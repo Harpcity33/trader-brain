@@ -23,6 +23,7 @@ class RuntimeConfig:
     snapshot_refresh_seconds: int
     stale_data_seconds: int
     quote_watch_count: int
+    eligible_ticker_types: tuple[str, ...]
     candidate_min_signal_strength: float
     candidate_min_price: float
     candidate_max_price: float
@@ -64,6 +65,7 @@ class RuntimeConfig:
             snapshot_refresh_seconds=int(raw["snapshot_refresh_seconds"]),
             stale_data_seconds=int(raw["stale_data_seconds"]),
             quote_watch_count=int(raw["quote_watch_count"]),
+            eligible_ticker_types=tuple(raw.get("eligible_ticker_types", ["CS", "ADRC"])),
             candidate_min_signal_strength=float(raw["candidate_min_signal_strength"]),
             candidate_min_price=float(raw["candidate_min_price"]),
             candidate_max_price=float(raw["candidate_max_price"]),
@@ -88,8 +90,10 @@ class RuntimeConfig:
             raise ValueError("websocket_url must use Massive's TLS endpoint")
         if not self.rest_base_url.startswith("https://api.massive.com"):
             raise ValueError("rest_base_url must use Massive's TLS endpoint")
-        if self.quote_watch_count < 1 or self.quote_watch_count > 100:
-            raise ValueError("quote_watch_count must be between 1 and 100")
+        if self.quote_watch_count < 1:
+            raise ValueError("quote_watch_count must be positive")
+        if not self.eligible_ticker_types:
+            raise ValueError("eligible_ticker_types cannot be empty")
         if self.stale_data_seconds < 15:
             raise ValueError("stale_data_seconds must be at least 15")
         if not 0 <= self.watch_min_signal_strength <= self.candidate_min_signal_strength:

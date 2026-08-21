@@ -8,6 +8,28 @@ from titan_runtime.storage import Store
 
 
 class StorageTests(unittest.TestCase):
+    def test_eligible_universe_and_plan_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            count = store.replace_eligible_universe([
+                {"ticker": "A", "name": "A Corp", "type": "CS", "active": True},
+                {"ticker": "ADR", "name": "ADR Corp", "type": "ADRC", "active": True},
+            ])
+            self.assertEqual(count, 2)
+            self.assertTrue(store.is_eligible_security("A"))
+            self.assertFalse(store.is_eligible_security("SPY"))
+            plan = {
+                "symbol": "A", "observed_at": "2026-08-20T14:00:00+00:00",
+                "status": "WATCH_ONLY", "direction": "UP", "lane": "regular_equity",
+                "setup": "structure_forming", "weighted_opportunity_score": 61.2,
+                "modeled_move_capacity_pct": 4.1, "trigger": None,
+                "structural_stop": None, "t1": None, "t2": None, "blockers": ["base"],
+            }
+            self.assertIsNotNone(store.save_prepared_trade_plan(plan))
+            self.assertIsNone(store.save_prepared_trade_plan(plan))
+            self.assertEqual(store.latest_prepared_trade_plans(10)[0]["symbol"], "A")
+            store.close()
+
     def test_event_deduplication_and_acknowledgement(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "test.sqlite3")

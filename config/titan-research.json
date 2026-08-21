@@ -25,6 +25,26 @@
     "technical_confirmation": 5,
     "short_volume_context": 5
   },
+  "weighted_opportunity_scale_v1": {
+    "base_weights": {
+      "catalyst_quality": 25,
+      "liquidity": 15,
+      "relative_volume": 10,
+      "sector_breadth": 10,
+      "remaining_move_capacity": 20,
+      "technical_structure": 10,
+      "historical_follow_through": 10
+    },
+    "penalty_weights": {
+      "extension_risk": 30,
+      "gap_fade_risk": 25,
+      "float_dilution_risk": 25,
+      "spread_risk": 20
+    },
+    "penalty_multiplier": 0.45,
+    "unknown_inputs": "preserve_as_missing_and_score_zero_in_raw_score",
+    "trade_authority": false
+  },
   "comparison_lanes": [
     "core",
     "high_risk_asymmetric",

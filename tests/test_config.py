@@ -18,6 +18,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.start_time, time(3, 55))
         self.assertLess(config.watch_min_signal_strength, config.candidate_min_signal_strength)
         self.assertLess(config.watch_min_gap_pct, config.candidate_min_gap_pct)
+        self.assertEqual(config.eligible_ticker_types, ("CS", "ADRC"))
+        self.assertGreaterEqual(config.quote_watch_count, 1000)
 
     def test_research_config_cannot_mutate_production(self) -> None:
         path = Path(__file__).resolve().parent.parent / "config" / "titan-research.json"

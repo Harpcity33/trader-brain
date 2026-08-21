@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS snapshots (
     received_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS eligible_universe (
+    symbol TEXT PRIMARY KEY,
+    name TEXT,
+    ticker_type TEXT NOT NULL,
+    primary_exchange TEXT,
+    cik TEXT,
+    active INTEGER NOT NULL,
+    refreshed_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eligible_universe_type
+    ON eligible_universe(active, ticker_type, symbol);
+
 CREATE TABLE IF NOT EXISTS bars_1m (
     symbol TEXT NOT NULL,
     start_ms INTEGER NOT NULL,
@@ -110,6 +123,42 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_rank
     ON candidates(signal_strength DESC, dollar_volume DESC);
+
+CREATE TABLE IF NOT EXISTS prepared_trade_plans (
+    plan_id TEXT PRIMARY KEY,
+    plan_key TEXT UNIQUE NOT NULL,
+    symbol TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    lane TEXT NOT NULL,
+    weighted_opportunity_score REAL,
+    modeled_move_capacity_pct REAL,
+    trigger REAL,
+    structural_stop REAL,
+    t1 REAL,
+    t2 REAL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_prepared_plans_rank
+    ON prepared_trade_plans(observed_at DESC, weighted_opportunity_score DESC);
+
+CREATE TABLE IF NOT EXISTS candidate_enrichment (
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    as_of_date TEXT NOT NULL,
+    historical_follow_through REAL,
+    gap_fade_risk REAL,
+    market_cap REAL,
+    weighted_shares_outstanding REAL,
+    sic_code TEXT,
+    sic_description TEXT,
+    analog_count INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL,
+    refreshed_at TEXT NOT NULL,
+    PRIMARY KEY(symbol, direction)
+);
 
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
@@ -322,6 +371,59 @@ class Store:
         row = self.conn.execute("SELECT * FROM snapshots WHERE symbol=?", (symbol,)).fetchone()
         return dict(row) if row else None
 
+    def replace_eligible_universe(self, rows: Iterable[dict[str, Any]]) -> int:
+        now = utc_now()
+        values = []
+        for item in rows:
+            symbol = item.get("ticker")
+            ticker_type = item.get("type")
+            if not symbol or not ticker_type:
+                continue
+            values.append(
+                (
+                    symbol, item.get("name"), ticker_type, item.get("primary_exchange"),
+                    item.get("cik"), int(bool(item.get("active", True))), now,
+                    json.dumps(item, separators=(",", ":")),
+                )
+            )
+        with self.transaction():
+            self.conn.execute("DELETE FROM eligible_universe")
+            self.conn.executemany(
+                """INSERT INTO eligible_universe(
+                       symbol,name,ticker_type,primary_exchange,cik,active,refreshed_at,payload_json
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                values,
+            )
+        return len(values)
+
+    def is_eligible_security(self, symbol: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM eligible_universe WHERE symbol=? AND active=1", (symbol,)
+        ).fetchone()
+        return bool(row)
+
+    def eligible_universe_count(self) -> int:
+        return int(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM eligible_universe WHERE active=1"
+            ).fetchone()[0]
+        )
+
+    def snapshot_coverage(self) -> dict[str, int]:
+        row = self.conn.execute(
+            """SELECT
+                   COUNT(*) AS universe_count,
+                   SUM(CASE WHEN s.symbol IS NOT NULL THEN 1 ELSE 0 END) AS snapshot_count,
+                   SUM(CASE WHEN s.price BETWEEN 1 AND 1000
+                                 AND ABS(s.change_pct) >= 4
+                                 AND COALESCE(s.price * s.day_volume, 0) >= 2000000
+                            THEN 1 ELSE 0 END) AS broad_qualifier_count
+               FROM eligible_universe u
+               LEFT JOIN snapshots s ON s.symbol=u.symbol
+               WHERE u.active=1"""
+        ).fetchone()
+        return {key: int(row[key] or 0) for key in row.keys()}
+
     def top_snapshot_symbols(self, limit: int) -> list[str]:
         rows = self.conn.execute(
             """SELECT symbol FROM snapshots
@@ -453,10 +555,113 @@ class Store:
 
     def leaderboard(self, limit: int = 20) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            """SELECT * FROM candidates ORDER BY signal_strength DESC, dollar_volume DESC LIMIT ?""",
+            """SELECT * FROM candidates
+               ORDER BY COALESCE(
+                   CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL),
+                   signal_strength
+               ) DESC, dollar_volume DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def all_candidate_symbols(self) -> list[str]:
+        rows = self.conn.execute(
+            """SELECT symbol FROM candidates
+               ORDER BY COALESCE(
+                   CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL),
+                   signal_strength
+               ) DESC, dollar_volume DESC"""
+        ).fetchall()
+        return [str(row["symbol"]) for row in rows]
+
+    def save_prepared_trade_plan(self, payload: dict[str, Any]) -> str | None:
+        fingerprint = {
+            key: payload.get(key)
+            for key in (
+                "symbol", "status", "direction", "lane", "setup", "trigger",
+                "structural_stop", "t1", "t2", "weighted_opportunity_score",
+                "modeled_move_capacity_pct", "blockers",
+            )
+        }
+        import hashlib
+        digest = hashlib.sha256(
+            json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        plan_key = f"{payload['symbol']}:{digest}"
+        plan_id = str(uuid.uuid4())
+        try:
+            self.conn.execute(
+                """INSERT INTO prepared_trade_plans(
+                       plan_id,plan_key,symbol,observed_at,status,direction,lane,
+                       weighted_opportunity_score,modeled_move_capacity_pct,trigger,
+                       structural_stop,t1,t2,payload_json,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan_id, plan_key, payload["symbol"], payload["observed_at"],
+                    payload["status"], payload["direction"], payload["lane"],
+                    payload.get("weighted_opportunity_score"),
+                    payload.get("modeled_move_capacity_pct"), payload.get("trigger"),
+                    payload.get("structural_stop"), payload.get("t1"), payload.get("t2"),
+                    json.dumps(payload, separators=(",", ":")), utc_now(),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        return plan_id
+
+    def upsert_candidate_enrichment(self, payload: dict[str, Any]) -> None:
+        self.conn.execute(
+            """INSERT INTO candidate_enrichment(
+                   symbol,direction,as_of_date,historical_follow_through,gap_fade_risk,
+                   market_cap,weighted_shares_outstanding,sic_code,sic_description,
+                   analog_count,payload_json,refreshed_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(symbol,direction) DO UPDATE SET
+                   as_of_date=excluded.as_of_date,
+                   historical_follow_through=excluded.historical_follow_through,
+                   gap_fade_risk=excluded.gap_fade_risk,
+                   market_cap=excluded.market_cap,
+                   weighted_shares_outstanding=excluded.weighted_shares_outstanding,
+                   sic_code=excluded.sic_code,sic_description=excluded.sic_description,
+                   analog_count=excluded.analog_count,payload_json=excluded.payload_json,
+                   refreshed_at=excluded.refreshed_at""",
+            (
+                payload["symbol"], payload["direction"], payload["as_of_date"],
+                payload.get("historical_follow_through"), payload.get("gap_fade_risk"),
+                payload.get("market_cap"), payload.get("weighted_shares_outstanding"),
+                payload.get("sic_code"), payload.get("sic_description"),
+                int(payload.get("analog_count") or 0),
+                json.dumps(payload, separators=(",", ":")), utc_now(),
+            ),
+        )
+
+    def get_candidate_enrichment(self, symbol: str, direction: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM candidate_enrichment WHERE symbol=? AND direction=?",
+            (symbol, direction),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item.update(json.loads(item.pop("payload_json")))
+        return item
+
+    def latest_prepared_trade_plans(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """SELECT p.* FROM prepared_trade_plans p
+               JOIN (
+                   SELECT symbol, MAX(created_at) AS latest
+                   FROM prepared_trade_plans GROUP BY symbol
+               ) newest ON newest.symbol=p.symbol AND newest.latest=p.created_at
+               ORDER BY p.weighted_opportunity_score DESC, p.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            result.append(item)
+        return result
 
     def emit_event(
         self,

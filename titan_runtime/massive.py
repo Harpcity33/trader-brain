@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 import fcntl
 import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import queue
+from statistics import median
 import subprocess
 import threading
 import time as time_module
@@ -17,6 +19,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from .config import RuntimeConfig
+from .ranking import apply_weighted_opportunity_scale, build_preliminary_trade_plan
 from .signals import Bar, compute_market_signal, trigger_cross_payload
 from .storage import Store, utc_now
 from .websocket_client import MinimalWebSocket, WebSocketError
@@ -94,6 +97,153 @@ class MassiveREST:
             raise RuntimeError(f"Massive snapshot returned status {payload.get('status')!r}")
         return payload.get("tickers") or []
 
+    def active_equity_universe(self, ticker_types: tuple[str, ...]) -> list[dict[str, Any]]:
+        """Fetch every active eligible U.S. equity reference record with pagination."""
+        results: list[dict[str, Any]] = []
+        for ticker_type in ticker_types:
+            query = urlencode(
+                {
+                    "market": "stocks", "locale": "us", "active": "true",
+                    "type": ticker_type, "limit": 1000, "sort": "ticker",
+                    "order": "asc", "apiKey": self.api_key,
+                }
+            )
+            url: str | None = f"{self.config.rest_base_url}/v3/reference/tickers?{query}"
+            while url:
+                separator = "&" if "?" in url else "?"
+                request_url = url if "apiKey=" in url else f"{url}{separator}apiKey={self.api_key}"
+                request = Request(request_url, headers={"User-Agent": "titan-momentum-watcher/0.2"})
+                with urlopen(request, timeout=45) as response:
+                    payload = json.load(response)
+                if payload.get("status") not in ("OK", "DELAYED"):
+                    raise RuntimeError(
+                        f"Massive reference tickers returned status {payload.get('status')!r}"
+                    )
+                results.extend(payload.get("results") or [])
+                url = payload.get("next_url")
+        unique = {str(item["ticker"]): item for item in results if item.get("ticker")}
+        return [unique[symbol] for symbol in sorted(unique)]
+
+    def ticker_overview(self, symbol: str) -> dict[str, Any]:
+        query = urlencode({"apiKey": self.api_key})
+        url = f"{self.config.rest_base_url}/v3/reference/tickers/{symbol}?{query}"
+        request = Request(url, headers={"User-Agent": "titan-momentum-watcher/0.2"})
+        with urlopen(request, timeout=45) as response:
+            payload = json.load(response)
+        if payload.get("status") not in ("OK", "DELAYED"):
+            raise RuntimeError(f"Massive ticker overview returned status {payload.get('status')!r}")
+        return payload.get("results") or {}
+
+    def daily_aggregates(self, symbol: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+        query = urlencode(
+            {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": self.api_key}
+        )
+        url = (
+            f"{self.config.rest_base_url}/v2/aggs/ticker/{symbol}/range/1/day/"
+            f"{start_date}/{end_date}?{query}"
+        )
+        request = Request(url, headers={"User-Agent": "titan-momentum-watcher/0.2"})
+        with urlopen(request, timeout=45) as response:
+            payload = json.load(response)
+        if payload.get("status") not in ("OK", "DELAYED"):
+            raise RuntimeError(f"Massive daily aggregates returned status {payload.get('status')!r}")
+        return payload.get("results") or []
+
+
+def historical_analog_features(rows: list[dict[str, Any]], direction: str) -> dict[str, Any]:
+    analogs: list[tuple[float, bool]] = []
+    previous_close: float | None = None
+    for row in rows:
+        open_price = float(row.get("o") or 0)
+        high = float(row.get("h") or 0)
+        low = float(row.get("l") or 0)
+        close = float(row.get("c") or 0)
+        if previous_close and open_price > 0:
+            gap_pct = (open_price / previous_close - 1) * 100
+            matching = gap_pct >= 4 if direction == "UP" else gap_pct <= -4
+            if matching:
+                if direction == "UP":
+                    follow_through = max(0.0, (high / open_price - 1) * 100)
+                    faded = close < open_price
+                else:
+                    follow_through = max(0.0, (1 - low / open_price) * 100)
+                    faded = close > open_price
+                analogs.append((follow_through, faded))
+        if close > 0:
+            previous_close = close
+    if not analogs:
+        return {"historical_follow_through": None, "gap_fade_risk": None, "analog_count": 0}
+    median_follow = median(value for value, _ in analogs)
+    follow_score = max(0.0, min(100.0, median_follow / 8.0 * 100))
+    fade_risk = sum(1 for _, faded in analogs if faded) / len(analogs) * 100
+    return {
+        "historical_follow_through": round(follow_score, 2),
+        "historical_median_follow_through_pct": round(median_follow, 3),
+        "gap_fade_risk": round(fade_risk, 2),
+        "analog_count": len(analogs),
+    }
+
+
+class CandidateEnricher(threading.Thread):
+    """On-demand Massive fundamentals and 90-day analog enrichment for every candidate."""
+
+    def __init__(self, config: RuntimeConfig, api_key: str, stop_event: threading.Event, logger: logging.Logger):
+        super().__init__(name="titan-candidate-enricher", daemon=True)
+        self.config = config
+        self.api_key = api_key
+        self.stop_event = stop_event
+        self.logger = logger
+        self.jobs: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.queued: set[tuple[str, str]] = set()
+        self.lock = threading.Lock()
+
+    def request(self, symbol: str, direction: str) -> None:
+        job = (symbol, direction)
+        with self.lock:
+            if job in self.queued:
+                return
+            self.queued.add(job)
+        self.jobs.put(job)
+
+    def run(self) -> None:
+        rest = MassiveREST(self.config, self.api_key)
+        store = Store(self.config.database_path)
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    symbol, direction = self.jobs.get(timeout=1)
+                except queue.Empty:
+                    continue
+                try:
+                    today = datetime.now(ZoneInfo(self.config.timezone)).date()
+                    overview = rest.ticker_overview(symbol)
+                    rows = rest.daily_aggregates(
+                        symbol, (today - timedelta(days=150)).isoformat(),
+                        (today - timedelta(days=1)).isoformat(),
+                    )
+                    features = historical_analog_features(rows, direction)
+                    payload = {
+                        "symbol": symbol, "direction": direction, "as_of_date": today.isoformat(),
+                        "market_cap": overview.get("market_cap"),
+                        "weighted_shares_outstanding": overview.get("weighted_shares_outstanding"),
+                        "sic_code": overview.get("sic_code"),
+                        "sic_description": overview.get("sic_description"),
+                        **features,
+                    }
+                    store.upsert_candidate_enrichment(payload)
+                    self.logger.info(
+                        "candidate_enriched symbol=%s direction=%s analogs=%d",
+                        symbol, direction, payload["analog_count"],
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "candidate_enrichment_failed symbol=%s error=%s", symbol, str(exc)[:300]
+                    )
+                finally:
+                    self.jobs.task_done()
+        finally:
+            store.close()
+
 
 class SnapshotRefresher(threading.Thread):
     def __init__(self, config: RuntimeConfig, api_key: str, stop_event: threading.Event, logger: logging.Logger):
@@ -133,6 +283,9 @@ class TitanWatcher:
         self.logger = setup_logger(config)
         self.stop_event = threading.Event()
         self.snapshot_refresher = SnapshotRefresher(config, api_key, self.stop_event, self.logger)
+        self.candidate_enricher = CandidateEnricher(
+            config, api_key, self.stop_event, self.logger
+        )
         self.client: MinimalWebSocket | None = None
         self.dynamic_symbols: set[str] = set()
         self.crossed_triggers: dict[str, float] = {}
@@ -140,6 +293,35 @@ class TitanWatcher:
         self.last_message_monotonic = time_module.monotonic()
         self.last_stale_event_at = 0.0
         self.et = ZoneInfo(config.timezone)
+        self.universe_ready = False
+
+    def _bootstrap_market_scope(self) -> None:
+        """Run the 03:55 full-universe/reference baseline before live bars begin."""
+        rest = MassiveREST(self.config, self.api_key)
+        universe = rest.active_equity_universe(self.config.eligible_ticker_types)
+        universe_count = self.store.replace_eligible_universe(universe)
+        snapshots = rest.full_snapshot()
+        snapshot_count = self.store.upsert_snapshots(snapshots)
+        coverage = self.store.snapshot_coverage()
+        coverage.update(
+            {
+                "reference_records": universe_count,
+                "raw_snapshot_records": snapshot_count,
+                "eligible_ticker_types": list(self.config.eligible_ticker_types),
+                "current_session_plan_count": 0,
+                "note": (
+                    "03:55 is a universe/baseline pass. Current-session plans require bars beginning "
+                    "at 04:00 ET and remain non-authoritative until all live Titan gates pass."
+                ),
+            }
+        )
+        self.store.set_health("market_scope_coverage", "healthy", coverage)
+        self.store.set_metadata("universe_bootstrapped_at", utc_now())
+        self.universe_ready = universe_count > 0
+        self.logger.info(
+            "market_scope_bootstrap universe=%d snapshots=%d broad_qualifiers=%d",
+            universe_count, snapshot_count, coverage.get("broad_qualifier_count", 0),
+        )
 
     def _session_start_ms(self) -> int:
         now_et = datetime.now(self.et)
@@ -185,6 +367,8 @@ class TitanWatcher:
         if not event.get("sym") or event.get("otc"):
             return
         self.store.insert_minute_bar(event)
+        if not self.universe_ready or not self.store.is_eligible_security(event["sym"]):
+            return
         bar = Bar(
             symbol=event["sym"], start_ms=int(event["s"]), end_ms=int(event["e"]),
             open=float(event["o"]), high=float(event["h"]), low=float(event["l"]),
@@ -259,7 +443,21 @@ class TitanWatcher:
             "A fresh controlled base, reclaim, or renewed acceleration must independently satisfy every live gate."
             if not entry_eligible else None
         )
+        enrichment = self.store.get_candidate_enrichment(bar.symbol, signal["direction"])
+        current_date = datetime.now(self.et).date().isoformat()
+        if enrichment and enrichment.get("as_of_date") == current_date:
+            for key in (
+                "historical_follow_through", "historical_median_follow_through_pct",
+                "gap_fade_risk", "analog_count", "market_cap",
+                "weighted_shares_outstanding", "sic_code", "sic_description",
+            ):
+                if enrichment.get(key) is not None:
+                    signal[key] = enrichment[key]
+        else:
+            self.candidate_enricher.request(bar.symbol, signal["direction"])
+        apply_weighted_opportunity_scale(signal)
         self.store.upsert_candidate(signal)
+        self.store.save_prepared_trade_plan(build_preliminary_trade_plan(signal))
         if signal.get("base_high") != (previous or {}).get("base_high"):
             self.crossed_triggers.pop(bar.symbol, None)
         if not entry_eligible:
@@ -424,19 +622,36 @@ class TitanWatcher:
     def _refresh_dynamic_subscriptions(self) -> None:
         if not self.client:
             return
-        ranked = self.store.leaderboard(self.config.quote_watch_count)
-        desired = {row["symbol"] for row in ranked}
-        desired = set(sorted(desired)[: self.config.quote_watch_count])
+        desired = set(self.store.all_candidate_symbols())
         additions = desired - self.dynamic_symbols
         removals = self.dynamic_symbols - desired
-        if additions:
-            params = ",".join([*(f"Q.{symbol}" for symbol in sorted(additions)), *(f"A.{symbol}" for symbol in sorted(additions))])
+        def chunks(symbols: set[str], size: int = 200):
+            ordered = sorted(symbols)
+            for start in range(0, len(ordered), size):
+                yield ordered[start:start + size]
+        for batch in chunks(additions):
+            params = ",".join([*(f"Q.{symbol}" for symbol in batch), *(f"A.{symbol}" for symbol in batch)])
             self.client.send_json({"action": "subscribe", "params": params})
-        if removals:
-            params = ",".join([*(f"Q.{symbol}" for symbol in sorted(removals)), *(f"A.{symbol}" for symbol in sorted(removals))])
+        for batch in chunks(removals):
+            params = ",".join([*(f"Q.{symbol}" for symbol in batch), *(f"A.{symbol}" for symbol in batch)])
             self.client.send_json({"action": "unsubscribe", "params": params})
         if additions or removals:
             self.dynamic_symbols = desired
+            status = "healthy" if len(desired) <= self.config.quote_watch_count else "capacity_warning"
+            self.store.set_health(
+                "promoted_candidate_coverage",
+                status,
+                {
+                    "promoted_candidates": len(desired),
+                    "quote_and_second_subscriptions": len(desired),
+                    "coverage_pct": 100.0,
+                    "attention_budget": self.config.quote_watch_count,
+                    "warning": (
+                        "All promoted candidates remain subscribed, but count exceeds the tested attention budget."
+                        if status != "healthy" else None
+                    ),
+                },
+            )
             self.logger.info("dynamic_universe size=%d added=%d removed=%d", len(desired), len(additions), len(removals))
 
     def _connect(self) -> None:
@@ -469,7 +684,13 @@ class TitanWatcher:
         self.store.set_metadata("runtime_mode", self.config.mode)
         self.store.set_metadata("runtime_started_at", utc_now())
         self.store.prune(self.config.retention_days)
+        try:
+            self._bootstrap_market_scope()
+        except Exception as exc:
+            self.store.set_health("market_scope_coverage", "degraded", {"error": str(exc)[:300]})
+            self.logger.warning("market_scope_bootstrap_failed error=%s", str(exc)[:300])
         self.snapshot_refresher.start()
+        self.candidate_enricher.start()
         backoff = 1
         last_dynamic_refresh = 0.0
         try:
@@ -525,6 +746,8 @@ class TitanWatcher:
             self._disconnect()
             if self.snapshot_refresher.is_alive():
                 self.snapshot_refresher.join(timeout=5)
+            if self.candidate_enricher.is_alive():
+                self.candidate_enricher.join(timeout=5)
             self.store.set_metadata("runtime_stopped_at", utc_now())
             self.store.close()
 

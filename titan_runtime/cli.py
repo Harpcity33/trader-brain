@@ -106,12 +106,37 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "gap_pct": row["gap_pct"], "dollar_volume": row["dollar_volume"],
                 "base_high": row["base_high"], "support": row["support"],
                 "spread_pct": row["spread_pct"], "observed_at": row["observed_at"],
+                "weighted_opportunity_score": json.loads(row["payload_json"]).get(
+                    "weighted_opportunity_score"
+                ),
+                "modeled_move_capacity_pct": json.loads(row["payload_json"]).get(
+                    "modeled_move_capacity_pct"
+                ),
             }
             for row in store.leaderboard(args.limit)
         ],
     }
     store.close()
     output(value)
+    return 0
+
+
+def cmd_coverage(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    coverage = store.snapshot_coverage()
+    coverage["promoted_candidates"] = len(store.all_candidate_symbols())
+    coverage["prepared_plans"] = len(store.latest_prepared_trade_plans(100000))
+    coverage["trade_authority"] = False
+    store.close()
+    output(coverage)
+    return 0
+
+
+def cmd_plans(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    plans = store.latest_prepared_trade_plans(args.limit)
+    store.close()
+    output(plans)
     return 0
 
 
@@ -268,6 +293,13 @@ def build_parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="Show health and current market-data leaders")
     status.add_argument("--limit", type=int, default=10)
     status.set_defaults(func=cmd_status)
+
+    coverage = commands.add_parser("coverage", help="Audit eligible-universe and promoted-candidate coverage")
+    coverage.set_defaults(func=cmd_coverage)
+
+    plans = commands.add_parser("plans", help="Read latest weighted preliminary trade plans")
+    plans.add_argument("--limit", type=int, default=100)
+    plans.set_defaults(func=cmd_plans)
 
     events = commands.add_parser("events", help="Read or acknowledge the durable event queue")
     events.add_argument("--limit", type=int, default=50)

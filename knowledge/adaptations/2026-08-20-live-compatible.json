@@ -34,6 +34,18 @@
       "category": "strategy_logic",
       "status": "approved",
       "rule": "Treat a verified transformative catalyst as evidence that historical gap envelopes may be less predictive, while retaining live structure, ATR/chase, exhaustion, liquidity, dilution, risk, review, and protection gates."
+    },
+    {
+      "id": "massive_exhaustive_promoted_coverage",
+      "category": "data_collection",
+      "status": "approved",
+      "rule": "At 03:55 ET refresh the full active common-stock/ADR universe and full-market baseline, process every eligible one-minute aggregate, and maintain quote/one-second subscriptions for 100% of symbols promoted by the broad watch gates without a top-30 truncation."
+    },
+    {
+      "id": "weighted_preliminary_trade_plans",
+      "category": "analytics",
+      "status": "approved",
+      "rule": "Persist the Trader Brain weighted opportunity score, evidence coverage, ATR-based remaining-move-capacity estimate, and preliminary trigger/stop/target plan for every promoted candidate. These artifacts rank attention only and cannot bypass complete live Titan or broker gates."
     }
   ],
   "explicitly_excluded": [
