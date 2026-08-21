@@ -1,0 +1,11 @@
+{
+  "date": "YYYY-MM-DD",
+  "source_role": "daily_market_research_only",
+  "top_five": [],
+  "trade_of_day": null,
+  "asymmetric_candidate": null,
+  "missed_opportunities": [],
+  "hypotheses": [],
+  "trade_authority": false,
+  "production_change_authority": false
+}

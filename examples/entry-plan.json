@@ -1,0 +1,26 @@
+{
+  "trade_date": "YYYY-MM-DD",
+  "symbol": "TICKER",
+  "setup": "premarket_high_break",
+  "lane": "earliest_reasonable_entry",
+  "earliest_time": "YYYY-MM-DDTHH:MM:SS-04:00",
+  "earliest_price": 0.0,
+  "conservative_time": "YYYY-MM-DDTHH:MM:SS-04:00",
+  "conservative_price": 0.0,
+  "selected_time": null,
+  "selected_price": null,
+  "structural_stop": 0.0,
+  "quantity": 1,
+  "capital": 0.0,
+  "context": {
+    "catalyst": null,
+    "catalyst_verified": false,
+    "gap_pct": null,
+    "premarket_volume": null,
+    "relative_volume": null,
+    "float": null,
+    "vwap": null,
+    "spread_pct": null,
+    "decision_time_evidence": []
+  }
+}

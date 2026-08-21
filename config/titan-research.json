@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "mode": "research_and_paper_only",
+  "production_mutation_allowed": false,
+  "paper_capital": {
+    "minimum_daily_deployment_when_qualified": 500.0,
+    "position_sizing_basis": "percentage_and_stop_defined"
+  },
+  "candidate_universe": {
+    "primary_price_min": 1.0,
+    "primary_price_max": 20.0,
+    "include_higher_prices_when_materially_stronger": true,
+    "include_otc": false,
+    "gap_buckets_pct": [5, 10, 20, 30],
+    "big_mover_buckets_pct": [20, 30, 50, 100]
+  },
+  "experimental_score_weights": {
+    "catalyst_strength": 20,
+    "relative_volume": 15,
+    "price_momentum": 15,
+    "float": 10,
+    "vwap_structure": 10,
+    "premarket_structure": 10,
+    "liquidity_spread": 10,
+    "technical_confirmation": 5,
+    "short_volume_context": 5
+  },
+  "comparison_lanes": [
+    "core",
+    "high_risk_asymmetric",
+    "earliest_reasonable_entry",
+    "conservative_confirmation"
+  ],
+  "change_classes": [
+    "observation",
+    "hypothesis",
+    "experimental_rule",
+    "validated_rule",
+    "production_rule"
+  ],
+  "change_categories": [
+    "data_collection",
+    "analytics",
+    "scanner_logic",
+    "strategy_logic",
+    "risk_logic",
+    "execution_logic"
+  ],
+  "required_live_progression": [
+    "research",
+    "historical_backtest",
+    "historical_replay",
+    "paper_trading",
+    "forward_testing",
+    "human_review",
+    "live_trading"
+  ],
+  "primary_research_questions": [
+    "hesitation_cost",
+    "confirmation_savings",
+    "vwap_confirmation_value",
+    "premarket_gap_continuation",
+    "relative_volume_thresholds",
+    "float_risk_adjusted_value",
+    "catalyst_follow_through",
+    "chase_distance_failure_rate",
+    "first_pullback_vs_breakout",
+    "under5_expected_value",
+    "short_volume_incremental_value",
+    "time_of_day_expected_return",
+    "top_premarket_mover_continuation",
+    "high_risk_vs_core_expectancy"
+  ]
+}

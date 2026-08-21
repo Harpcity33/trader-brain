@@ -1,0 +1,12 @@
+{
+  "title": "Test whether the earliest reasonable entry improves expectancy",
+  "change_class": "hypothesis",
+  "category": "analytics",
+  "evidence": {
+    "source": "daily_market_research",
+    "sample_size": 0
+  },
+  "expected_effect": "Measure gains sacrificed and losses avoided by confirmation.",
+  "status": "proposed",
+  "production_approved": false
+}
