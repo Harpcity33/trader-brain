@@ -39,7 +39,7 @@
       "id": "massive_exhaustive_promoted_coverage",
       "category": "data_collection",
       "status": "approved",
-      "rule": "At 03:55 ET refresh the full active common-stock/ADR universe and full-market baseline, process every eligible one-minute aggregate, and maintain quote/one-second subscriptions for 100% of symbols promoted by the broad watch gates without a top-30 truncation."
+      "rule": "At 04:00 ET refresh the full active common-stock/ADR universe and full-market baseline, process every eligible one-minute aggregate as live bars arrive, and maintain quote/one-second subscriptions for 100% of symbols promoted by the broad watch gates without a top-30 truncation."
     },
     {
       "id": "weighted_preliminary_trade_plans",

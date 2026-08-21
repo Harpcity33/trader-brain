@@ -296,7 +296,7 @@ class TitanWatcher:
         self.universe_ready = False
 
     def _bootstrap_market_scope(self) -> None:
-        """Run the 03:55 full-universe/reference baseline before live bars begin."""
+        """Refresh the full universe and baseline at the 04:00 live-data start."""
         rest = MassiveREST(self.config, self.api_key)
         universe = rest.active_equity_universe(self.config.eligible_ticker_types)
         universe_count = self.store.replace_eligible_universe(universe)
@@ -310,8 +310,8 @@ class TitanWatcher:
                 "eligible_ticker_types": list(self.config.eligible_ticker_types),
                 "current_session_plan_count": 0,
                 "note": (
-                    "03:55 is a universe/baseline pass. Current-session plans require bars beginning "
-                    "at 04:00 ET and remain non-authoritative until all live Titan gates pass."
+                    "04:00 startup refreshes the eligible universe and baseline, then current-session "
+                    "plans develop as live bars arrive and remain non-authoritative until all Titan gates pass."
                 ),
             }
         )

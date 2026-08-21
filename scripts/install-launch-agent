@@ -40,4 +40,4 @@ launchctl kickstart -k "gui/${UID}/com.titan.momentum-watcher"
 
 echo "Installed ${TARGET}"
 echo "Deployed watcher runtime to ${DEPLOY_ROOT}"
-echo "The watcher will start at 03:55 ET on weekdays for premarket collection."
+echo "The watcher will start at 04:00 ET on weekdays for premarket collection."

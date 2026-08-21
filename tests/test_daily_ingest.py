@@ -28,7 +28,7 @@ class DailyIngestTests(unittest.TestCase):
                 "event_export_path": "runtime/events.jsonl",
                 "log_path": "runtime/test.log",
                 "timezone": "America/New_York",
-                "start_time_et": "03:55",
+                "start_time_et": "04:00",
                 "stop_time_et": "16:05",
                 "snapshot_refresh_seconds": 300,
                 "stale_data_seconds": 90,

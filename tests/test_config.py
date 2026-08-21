@@ -15,7 +15,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.mode, "shadow")
         self.assertEqual(config.websocket_url, "wss://socket.massive.com/stocks")
         self.assertTrue(str(config.database_path).endswith("runtime/titan-intelligence.sqlite3"))
-        self.assertEqual(config.start_time, time(3, 55))
+        self.assertEqual(config.start_time, time(4, 0))
         self.assertLess(config.watch_min_signal_strength, config.candidate_min_signal_strength)
         self.assertLess(config.watch_min_gap_pct, config.candidate_min_gap_pct)
         self.assertEqual(config.eligible_ticker_types, ("CS", "ADRC"))
