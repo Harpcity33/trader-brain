@@ -1,0 +1,153 @@
+{
+  "accepted": [
+    {
+      "components": {
+        "catalyst_context": 10.0,
+        "gap_behavior": 4.58,
+        "liquidity": 6.25,
+        "other_massive_data": 5.0,
+        "prior_90d_behavior": 12.5,
+        "relative_volume": 7.5,
+        "sector_market_sympathy": 7.5,
+        "technical_structure": 11.67
+      },
+      "eligible": true,
+      "fresh_news": true,
+      "missing_factors": [],
+      "score": 65.0,
+      "score_version": "0.1.0-hypothesis",
+      "ticker": "ALFA"
+    },
+    {
+      "components": {
+        "catalyst_context": 8.75,
+        "gap_behavior": 4.17,
+        "liquidity": 5.0,
+        "other_massive_data": 4.58,
+        "prior_90d_behavior": 11.25,
+        "relative_volume": 6.25,
+        "sector_market_sympathy": 6.67,
+        "technical_structure": 10.0
+      },
+      "eligible": true,
+      "fresh_news": false,
+      "missing_factors": [],
+      "score": 56.67,
+      "score_version": "0.1.0-hypothesis",
+      "ticker": "BRVO"
+    },
+    {
+      "components": {
+        "catalyst_context": 7.5,
+        "gap_behavior": 3.75,
+        "liquidity": 3.75,
+        "other_massive_data": 4.17,
+        "prior_90d_behavior": 10.0,
+        "relative_volume": 5.0,
+        "sector_market_sympathy": 5.83,
+        "technical_structure": 8.33
+      },
+      "eligible": true,
+      "fresh_news": true,
+      "missing_factors": [],
+      "score": 48.33,
+      "score_version": "0.1.0-hypothesis",
+      "ticker": "CRWN"
+    },
+    {
+      "components": {
+        "catalyst_context": 6.25,
+        "gap_behavior": 3.33,
+        "liquidity": 2.5,
+        "other_massive_data": 3.75,
+        "prior_90d_behavior": 8.75,
+        "relative_volume": 3.75,
+        "sector_market_sympathy": 5.0,
+        "technical_structure": 6.67
+      },
+      "eligible": true,
+      "fresh_news": false,
+      "missing_factors": [],
+      "score": 40.0,
+      "score_version": "0.1.0-hypothesis",
+      "ticker": "DASH"
+    },
+    {
+      "components": {
+        "catalyst_context": 5.0,
+        "gap_behavior": 2.92,
+        "liquidity": 1.25,
+        "other_massive_data": 3.33,
+        "prior_90d_behavior": 7.5,
+        "relative_volume": 2.5,
+        "sector_market_sympathy": 4.17,
+        "technical_structure": 5.0
+      },
+      "eligible": true,
+      "fresh_news": false,
+      "missing_factors": [],
+      "score": 31.67,
+      "score_version": "0.1.0-hypothesis",
+      "ticker": "ECHO"
+    }
+  ],
+  "accepted_count": 5,
+  "api_failures": [
+    "Massive adapter not configured"
+  ],
+  "data_timestamp_et": "2026-08-20T03:54:59-04:00",
+  "decision_timestamp_et": "2026-08-20T03:55:00-04:00",
+  "reason": "Massive credentials/data unavailable; synthetic fixtures are not market evidence",
+  "rejected": [
+    {
+      "input": {
+        "factors": {
+          "catalyst_context": 1,
+          "gap_behavior": 1,
+          "liquidity": 0.75,
+          "other_massive_data": 1,
+          "prior_90d_behavior": 1,
+          "relative_volume": 0.8333333333333334,
+          "sector_market_sympathy": 1,
+          "technical_structure": 0.9166666666666666
+        },
+        "has_fresh_news": true,
+        "price": 5.0,
+        "ticker": "FIVE",
+        "volume": 3000000
+      },
+      "reasons": [
+        "price_not_strictly_above_5"
+      ],
+      "ticker": "FIVE"
+    },
+    {
+      "input": {
+        "factors": {
+          "catalyst_context": 1,
+          "gap_behavior": 1,
+          "liquidity": 0.75,
+          "other_massive_data": 1,
+          "prior_90d_behavior": 1,
+          "relative_volume": 0.8333333333333334,
+          "sector_market_sympathy": 1,
+          "technical_structure": 0.9166666666666666
+        },
+        "has_fresh_news": true,
+        "price": 9.0,
+        "ticker": "LOWV",
+        "volume": 749999
+      },
+      "reasons": [
+        "volume_below_750000"
+      ],
+      "ticker": "LOWV"
+    }
+  ],
+  "rejected_count": 2,
+  "retries": 0,
+  "run_timestamp_utc": "2026-08-21T01:34:40.664178+00:00",
+  "run_type": "synthetic_full_input_universe_dry_run",
+  "universe_size": 7,
+  "validation_status": "not_yet_validated"
+}
