@@ -31,6 +31,11 @@ class RuntimeConfig:
     watch_min_gap_pct: float
     candidate_min_dollar_volume: float
     watch_min_signal_strength: float
+    score_is_entry_gate: bool
+    fresh_news_required: bool
+    state_is_entry_gate: bool
+    entry_states: tuple[str, ...]
+    max_spread_to_structural_risk: float
     under5_min_dollar_volume: float
     max_quote_spread_pct: float
     under5_max_quote_spread_pct: float
@@ -75,6 +80,13 @@ class RuntimeConfig:
             watch_min_signal_strength=float(
                 raw.get("watch_min_signal_strength", raw["candidate_min_signal_strength"])
             ),
+            score_is_entry_gate=bool(raw.get("score_is_entry_gate", True)),
+            fresh_news_required=bool(raw.get("fresh_news_required", False)),
+            state_is_entry_gate=bool(raw.get("state_is_entry_gate", False)),
+            entry_states=tuple(raw.get("entry_states", ["BUILDING", "ACCELERATING", "BREAKOUT"])),
+            max_spread_to_structural_risk=float(
+                raw.get("max_spread_to_structural_risk", 0.15)
+            ),
             under5_min_dollar_volume=float(raw["under5_min_dollar_volume"]),
             max_quote_spread_pct=float(raw["max_quote_spread_pct"]),
             under5_max_quote_spread_pct=float(raw["under5_max_quote_spread_pct"]),
@@ -100,3 +112,7 @@ class RuntimeConfig:
             raise ValueError("watch_min_signal_strength must be between 0 and candidate_min_signal_strength")
         if not 0 <= self.watch_min_gap_pct <= self.candidate_min_gap_pct:
             raise ValueError("watch_min_gap_pct must be between 0 and candidate_min_gap_pct")
+        if self.state_is_entry_gate and not self.entry_states:
+            raise ValueError("entry_states cannot be empty when state_is_entry_gate is enabled")
+        if not 0 < self.max_spread_to_structural_risk <= 1:
+            raise ValueError("max_spread_to_structural_risk must be in (0, 1]")
