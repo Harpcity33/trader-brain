@@ -20,6 +20,10 @@ class ConfigTests(unittest.TestCase):
         self.assertLess(config.watch_min_gap_pct, config.candidate_min_gap_pct)
         self.assertEqual(config.eligible_ticker_types, ("CS", "ADRC"))
         self.assertGreaterEqual(config.quote_watch_count, 1000)
+        self.assertFalse(config.score_is_entry_gate)
+        self.assertFalse(config.fresh_news_required)
+        self.assertFalse(config.state_is_entry_gate)
+        self.assertEqual(config.max_spread_to_structural_risk, 0.15)
 
     def test_research_config_cannot_mutate_production(self) -> None:
         path = Path(__file__).resolve().parent.parent / "config" / "titan-research.json"
