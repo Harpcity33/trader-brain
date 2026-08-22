@@ -10,12 +10,40 @@
       "trade_authority": false,
       "production_change_authority": false,
       "sha256": "9708d270101a0259fa05a4b651d587ceab37145677c38864ef43b37abcce5f48"
+    },
+    {
+      "date": "2026-08-22",
+      "source": "titan_full_candle_and_exit_study",
+      "path": "knowledge/reports/2026-08-22-full-candle-exit-study.md",
+      "content_type": "text/markdown",
+      "classification": "validated_research_evidence",
+      "trade_authority": false,
+      "production_change_authority": false,
+      "sha256": "204738fb8ae5521fdf824693297307f3bb03d7adebe5daa6b0d1ba38792c2f93"
     }
   ],
   "adaptations": [
     {
       "date": "2026-08-20",
       "path": "knowledge/adaptations/2026-08-20-live-compatible.json",
+      "authorization": "explicit_user_authorization",
+      "preserves_newer_live_rules": true
+    },
+    {
+      "date": "2026-08-21",
+      "path": "knowledge/adaptations/2026-08-21-sol-ultra-shadow-policy.json",
+      "authorization": "research_and_shadow_only",
+      "preserves_newer_live_rules": true
+    },
+    {
+      "date": "2026-08-21",
+      "path": "knowledge/adaptations/2026-08-21-sol-ultra-live-autonomous-policy.json",
+      "authorization": "explicit_user_authorization",
+      "preserves_newer_live_rules": true
+    },
+    {
+      "date": "2026-08-22",
+      "path": "knowledge/adaptations/2026-08-22-profit-loss-and-exit-decision.json",
       "authorization": "explicit_user_authorization",
       "preserves_newer_live_rules": true
     }
