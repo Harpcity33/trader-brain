@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from .config import RuntimeConfig
+from .policy import evaluate_shadow_candidate
 from .ranking import apply_weighted_opportunity_scale, build_preliminary_trade_plan
 from .signals import Bar, compute_market_signal, trigger_cross_payload
 from .storage import Store, utc_now
@@ -396,51 +397,24 @@ class TitanWatcher:
                 previous_payload = json.loads(previous["payload_json"])
             except (TypeError, ValueError):
                 previous_payload = {}
-        min_dollar_volume = (
-            self.config.under5_min_dollar_volume if signal["lane"] == "under5"
-            else self.config.candidate_min_dollar_volume
-        )
-        gap = signal.get("gap_pct")
-        price_eligible = self.config.candidate_min_price <= signal["price"] <= self.config.candidate_max_price
-        direction_eligible = not (signal.get("direction") == "DOWN" and signal["price"] <= 5)
-        entry_eligible = (
-            price_eligible
-            and direction_eligible
-            and gap is not None
-            and abs(gap) >= self.config.candidate_min_gap_pct
-            and signal["dollar_volume"] >= min_dollar_volume
-            and signal["signal_strength"] >= self.config.candidate_min_signal_strength
-            and signal.get("entry_setup_eligible", True)
-        )
-        watch_eligible = (
-            price_eligible
-            and direction_eligible
-            and gap is not None
-            and abs(gap) >= self.config.watch_min_gap_pct
-            and signal["dollar_volume"] >= min_dollar_volume * 0.50
-            and signal["signal_strength"] >= self.config.watch_min_signal_strength
-        )
+        policy = evaluate_shadow_candidate(signal, self.config)
+        entry_eligible = policy.entry_eligible
+        watch_eligible = policy.watch_eligible
         if not entry_eligible and not watch_eligible:
             self.store.delete_candidate(bar.symbol)
             self.crossed_triggers.pop(bar.symbol, None)
             return
 
-        rejection_reasons: list[str] = []
-        if not entry_eligible:
-            if abs(gap or 0) < self.config.candidate_min_gap_pct:
-                rejection_reasons.append("move below entry-candidate gap threshold")
-            if signal["dollar_volume"] < min_dollar_volume:
-                rejection_reasons.append("dollar volume below entry threshold")
-            if signal["signal_strength"] < self.config.candidate_min_signal_strength:
-                rejection_reasons.append("market signal below entry-candidate threshold")
-            if signal.get("exhaustion_lock"):
-                rejection_reasons.append("exhaustion lock: three expansion bars and over four ATR from VWAP")
-            if not direction_eligible:
-                rejection_reasons.append("downside board is limited to option-eligible above-$5 underlyings")
+        rejection_reasons = list(policy.rejection_reasons)
+        signal["opportunity_score_role"] = (
+            "ranking_only" if not self.config.score_is_entry_gate else "hard_gate"
+        )
+        signal["fresh_news_required"] = self.config.fresh_news_required
+        signal["state_is_entry_gate"] = self.config.state_is_entry_gate
         signal["disposition"] = "ENTRY_CANDIDATE" if entry_eligible else "ENTRY_REJECTED_KEEP_WATCH"
         signal["entry_rejection_reasons"] = rejection_reasons
         signal["watch_rearm_requirement"] = (
-            "A fresh controlled base, reclaim, or renewed acceleration must independently satisfy every live gate."
+            "A fresh controlled base, reclaim, or renewed acceleration must independently satisfy every structural and liquidity gate."
             if not entry_eligible else None
         )
         enrichment = self.store.get_candidate_enrichment(bar.symbol, signal["direction"])
@@ -464,6 +438,7 @@ class TitanWatcher:
             self.crossed_triggers.pop(bar.symbol, None)
         crossed_threshold = bool(
             entry_eligible
+            and self.config.score_is_entry_gate
             and (not previous or previous["signal_strength"] < self.config.candidate_min_signal_strength)
         )
         became_entry_candidate = bool(
@@ -501,7 +476,7 @@ class TitanWatcher:
             base_payload["warning"] = (
                 "Not ARMED: "
                 + ("; ".join(blockers) + "; " if blockers else "")
-                + "catalyst, Level 2, score, risk and broker gates are unresolved."
+                + "catalyst context, Level 2, risk and broker review remain unresolved; score is ranking-only."
             )
             priority = 70 if signal.get("session_lane_eligible") else 55
             self.emit(
@@ -534,7 +509,13 @@ class TitanWatcher:
             if candidate.get("lane") == "under5"
             else self.config.max_quote_spread_pct
         )
-        payload = trigger_cross_payload(candidate, event, quote, max_spread_pct=max_spread_pct)
+        payload = trigger_cross_payload(
+            candidate,
+            event,
+            quote,
+            max_spread_pct=max_spread_pct,
+            max_spread_to_risk_ratio=self.config.max_spread_to_structural_risk,
+        )
         if not payload:
             return
         if payload["inside_half_atr_chase_ceiling"] and payload["volume_pace_expanding"]:
