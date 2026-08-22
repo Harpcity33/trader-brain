@@ -147,6 +147,40 @@ class SignalTests(unittest.TestCase):
             trigger_cross_payload(candidate, second, quote, 0.75, now_ms=1_700_000_500_500)
         )
 
+
+    def test_trigger_cross_applies_dynamic_spread_to_risk_gate(self) -> None:
+        candidate = {
+            "symbol": "TEST", "base_high": 10.74, "invalidation": 10.54,
+            "short_atr": 0.25, "limit_ceiling": 10.76,
+            "payload_json": (
+                '{"pullback_volume_per_second":1800,'
+                '"session_lane_eligible":true,"session_blockers":[]}'
+            ),
+        }
+        second = {"h": 10.75, "c": 10.75, "v": 2500, "s": 1_700_000_500_000}
+        good_quote = {
+            "bid": 10.73, "ask": 10.75, "spread_pct": 0.1862,
+            "timestamp_ms": 1_700_000_500_000,
+        }
+        payload = trigger_cross_payload(
+            candidate, second, good_quote, 0.75, 0.15, now_ms=1_700_000_500_500
+        )
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertTrue(payload["spread_to_risk_pass"])
+        self.assertAlmostEqual(payload["spread_to_structural_risk"], 0.10)
+
+        wide_quote = {
+            "bid": 10.70, "ask": 10.75, "spread_pct": 0.4662,
+            "timestamp_ms": 1_700_000_500_000,
+        }
+        self.assertIsNone(
+            trigger_cross_payload(
+                candidate, second, wide_quote, 0.75, 0.15,
+                now_ms=1_700_000_500_500,
+            )
+        )
+
     def test_under5_premarket_is_flagged_as_ineligible(self) -> None:
         # 2026-08-20 08:20:00 America/New_York.
         context = session_lane_context("under5", 1_787_227_600_000)
