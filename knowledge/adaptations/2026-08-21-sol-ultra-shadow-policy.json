@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "change_id": "sol_ultra_shadow_policy_2026_08_21_v1",
+  "created_at": "2026-08-21",
+  "status": "shadow_and_paper_only",
+  "live_capital_authority": false,
+  "objective": "Measure earlier participation while preserving tail-risk and execution controls.",
+  "evidence": {
+    "prospective_triggers": 24857,
+    "official_holdout_sessions": 36,
+    "holdout_mean_return_r": {
+      "entry_only_5bp": 0.05,
+      "round_trip_5bp_each_side": -0.013,
+      "round_trip_10bp_each_side": -0.112,
+      "prior_half_spread_plus_5bp_each_side": -0.419
+    },
+    "high_score_sample": {
+      "triggers_at_or_above_75": 20,
+      "triggers_at_or_above_85": 0
+    },
+    "quote_coverage_within_15_minutes_pct": 28.1,
+    "gap_through_losses_worse_than_negative_1r": 1424,
+    "worst_gap_through_r": -24.35,
+    "conclusion": "The score detects movement but is not validated as a directional entry gate; live risk expansion is not supported."
+  },
+  "limited_hard_gates": [
+    {
+      "control": "minimum opportunity score",
+      "new_role": "ranking_and_measurement_only",
+      "reversible_flag": "score_is_entry_gate"
+    },
+    {
+      "control": "fresh news",
+      "new_role": "context_and_ranking_input",
+      "reversible_flag": "fresh_news_required"
+    },
+    {
+      "control": "state-only authorization",
+      "new_role": "context_and_cohort_label",
+      "reversible_flag": "state_is_entry_gate"
+    }
+  ],
+  "retained_hard_gates": [
+    "fresh quote",
+    "absolute spread ceiling",
+    "spread no greater than 15 percent of structural risk",
+    "positive structural stop distance",
+    "half-ATR chase ceiling",
+    "exhaustion lock",
+    "minimum gap and dollar-volume floors",
+    "separate under-$5 liquidity lane",
+    "eligible ticker types"
+  ],
+  "implementation": {
+    "runtime_mode": "shadow",
+    "policy_module": "titan_runtime/policy.py",
+    "configuration": "config/titan-massive.json",
+    "test_files": [
+      "tests/test_policy.py",
+      "tests/test_config.py",
+      "tests/test_signals.py"
+    ]
+  },
+  "rollback": {
+    "score_gate": "set score_is_entry_gate to true",
+    "news_gate": "set fresh_news_required to true",
+    "state_gate": "set state_is_entry_gate to true",
+    "spread_guard": "lower max_spread_to_structural_risk below 0.15 after replay evidence"
+  },
+  "promotion_path": [
+    "prospective shadow capture",
+    "causal historical replay",
+    "paper trading",
+    "forward-test expectancy after spread and slippage",
+    "human review"
+  ]
+}
