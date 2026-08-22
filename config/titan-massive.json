@@ -12,16 +12,29 @@
   "snapshot_refresh_seconds": 300,
   "stale_data_seconds": 90,
   "quote_watch_count": 1000,
-  "eligible_ticker_types": ["CS", "ADRC"],
+  "eligible_ticker_types": [
+    "CS",
+    "ADRC"
+  ],
   "candidate_min_signal_strength": 62,
-  "candidate_min_price": 1.0,
-  "candidate_max_price": 1000.0,
-  "candidate_min_gap_pct": 4.0,
-  "watch_min_gap_pct": 3.0,
+  "candidate_min_price": 1,
+  "candidate_max_price": 1000,
+  "candidate_min_gap_pct": 4,
+  "watch_min_gap_pct": 3,
   "candidate_min_dollar_volume": 2000000,
   "watch_min_signal_strength": 50,
   "under5_min_dollar_volume": 10000000,
   "max_quote_spread_pct": 0.75,
   "under5_max_quote_spread_pct": 0.75,
-  "retention_days": 15
+  "retention_days": 15,
+  "score_is_entry_gate": false,
+  "fresh_news_required": false,
+  "state_is_entry_gate": false,
+  "entry_states": [
+    "BUILDING",
+    "ACCELERATING",
+    "BREAKOUT"
+  ],
+  "max_spread_to_structural_risk": 0.15,
+  "shadow_policy_version": "sol_ultra_2026-08-21_v1"
 }
