@@ -6,6 +6,8 @@ from statistics import mean
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
+from .policy import spread_to_risk_gate
+
 
 @dataclass(frozen=True)
 class Bar:
@@ -306,6 +308,7 @@ def trigger_cross_payload(
     second_bar: dict[str, Any],
     quote: dict[str, Any] | None,
     max_spread_pct: float | None = None,
+    max_spread_to_risk_ratio: float | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any] | None:
     trigger = candidate.get("base_high")
@@ -317,14 +320,30 @@ def trigger_cross_payload(
     # A completed/partial second bar touching the trigger is not enough. Titan's
     # contract requires a contemporaneous live ask at or through the trigger.
     ask = quote.get("ask") if quote else None
+    bid = quote.get("bid") if quote else None
     spread_pct = quote.get("spread_pct") if quote else None
     quote_timestamp_ms = int((quote or {}).get("timestamp_ms") or 0)
     reference_ms = now_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     quote_fresh = bool(quote_timestamp_ms and 0 <= reference_ms - quote_timestamp_ms <= 15_000)
+    spread_to_risk_pass = True
+    spread_to_risk_ratio = None
+    if max_spread_to_risk_ratio is not None:
+        invalidation = candidate.get("invalidation")
+        if bid is None or ask is None or invalidation is None:
+            spread_to_risk_pass = False
+        else:
+            spread_to_risk_pass, spread_to_risk_ratio = spread_to_risk_gate(
+                trigger=float(trigger),
+                invalidation=float(invalidation),
+                bid=float(bid),
+                ask=float(ask),
+                max_ratio=max_spread_to_risk_ratio,
+            )
     liquidity_pass = bool(
         quote_fresh
         and spread_pct is not None
         and (max_spread_pct is None or 0 <= float(spread_pct) <= max_spread_pct)
+        and spread_to_risk_pass
     )
     if ask is None or float(ask) < float(trigger) or not liquidity_pass:
         return None
@@ -359,6 +378,11 @@ def trigger_cross_payload(
         "pullback_volume_per_second": pullback_pace,
         "volume_pace_expanding": pace > pullback_pace,
         "spread_pct": spread_pct,
+        "spread_to_structural_risk": (
+            round(spread_to_risk_ratio, 4) if spread_to_risk_ratio is not None else None
+        ),
+        "max_spread_to_structural_risk": max_spread_to_risk_ratio,
+        "spread_to_risk_pass": spread_to_risk_pass,
         "quote_fresh": quote_fresh,
         "preliminary_liquidity_pass": liquidity_pass,
         "price_cross_confirmed": True,
