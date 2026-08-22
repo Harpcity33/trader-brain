@@ -3,16 +3,26 @@
   "mode": "research_and_paper_only",
   "production_mutation_allowed": false,
   "paper_capital": {
-    "minimum_daily_deployment_when_qualified": 500.0,
+    "minimum_daily_deployment_when_qualified": 500,
     "position_sizing_basis": "percentage_and_stop_defined"
   },
   "candidate_universe": {
-    "primary_price_min": 1.0,
-    "primary_price_max": 20.0,
+    "primary_price_min": 1,
+    "primary_price_max": 20,
     "include_higher_prices_when_materially_stronger": true,
     "include_otc": false,
-    "gap_buckets_pct": [5, 10, 20, 30],
-    "big_mover_buckets_pct": [20, 30, 50, 100]
+    "gap_buckets_pct": [
+      5,
+      10,
+      20,
+      30
+    ],
+    "big_mover_buckets_pct": [
+      20,
+      30,
+      50,
+      100
+    ]
   },
   "experimental_score_weights": {
     "catalyst_strength": 20,
@@ -90,5 +100,48 @@
     "time_of_day_expected_return",
     "top_premarket_mover_continuation",
     "high_risk_vs_core_expectancy"
-  ]
+  ],
+  "sol_ultra_shadow_policy_v1": {
+    "status": "shadow_and_paper_only",
+    "effective_date": "2026-08-21",
+    "objective": "measure earlier participation without increasing live capital authority",
+    "opportunity_score_role": "ranking_and_measurement_only",
+    "hard_gates_disabled_for_experiment": [
+      "minimum opportunity score",
+      "fresh-news requirement",
+      "state-only authorization"
+    ],
+    "retained_hard_gates": [
+      "fresh quote",
+      "structural stop and positive risk distance",
+      "dynamic spread-to-structural-risk limit",
+      "absolute spread ceiling",
+      "half-ATR chase ceiling",
+      "exhaustion lock",
+      "minimum gap and dollar-volume floors",
+      "separate under-$5 liquidity lane",
+      "ticker eligibility"
+    ],
+    "setup_priority": [
+      "above-$5 opening VWAP reclaim or hold",
+      "opening-range breakout",
+      "first pullback after impulse"
+    ],
+    "dynamic_controls": {
+      "max_quote_age_seconds": 15,
+      "max_spread_to_structural_risk": 0.15,
+      "under5_min_dollar_volume": 10000000,
+      "one_ticker_session_exposure_in_live": true,
+      "one_paper_reentry_max": true
+    },
+    "promotion_requirements": [
+      "prospective shadow capture",
+      "historical replay with causal timestamps",
+      "paper trading",
+      "forward-test expectancy after spread and slippage",
+      "human review"
+    ],
+    "live_trading_authority": false,
+    "evidence_note": "SOL Ultra showed score ranking movement but not direction and did not support increasing live risk."
+  }
 }
