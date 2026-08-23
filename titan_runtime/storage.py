@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
 from math import isfinite
@@ -407,7 +408,94 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_active
 CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_pending
     ON risk_authorizations(account_key, session_date)
     WHERE status IN ('ACTIVE','CONSUMED');
+
+CREATE TABLE IF NOT EXISTS daily_performance_grades (
+    grade_id TEXT PRIMARY KEY,
+    account_key TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    corrects_grade_id TEXT REFERENCES daily_performance_grades(grade_id),
+    rubric_version TEXT NOT NULL,
+    graded_at TEXT NOT NULL,
+    broker_confirmed_at TEXT,
+    recorded_at TEXT NOT NULL,
+    payload_hash TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    evidence_coverage_pct REAL NOT NULL CHECK(
+        evidence_coverage_pct >= 0 AND evidence_coverage_pct <= 100
+    ),
+    process_score REAL NOT NULL CHECK(process_score >= 0 AND process_score <= 100),
+    outcome_score REAL NOT NULL CHECK(outcome_score >= 0 AND outcome_score <= 100),
+    raw_overall_score REAL NOT NULL CHECK(
+        raw_overall_score >= 0 AND raw_overall_score <= 100
+    ),
+    overall_score REAL CHECK(
+        overall_score IS NULL OR (overall_score >= 0 AND overall_score <= 100)
+    ),
+    letter_grade TEXT NOT NULL CHECK(letter_grade IN (
+        'A','A-','B+','B','B-','C+','C','C-','D','F','INCOMPLETE'
+    )),
+    grade_status TEXT NOT NULL CHECK(grade_status IN (
+        'PENDING_RECONCILIATION','FINAL','INCOMPLETE'
+    )),
+    evidence_ceiling REAL,
+    incomplete_reasons_json TEXT NOT NULL,
+    hard_fail INTEGER NOT NULL CHECK(hard_fail IN (0,1)),
+    hard_ceiling REAL,
+    UNIQUE(account_key, session_date, strategy_version, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_performance_grades_session
+    ON daily_performance_grades(session_date DESC, account_key, strategy_version, revision DESC);
+
+CREATE TRIGGER IF NOT EXISTS daily_performance_grades_no_update
+BEFORE UPDATE ON daily_performance_grades
+BEGIN
+    SELECT RAISE(ABORT, 'daily performance grades are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS daily_performance_grades_no_delete
+BEFORE DELETE ON daily_performance_grades
+BEGIN
+    SELECT RAISE(ABORT, 'daily performance grades are append-only');
+END;
 """
+
+
+PERFORMANCE_PROCESS_WEIGHT = Decimal("0.80")
+PERFORMANCE_OUTCOME_WEIGHT = Decimal("0.20")
+PERFORMANCE_SCORE_QUANTUM = Decimal("0.0001")
+PERFORMANCE_RUBRIC_VERSION = "titan_daily_performance_2026-08-23_v1"
+PERFORMANCE_RUBRIC = {
+    "account_and_risk_integrity": ("process", Decimal("25")),
+    "execution_and_protection": ("process", Decimal("15")),
+    "causal_data_and_evidence": ("process", Decimal("15")),
+    "opportunity_coverage_and_offense": ("process", Decimal("15")),
+    "entry_quality_and_selectivity": ("process", Decimal("10")),
+    "position_management_and_profit_capture": ("process", Decimal("12")),
+    "audit_and_learning_quality": ("process", Decimal("8")),
+    "broker_net_pnl_vs_objective_and_boundary": ("outcome", Decimal("40")),
+    "net_r_after_execution_costs": ("outcome", Decimal("30")),
+    "risk_weighted_after_cost_opportunity_capture": (
+        "outcome", Decimal("30")
+    ),
+}
+PERFORMANCE_MINIMUM_APPLICABLE_PROCESS_WEIGHT = Decimal("55")
+PERFORMANCE_REQUIRED_FAILURE_MARKERS = {
+    "unreconciled_broker_state",
+    "order_lifecycle_or_quantity_defect",
+    "unprotected_or_overlapping_exit_or_overnight",
+    "prohibited_or_unauthorized_action",
+    "loss_lock_violation",
+    "fabricated_or_future_data",
+}
+PERFORMANCE_HARD_FAILURE_CEILINGS = {
+    "order_lifecycle_or_quantity_defect": Decimal("59"),
+    "unprotected_or_overlapping_exit_or_overnight": Decimal("39"),
+    "prohibited_or_unauthorized_action": Decimal("0"),
+    "loss_lock_violation": Decimal("0"),
+    "fabricated_or_future_data": Decimal("0"),
+}
 
 
 def utc_now() -> str:
@@ -435,6 +523,29 @@ def _finite_float(value: Any, field: str) -> float:
     if not isfinite(result):
         raise ValueError(f"{field} must be a finite number")
     return result
+
+
+def _finite_decimal(value: Any, field: str) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise ValueError(f"{field} must be a finite number") from error
+    if not result.is_finite():
+        raise ValueError(f"{field} must be a finite number")
+    return result
+
+
+def _bounded_score(value: Any, field: str) -> Decimal:
+    result = _finite_decimal(value, field)
+    if result < 0 or result > 100:
+        raise ValueError(f"{field} must be within 0..100")
+    return result
+
+
+def _quantized_score(value: Decimal) -> float:
+    return float(value.quantize(PERFORMANCE_SCORE_QUANTUM, rounding=ROUND_HALF_UP))
 
 
 def _validate_risk_gate_authorization(
@@ -1521,6 +1632,10 @@ class Store:
             raise ValueError(
                 "daily research cannot register a production_rule; live changes require a separate user-authorized workflow"
             )
+        if payload.get("status", "proposed") != "proposed":
+            raise ValueError("new strategy change proposals must start as proposed")
+        if bool(payload.get("production_approved", False)):
+            raise ValueError("proposal input cannot self-assert production approval")
         change_id = str(uuid.uuid4())
         self.conn.execute(
             """INSERT INTO strategy_changes(
@@ -1530,8 +1645,7 @@ class Store:
             (
                 change_id, utc_now(), payload["title"], change_class, category,
                 json.dumps(payload.get("evidence") or {}, separators=(",", ":")),
-                payload["expected_effect"], payload.get("status", "proposed"),
-                int(bool(payload.get("production_approved", False))),
+                payload["expected_effect"], "proposed", 0,
                 payload.get("prior_version"), payload.get("proposed_version"),
             ),
         )
@@ -1548,6 +1662,985 @@ class Store:
             item["production_approved"] = bool(item["production_approved"])
             result.append(item)
         return result
+
+    def _performance_grade_item(self, row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        payload = json.loads(item.pop("payload_json"))
+        item["incomplete_reasons"] = json.loads(
+            item.pop("incomplete_reasons_json")
+        )
+        item.update(payload)
+        item["hard_fail"] = bool(item["hard_fail"])
+        newer = self.conn.execute(
+            """SELECT 1 FROM daily_performance_grades
+               WHERE account_key=? AND session_date=? AND strategy_version=?
+                 AND revision>? LIMIT 1""",
+            (
+                item["account_key"], item["session_date"],
+                item["strategy_version"], item["revision"],
+            ),
+        ).fetchone()
+        item["is_canonical"] = newer is None
+        item["score_calculation"] = {
+            "process_weight_pct": 80.0,
+            "outcome_weight_pct": 20.0,
+            "process_score": item["process_score"],
+            "outcome_score": item["outcome_score"],
+            "raw_overall_score": item["raw_overall_score"],
+            "evidence_ceiling": item["evidence_ceiling"],
+            "hard_ceiling": item["hard_ceiling"],
+            "overall_score": item["overall_score"],
+            "letter_grade": item["letter_grade"],
+        }
+        # The current recorder validates shape, formulas, the immutable broker
+        # snapshot, and terminal account state.  It does not yet derive every
+        # checklist item or source digest from an independent evidence sealer.
+        # Therefore even a high-quality FINAL grade is reporting/shadow
+        # evidence only and can never be used as a production-promotion token.
+        item["authoritative_evidence_verified"] = False
+        item["evidence_sufficient_for_change_evaluation"] = False
+        item["promotion_blocked_reason"] = (
+            "independent evidence sealer and hash-bound promotion gate are not installed"
+        )
+        # Recording a grade never authorizes or applies a production edit.
+        item["change_authority"] = False
+        return item
+
+    def record_performance_grade(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Append one evidence-bound daily grade or an explicit correction.
+
+        The first record for an account/session/strategy is revision 1.  An
+        exact replay is idempotent.  Any different payload must explicitly
+        name the current canonical grade in ``corrects_grade_id`` and becomes
+        the next immutable revision.  This method only records the completed
+        grade; it never applies a strategy or automation change.
+        """
+        if not isinstance(payload, dict):
+            raise ValueError("daily performance grade must be a JSON object")
+        allowed_fields = {
+            "account_key", "session_date", "strategy_version", "rubric_version",
+            "graded_at", "broker_confirmed_pnl", "execution_metrics",
+            "category_scores", "evidence_coverage_pct", "strengths", "mistakes",
+            "improvement_proposals", "hard_failures", "corrects_grade_id",
+            "correction_reason", "no_change_reason", "evidence_manifest", "notes",
+        }
+        unknown = sorted(set(payload) - allowed_fields)
+        if unknown:
+            raise ValueError(
+                "unknown daily performance grade fields: " + ", ".join(unknown)
+            )
+        required = (
+            "account_key", "session_date", "strategy_version", "rubric_version",
+            "graded_at", "broker_confirmed_pnl", "execution_metrics",
+            "category_scores", "evidence_coverage_pct", "strengths", "mistakes",
+            "improvement_proposals", "hard_failures",
+        )
+        missing = [field for field in required if field not in payload]
+        if missing:
+            raise ValueError(
+                "missing daily performance grade fields: " + ", ".join(missing)
+            )
+
+        account_key = str(payload["account_key"]).strip()
+        strategy_version = str(payload["strategy_version"]).strip()
+        rubric_version = str(payload["rubric_version"]).strip()
+        if not account_key or not strategy_version or not rubric_version:
+            raise ValueError(
+                "account_key, strategy_version, and rubric_version cannot be empty"
+            )
+        if rubric_version != PERFORMANCE_RUBRIC_VERSION:
+            raise ValueError(
+                f"unsupported rubric_version: {rubric_version}; "
+                f"expected {PERFORMANCE_RUBRIC_VERSION}"
+            )
+        session_date = str(payload["session_date"])
+        try:
+            parsed_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+        except ValueError as error:
+            raise ValueError("session_date must use YYYY-MM-DD") from error
+        if parsed_date.isoformat() != session_date:
+            raise ValueError("session_date must use YYYY-MM-DD")
+        graded_at = _aware_timestamp(payload["graded_at"], "graded_at")
+        graded_time = datetime.fromisoformat(graded_at)
+        if graded_time > datetime.now(timezone.utc) + timedelta(seconds=15):
+            raise ValueError("graded_at may not be in the future")
+        graded_et = graded_time.astimezone(ZoneInfo("America/New_York"))
+        if graded_et.date() != parsed_date:
+            raise ValueError("graded_at must fall on session_date in America/New_York")
+        if (graded_et.hour, graded_et.minute) < (16, 10):
+            raise ValueError("daily grading may not begin before 16:10 America/New_York")
+
+        pnl = payload["broker_confirmed_pnl"]
+        required_pnl = (
+            "broker_confirmed_at", "start_of_day_equity", "current_equity",
+            "realized_net_pnl", "confirmed_cash_flow_adjustment", "account_day_pnl",
+        )
+        broker_confirmed_at: str | None = None
+        normalized_pnl: dict[str, object] | None = None
+        if pnl is not None:
+            if not isinstance(pnl, dict):
+                raise ValueError("broker_confirmed_pnl must be an object or null")
+            missing_pnl = [field for field in required_pnl if field not in pnl]
+            if missing_pnl:
+                raise ValueError(
+                    "missing broker-confirmed P&L fields: " + ", ".join(missing_pnl)
+                )
+            broker_confirmed_at = _aware_timestamp(
+                pnl["broker_confirmed_at"],
+                "broker_confirmed_pnl.broker_confirmed_at",
+            )
+            broker_time = datetime.fromisoformat(broker_confirmed_at)
+            if broker_time > graded_time:
+                raise ValueError("graded_at must not precede broker-confirmed P&L")
+            broker_et = broker_time.astimezone(ZoneInfo("America/New_York"))
+            if broker_et.date() != parsed_date or (broker_et.hour, broker_et.minute) < (16, 5):
+                raise ValueError(
+                    "final broker snapshot must be from session_date at or after 16:05 America/New_York"
+                )
+            normalized_pnl = {"broker_confirmed_at": broker_confirmed_at}
+            for field in required_pnl[1:]:
+                normalized_pnl[field] = float(
+                    _finite_decimal(pnl[field], f"broker_confirmed_pnl.{field}")
+                )
+            if (
+                float(normalized_pnl["start_of_day_equity"]) <= 0
+                or float(normalized_pnl["current_equity"]) <= 0
+            ):
+                raise ValueError("broker-confirmed account equity must be positive")
+            calculated_account_day_pnl = (
+                float(normalized_pnl["current_equity"])
+                - float(normalized_pnl["start_of_day_equity"])
+                - float(normalized_pnl["confirmed_cash_flow_adjustment"])
+            )
+            if abs(
+                float(normalized_pnl["account_day_pnl"])
+                - calculated_account_day_pnl
+            ) > 0.005:
+                raise ValueError(
+                    "broker_confirmed_pnl.account_day_pnl is inconsistent with equity and cash flow"
+                )
+
+        execution = payload["execution_metrics"]
+        if not isinstance(execution, dict):
+            raise ValueError("execution_metrics must be an object")
+        count_fields = (
+            "campaigns_reviewed", "campaigns_entered", "campaigns_closed",
+            "winning_campaigns", "losing_campaigns", "orders_submitted",
+            "orders_filled", "missed_qualified_setups", "false_positive_entries",
+            "qualified_setups",
+        )
+        continuous_fields = (
+            "mfe_dollars", "mae_dollars", "capture_ratio_pct",
+            "average_entry_slippage_bps", "average_exit_slippage_bps",
+            "max_protection_latency_seconds", "authorized_filled_risk_dollars",
+            "realized_after_cost_profit_dollars",
+            "executed_after_cost_favorable_opportunity_dollars",
+            "missed_after_cost_favorable_opportunity_dollars",
+        )
+        missing_execution = [
+            field for field in (*count_fields, *continuous_fields)
+            if field not in execution
+        ]
+        if missing_execution:
+            raise ValueError(
+                "missing execution metrics: " + ", ".join(missing_execution)
+            )
+        normalized_execution = dict(execution)
+        for field in count_fields:
+            value = _finite_decimal(execution[field], f"execution_metrics.{field}")
+            if value < 0 or value != value.to_integral_value():
+                raise ValueError(f"execution_metrics.{field} must be a nonnegative integer")
+            normalized_execution[field] = int(value)
+        for field in continuous_fields:
+            value = _finite_decimal(execution[field], f"execution_metrics.{field}")
+            normalized_execution[field] = float(value)
+        for field in (
+            "mfe_dollars", "mae_dollars", "max_protection_latency_seconds",
+            "authorized_filled_risk_dollars",
+            "realized_after_cost_profit_dollars",
+            "executed_after_cost_favorable_opportunity_dollars",
+            "missed_after_cost_favorable_opportunity_dollars",
+        ):
+            if float(normalized_execution[field]) < 0:
+                raise ValueError(f"execution_metrics.{field} cannot be negative")
+        _bounded_score(
+            normalized_execution["capture_ratio_pct"],
+            "execution_metrics.capture_ratio_pct",
+        )
+        if normalized_execution["campaigns_entered"] > normalized_execution["campaigns_reviewed"]:
+            raise ValueError("campaigns_entered cannot exceed campaigns_reviewed")
+        if normalized_execution["campaigns_closed"] > normalized_execution["campaigns_entered"]:
+            raise ValueError("campaigns_closed cannot exceed campaigns_entered")
+        if (
+            normalized_execution["winning_campaigns"]
+            + normalized_execution["losing_campaigns"]
+            > normalized_execution["campaigns_closed"]
+        ):
+            raise ValueError("winning plus losing campaigns cannot exceed campaigns_closed")
+        if normalized_execution["orders_filled"] > normalized_execution["orders_submitted"]:
+            raise ValueError("orders_filled cannot exceed orders_submitted")
+        if normalized_execution["campaigns_entered"] > normalized_execution["qualified_setups"]:
+            raise ValueError("campaigns_entered cannot exceed qualified_setups")
+        if normalized_execution["missed_qualified_setups"] > normalized_execution["qualified_setups"]:
+            raise ValueError("missed_qualified_setups cannot exceed qualified_setups")
+        if (
+            normalized_execution["campaigns_entered"]
+            + normalized_execution["missed_qualified_setups"]
+            > normalized_execution["qualified_setups"]
+        ):
+            raise ValueError(
+                "entered plus missed qualified setups cannot exceed qualified_setups"
+            )
+        if (
+            normalized_execution["campaigns_entered"] > 0
+            and normalized_execution["authorized_filled_risk_dollars"] <= 0
+        ):
+            raise ValueError(
+                "entered campaigns require positive authorized_filled_risk_dollars"
+            )
+        try:
+            json.dumps(normalized_execution, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("execution_metrics must contain JSON values") from error
+
+        categories = payload["category_scores"]
+        if not isinstance(categories, dict) or set(categories) != set(PERFORMANCE_RUBRIC):
+            raise ValueError(
+                "category_scores must contain exactly the fixed rubric categories: "
+                + ", ".join(sorted(PERFORMANCE_RUBRIC))
+            )
+        normalized_categories: dict[str, dict[str, object]] = {}
+        weighted_sums = {"process": Decimal("0"), "outcome": Decimal("0")}
+        weight_sums = {"process": Decimal("0"), "outcome": Decimal("0")}
+        for raw_name in sorted(categories):
+            name = str(raw_name).strip()
+            value = categories[raw_name]
+            if not name or not isinstance(value, dict):
+                raise ValueError("each category score must be a named object")
+            extra_category_fields = set(value) - {
+                "group", "score", "weight", "evidence", "applicable"
+            }
+            if extra_category_fields:
+                raise ValueError(
+                    f"unknown fields for category {name}: "
+                    + ", ".join(sorted(extra_category_fields))
+                )
+            missing_category_fields = {
+                "group", "score", "weight", "evidence", "applicable"
+            } - set(value)
+            if missing_category_fields:
+                raise ValueError(
+                    f"missing fields for category {name}: "
+                    + ", ".join(sorted(missing_category_fields))
+                )
+            expected_group, expected_weight = PERFORMANCE_RUBRIC[name]
+            group = str(value["group"]).strip().lower()
+            if group != expected_group:
+                raise ValueError(
+                    f"category {name} group must be {expected_group}"
+                )
+            weight = _finite_decimal(value["weight"], f"category_scores.{name}.weight")
+            if weight != expected_weight:
+                raise ValueError(
+                    f"category {name} weight must be {expected_weight}"
+                )
+            applicable = value["applicable"]
+            if type(applicable) is not bool:
+                raise ValueError(f"category {name} applicable must be boolean")
+            if group == "outcome" and not applicable:
+                raise ValueError(f"outcome category {name} cannot be N/A")
+            evidence = value["evidence"]
+            if evidence in (None, "", [], {}):
+                raise ValueError(f"category {name} requires nonempty evidence")
+            if applicable:
+                score = _bounded_score(
+                    value["score"], f"category_scores.{name}.score"
+                )
+            else:
+                if value["score"] is not None:
+                    raise ValueError(
+                        f"inapplicable category {name} score must be null"
+                    )
+                score = None
+            if group == "process":
+                required_evidence_fields = {
+                    "eligible_items", "passed_items", "source_ids"
+                }
+                if (
+                    not isinstance(evidence, dict)
+                    or set(evidence) != required_evidence_fields
+                ):
+                    raise ValueError(
+                        f"process category {name} evidence must contain exactly "
+                        "eligible_items, passed_items, and source_ids"
+                    )
+                eligible_item_count = _finite_decimal(
+                    evidence["eligible_items"],
+                    f"category_scores.{name}.evidence.eligible_items",
+                )
+                passed_item_count = _finite_decimal(
+                    evidence["passed_items"],
+                    f"category_scores.{name}.evidence.passed_items",
+                )
+                source_ids = evidence["source_ids"]
+                if (
+                    eligible_item_count < 0
+                    or eligible_item_count != eligible_item_count.to_integral_value()
+                    or passed_item_count < 0
+                    or passed_item_count != passed_item_count.to_integral_value()
+                    or passed_item_count > eligible_item_count
+                    or not isinstance(source_ids, list)
+                    or not source_ids
+                    or any(
+                        not isinstance(source_id, str) or not source_id.strip()
+                        for source_id in source_ids
+                    )
+                ):
+                    raise ValueError(
+                        f"process category {name} has invalid checklist evidence"
+                    )
+                if applicable:
+                    if eligible_item_count <= 0:
+                        raise ValueError(
+                            f"applicable process category {name} needs eligible items"
+                        )
+                    expected_process_score = (
+                        passed_item_count * Decimal("100") / eligible_item_count
+                    )
+                    assert score is not None
+                    if abs(score - expected_process_score) > Decimal("0.01"):
+                        raise ValueError(
+                            f"process category {name} score does not match checklist; "
+                            f"expected {_quantized_score(expected_process_score)}"
+                        )
+                elif eligible_item_count != 0 or passed_item_count != 0:
+                    raise ValueError(
+                        f"inapplicable process category {name} checklist counts must be zero"
+                    )
+            normalized_category: dict[str, object] = {
+                "group": group,
+                "score": float(score) if score is not None else None,
+                "weight": float(weight),
+                "applicable": applicable,
+                "evidence": evidence,
+            }
+            try:
+                json.dumps(normalized_category, sort_keys=True, separators=(",", ":"))
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"category {name} evidence must be JSON") from error
+            normalized_categories[name] = normalized_category
+            if applicable:
+                assert score is not None
+                weighted_sums[group] += score * weight
+                weight_sums[group] += weight
+        if any(weight_sums[group] <= 0 for group in weight_sums):
+            raise ValueError("category_scores must include process and outcome categories")
+        if weight_sums["process"] < PERFORMANCE_MINIMUM_APPLICABLE_PROCESS_WEIGHT:
+            raise ValueError(
+                "applicable process category weight must total at least 55"
+            )
+
+        no_trade_no_setup = (
+            normalized_execution["campaigns_entered"] == 0
+            and normalized_execution["qualified_setups"] == 0
+            and normalized_execution["orders_submitted"] == 0
+            and normalized_execution["orders_filled"] == 0
+            and normalized_execution["authorized_filled_risk_dollars"] == 0
+            and (
+                normalized_pnl is None
+                or abs(float(normalized_pnl["account_day_pnl"])) <= 0.005
+            )
+        )
+        if normalized_pnl is None:
+            expected_pnl_score = Decimal("50")
+        else:
+            account_day_pnl = Decimal(str(normalized_pnl["account_day_pnl"]))
+            if account_day_pnl <= 0:
+                expected_pnl_score = Decimal("50") * (
+                    Decimal("1") + account_day_pnl / Decimal("100")
+                )
+            else:
+                expected_pnl_score = Decimal("50") + Decimal("50") * (
+                    account_day_pnl / Decimal("150")
+                )
+            expected_pnl_score = min(
+                Decimal("100"), max(Decimal("0"), expected_pnl_score)
+            )
+
+        if no_trade_no_setup:
+            expected_net_r_score = expected_capture_score = Decimal("50")
+        else:
+            authorized_risk = Decimal(
+                str(normalized_execution["authorized_filled_risk_dollars"])
+            )
+            if authorized_risk > 0 and normalized_pnl is not None:
+                day_r = Decimal(str(normalized_pnl["account_day_pnl"])) / authorized_risk
+                if day_r <= 0:
+                    expected_net_r_score = Decimal("50") * (Decimal("1") + day_r)
+                else:
+                    expected_net_r_score = Decimal("50") + (
+                        Decimal("50") * day_r / Decimal("1.5")
+                    )
+                expected_net_r_score = min(
+                    Decimal("100"), max(Decimal("0"), expected_net_r_score)
+                )
+            else:
+                expected_net_r_score = (
+                    Decimal("0")
+                    if normalized_execution["qualified_setups"] > 0
+                    else Decimal("50")
+                )
+            capture_numerator = Decimal(
+                str(normalized_execution["realized_after_cost_profit_dollars"])
+            )
+            capture_denominator = (
+                Decimal(str(normalized_execution[
+                    "executed_after_cost_favorable_opportunity_dollars"
+                ]))
+                + Decimal(str(normalized_execution[
+                    "missed_after_cost_favorable_opportunity_dollars"
+                ]))
+            )
+            if capture_numerator - capture_denominator > Decimal("0.01"):
+                raise ValueError(
+                    "realized profit cannot exceed executed plus missed after-cost favorable opportunity"
+                )
+            if normalized_pnl is not None and abs(
+                capture_numerator
+                - max(Decimal("0"), Decimal(str(normalized_pnl["account_day_pnl"])))
+            ) > Decimal("0.01"):
+                raise ValueError(
+                    "realized_after_cost_profit_dollars must equal positive broker account-day P&L"
+                )
+            if capture_denominator > 0:
+                expected_capture_score = min(
+                    Decimal("100"), max(
+                        Decimal("0"),
+                        Decimal("100") * capture_numerator / capture_denominator,
+                    )
+                )
+            else:
+                expected_capture_score = Decimal("0")
+            supplied_capture_ratio = Decimal(
+                str(normalized_execution["capture_ratio_pct"])
+            )
+            if abs(supplied_capture_ratio - expected_capture_score) > Decimal("0.01"):
+                raise ValueError(
+                    "execution_metrics.capture_ratio_pct does not match executed plus missed opportunity"
+                )
+
+        deterministic_outcomes = {
+            "broker_net_pnl_vs_objective_and_boundary": expected_pnl_score,
+            "net_r_after_execution_costs": expected_net_r_score,
+            "risk_weighted_after_cost_opportunity_capture": expected_capture_score,
+        }
+        if normalized_pnl is not None:
+            for name, expected_score in deterministic_outcomes.items():
+                supplied_score = Decimal(str(normalized_categories[name]["score"]))
+                if abs(supplied_score - expected_score) > Decimal("0.01"):
+                    raise ValueError(
+                        f"category {name} score does not match deterministic rubric formula; "
+                        f"expected {_quantized_score(expected_score)}"
+                    )
+        process_decimal = weighted_sums["process"] / weight_sums["process"]
+        outcome_decimal = weighted_sums["outcome"] / weight_sums["outcome"]
+        raw_overall_decimal = (
+            process_decimal * PERFORMANCE_PROCESS_WEIGHT
+            + outcome_decimal * PERFORMANCE_OUTCOME_WEIGHT
+        )
+
+        evidence_coverage = _bounded_score(
+            payload["evidence_coverage_pct"], "evidence_coverage_pct"
+        )
+
+        def normalized_text_list(field: str, *, allow_empty: bool = False) -> list[str]:
+            raw = payload[field]
+            if not isinstance(raw, list) or (not raw and not allow_empty):
+                requirement = "a list" if allow_empty else "a nonempty list"
+                raise ValueError(f"{field} must be {requirement}")
+            values = []
+            for value in raw:
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"{field} entries must be nonempty strings")
+                values.append(value.strip())
+            return values
+
+        strengths = normalized_text_list("strengths")
+        mistakes = normalized_text_list("mistakes", allow_empty=True)
+        proposals = payload["improvement_proposals"]
+        if not isinstance(proposals, list) or len(proposals) > 3:
+            raise ValueError("improvement_proposals must be a list of at most three items")
+        proposal_fields = {
+            "title", "causal_problem", "proposed_change", "evidence",
+            "independent_sample_count", "independent_session_count",
+            "expected_primary_metric", "possible_adverse_effect", "test_horizon",
+            "success_threshold", "rollback_trigger", "classification",
+        }
+        normalized_proposals = []
+        for proposal in proposals:
+            if not isinstance(proposal, dict) or set(proposal) != proposal_fields:
+                raise ValueError(
+                    "each improvement proposal must contain exactly: "
+                    + ", ".join(sorted(proposal_fields))
+                )
+            normalized_proposal = dict(proposal)
+            for field in proposal_fields - {
+                "evidence", "independent_sample_count", "independent_session_count"
+            }:
+                if not isinstance(proposal[field], str) or not proposal[field].strip():
+                    raise ValueError(f"improvement proposal {field} must be nonempty text")
+                normalized_proposal[field] = proposal[field].strip()
+            if proposal["classification"] not in {
+                "IMMEDIATE_SAFE", "SHADOW_FIRST", "PROTECTED_USER_ONLY"
+            }:
+                raise ValueError("invalid improvement proposal classification")
+            for field in ("independent_sample_count", "independent_session_count"):
+                count = _finite_decimal(proposal[field], f"improvement_proposals.{field}")
+                if count < 0 or count != count.to_integral_value():
+                    raise ValueError(f"improvement proposal {field} must be a nonnegative integer")
+                normalized_proposal[field] = int(count)
+            if proposal["evidence"] in (None, "", [], {}):
+                raise ValueError("improvement proposal evidence must be nonempty")
+            normalized_proposals.append(normalized_proposal)
+        no_change_reason = payload.get("no_change_reason")
+        if not proposals:
+            if not isinstance(no_change_reason, str) or not no_change_reason.strip():
+                raise ValueError("no_change_reason is required when no proposal is warranted")
+            no_change_reason = no_change_reason.strip()
+        elif no_change_reason is not None:
+            raise ValueError("no_change_reason is allowed only when proposals are empty")
+        try:
+            json.dumps(normalized_proposals, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("improvement_proposals must contain JSON values") from error
+
+        hard_failures = payload["hard_failures"]
+        required_failures = PERFORMANCE_REQUIRED_FAILURE_MARKERS
+        if not isinstance(hard_failures, dict) or set(hard_failures) != required_failures:
+            raise ValueError(
+                "hard_failures must contain exactly: "
+                + ", ".join(sorted(required_failures))
+            )
+        if any(type(hard_failures[field]) is not bool for field in required_failures):
+            raise ValueError("hard failure markers must be booleans")
+        active_ceilings = [
+            ceiling for field, ceiling in PERFORMANCE_HARD_FAILURE_CEILINGS.items()
+            if hard_failures[field]
+        ]
+        hard_ceiling_decimal = min(active_ceilings) if active_ceilings else None
+        evidence_ceiling_decimal = (
+            Decimal("69") if Decimal("80") <= evidence_coverage < Decimal("95")
+            else None
+        )
+        incomplete_reasons = []
+        if evidence_coverage < 80:
+            incomplete_reasons.append("evidence_coverage_below_80_pct")
+        if normalized_pnl is None:
+            incomplete_reasons.append("final_broker_confirmed_pnl_missing")
+        if hard_failures["unreconciled_broker_state"]:
+            incomplete_reasons.append("broker_state_unreconciled")
+        grade_status = "INCOMPLETE" if incomplete_reasons else "FINAL"
+        if (
+            grade_status == "INCOMPLETE"
+            and (graded_et.hour, graded_et.minute) < (17, 0)
+        ):
+            raise ValueError(
+                "terminal INCOMPLETE grade may not be sealed before 17:00 America/New_York"
+            )
+        if grade_status == "INCOMPLETE":
+            overall_score: float | None = None
+            letter_grade = "INCOMPLETE"
+        else:
+            score_ceilings = [
+                ceiling for ceiling in (
+                    evidence_ceiling_decimal, hard_ceiling_decimal
+                ) if ceiling is not None
+            ]
+            overall_decimal = (
+                min(raw_overall_decimal, *score_ceilings)
+                if score_ceilings else raw_overall_decimal
+            )
+            overall_score = _quantized_score(overall_decimal)
+            letter_grade = (
+                "A" if overall_score >= 93 else
+                "A-" if overall_score >= 90 else
+                "B+" if overall_score >= 87 else
+                "B" if overall_score >= 83 else
+                "B-" if overall_score >= 80 else
+                "C+" if overall_score >= 77 else
+                "C" if overall_score >= 73 else
+                "C-" if overall_score >= 70 else
+                "D" if overall_score >= 60 else "F"
+            )
+
+        corrects_grade_id_raw = payload.get("corrects_grade_id")
+        corrects_grade_id = (
+            str(corrects_grade_id_raw).strip() if corrects_grade_id_raw is not None else None
+        )
+        if corrects_grade_id_raw is not None and not corrects_grade_id:
+            raise ValueError("corrects_grade_id cannot be empty")
+        if corrects_grade_id is not None:
+            raise ValueError(
+                "grade corrections are disabled until an independent evidence sealer is installed"
+            )
+        correction_reason_raw = payload.get("correction_reason")
+        correction_reason = (
+            str(correction_reason_raw).strip()
+            if correction_reason_raw is not None else None
+        )
+        if corrects_grade_id is not None and not correction_reason:
+            raise ValueError("correction_reason is required for a grade correction")
+        if corrects_grade_id is None and correction_reason_raw is not None:
+            raise ValueError("revision 1 cannot include correction_reason")
+        normalized_payload: dict[str, object] = {
+            "account_key": account_key,
+            "session_date": session_date,
+            "strategy_version": strategy_version,
+            "rubric_version": rubric_version,
+            "graded_at": graded_at,
+            "broker_confirmed_pnl": normalized_pnl,
+            "execution_metrics": normalized_execution,
+            "category_scores": normalized_categories,
+            "evidence_coverage_pct": float(evidence_coverage),
+            "strengths": strengths,
+            "mistakes": mistakes,
+            "improvement_proposals": normalized_proposals,
+            "hard_failures": {
+                field: hard_failures[field] for field in sorted(required_failures)
+            },
+            "corrects_grade_id": corrects_grade_id,
+        }
+        if correction_reason is not None:
+            normalized_payload["correction_reason"] = correction_reason
+        if no_change_reason is not None:
+            normalized_payload["no_change_reason"] = no_change_reason
+        evidence_manifest = payload.get("evidence_manifest")
+        required_manifest_fields = {
+            "sealed_at", "eligible_items", "verified_items", "source_hashes",
+            "source_record_counts", "massive_data_watermark", "decision_watermark",
+        }
+        if (
+            not isinstance(evidence_manifest, dict)
+            or set(evidence_manifest) != required_manifest_fields
+        ):
+            raise ValueError(
+                "evidence_manifest must contain exactly: "
+                + ", ".join(sorted(required_manifest_fields))
+            )
+        sealed_at = _aware_timestamp(evidence_manifest["sealed_at"], "evidence_manifest.sealed_at")
+        if datetime.fromisoformat(sealed_at) > graded_time:
+            raise ValueError("evidence manifest must be sealed no later than graded_at")
+        if (
+            broker_confirmed_at is not None
+            and datetime.fromisoformat(sealed_at) < datetime.fromisoformat(broker_confirmed_at)
+        ):
+            raise ValueError("evidence manifest cannot be sealed before the final broker snapshot")
+        eligible_items = _finite_decimal(
+            evidence_manifest["eligible_items"], "evidence_manifest.eligible_items"
+        )
+        verified_items = _finite_decimal(
+            evidence_manifest["verified_items"], "evidence_manifest.verified_items"
+        )
+        if (
+            eligible_items <= 0
+            or eligible_items != eligible_items.to_integral_value()
+            or verified_items < 0
+            or verified_items != verified_items.to_integral_value()
+            or verified_items > eligible_items
+        ):
+            raise ValueError("evidence manifest item counts are invalid")
+        calculated_coverage = verified_items * Decimal("100") / eligible_items
+        if abs(calculated_coverage - evidence_coverage) > Decimal("0.01"):
+            raise ValueError(
+                "evidence_coverage_pct does not match verified/eligible evidence items"
+            )
+        source_hashes = evidence_manifest["source_hashes"]
+        if not isinstance(source_hashes, dict) or not source_hashes:
+            raise ValueError("evidence_manifest.source_hashes must be nonempty")
+        for source, digest in source_hashes.items():
+            if (
+                not isinstance(source, str) or not source.strip()
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest.lower())
+            ):
+                raise ValueError("evidence source hashes must be named SHA-256 values")
+        source_counts = evidence_manifest["source_record_counts"]
+        if not isinstance(source_counts, dict) or not source_counts:
+            raise ValueError("evidence_manifest.source_record_counts must be nonempty")
+        for source, count in source_counts.items():
+            count_value = _finite_decimal(count, f"evidence_manifest.source_record_counts.{source}")
+            if count_value < 0 or count_value != count_value.to_integral_value():
+                raise ValueError("evidence source record counts must be nonnegative integers")
+        normalized_manifest = {
+            "sealed_at": sealed_at,
+            "eligible_items": int(eligible_items),
+            "verified_items": int(verified_items),
+            "source_hashes": source_hashes,
+            "source_record_counts": {
+                source: int(count) for source, count in source_counts.items()
+            },
+            "massive_data_watermark": _aware_timestamp(
+                evidence_manifest["massive_data_watermark"],
+                "evidence_manifest.massive_data_watermark",
+            ),
+            "decision_watermark": _aware_timestamp(
+                evidence_manifest["decision_watermark"],
+                "evidence_manifest.decision_watermark",
+            ),
+        }
+        sealed_time = datetime.fromisoformat(sealed_at)
+        for watermark_field in ("massive_data_watermark", "decision_watermark"):
+            if datetime.fromisoformat(str(normalized_manifest[watermark_field])) > sealed_time:
+                raise ValueError(
+                    f"evidence_manifest.{watermark_field} cannot follow sealed_at"
+                )
+        normalized_payload["evidence_manifest"] = normalized_manifest
+        if "notes" in payload:
+            if not isinstance(payload["notes"], str):
+                raise ValueError("notes must be a string")
+            normalized_payload["notes"] = payload["notes"]
+        canonical_json = json.dumps(
+            normalized_payload, sort_keys=True, separators=(",", ":")
+        )
+        payload_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+        grade_id = payload_hash
+
+        with self.transaction():
+            # Exact replays are immutable reads.  Resolve them before checking
+            # whether the broker has since produced a newer snapshot; later
+            # account state must not invalidate a previously sealed grade.
+            exact_replay = self.conn.execute(
+                "SELECT * FROM daily_performance_grades WHERE payload_hash=?",
+                (payload_hash,),
+            ).fetchone()
+            if exact_replay:
+                result = self._performance_grade_item(exact_replay)
+                result["idempotent_replay"] = True
+                return result
+            if (
+                normalized_pnl is not None
+                and not hard_failures["unreconciled_broker_state"]
+            ):
+                assert broker_confirmed_at is not None
+                source = self.conn.execute(
+                    """SELECT snapshot_json FROM risk_session_snapshots
+                       WHERE account_key=? AND session_date=? AND broker_confirmed_at=?""",
+                    (account_key, session_date, broker_confirmed_at),
+                ).fetchone()
+                if not source:
+                    raise ValueError(
+                        "daily grade has no matching immutable broker-confirmed risk snapshot"
+                    )
+                latest_source = self.conn.execute(
+                    """SELECT broker_confirmed_at FROM risk_session_snapshots
+                       WHERE account_key=? AND session_date=?
+                       ORDER BY broker_confirmed_at DESC LIMIT 1""",
+                    (account_key, session_date),
+                ).fetchone()
+                if (
+                    not latest_source
+                    or str(latest_source["broker_confirmed_at"]) != broker_confirmed_at
+                ):
+                    raise ValueError(
+                        "daily grade must use the latest immutable broker snapshot"
+                    )
+                source_snapshot = json.loads(str(source["snapshot_json"]))
+                if str(source_snapshot.get("strategy_version")) != strategy_version:
+                    raise ValueError(
+                        "daily grade strategy does not match the broker risk session"
+                    )
+                source_pairs = (
+                    ("start_of_day_equity", "start_of_day_equity"),
+                    ("current_equity", "current_equity"),
+                    ("realized_net_pnl", "realized_net_pnl"),
+                    ("confirmed_cash_flow_adjustment", "confirmed_cash_flow_adjustment"),
+                    ("account_day_pnl", "account_day_pnl"),
+                )
+                for grade_field, source_field in source_pairs:
+                    if abs(
+                        float(normalized_pnl[grade_field])
+                        - float(source_snapshot[source_field])
+                    ) > 0.005:
+                        raise ValueError(
+                            f"daily grade {grade_field} does not match its immutable broker snapshot"
+                        )
+                source_broker_state = source_snapshot.get("broker_state")
+                if not isinstance(source_broker_state, dict):
+                    raise ValueError("daily grade source snapshot has no broker_state")
+                for field in (
+                    "account_state_readable", "orders_reconciled", "positions_reconciled"
+                ):
+                    if source_broker_state.get(field) is not True:
+                        raise ValueError(
+                            f"daily grade source snapshot is not final: {field}"
+                        )
+                for field in (
+                    "current_gross_exposure_dollars", "working_entry_notional_dollars"
+                ):
+                    try:
+                        flat_value = float(source_broker_state[field])
+                    except (KeyError, TypeError, ValueError) as error:
+                        raise ValueError(
+                            f"daily grade source snapshot is missing {field}"
+                        ) from error
+                    if not isfinite(flat_value) or abs(flat_value) > 0.005:
+                        raise ValueError(
+                            f"daily grade source snapshot is not flat: {field}"
+                        )
+                for field in (
+                    "position_count", "working_order_count",
+                    "working_entry_order_count", "working_exit_order_count",
+                ):
+                    try:
+                        count_value = _finite_decimal(source_broker_state[field], field)
+                    except (KeyError, TypeError, ValueError) as error:
+                        raise ValueError(
+                            f"daily grade source snapshot is missing {field}"
+                        ) from error
+                    if count_value != 0:
+                        raise ValueError(
+                            f"daily grade source snapshot is not terminal: {field}"
+                        )
+                active_campaign_count = int(self.conn.execute(
+                    """SELECT COUNT(*) FROM position_campaigns
+                       WHERE account_key=?
+                         AND status NOT IN ('CLOSED','CANCELED','REJECTED','FAILED')""",
+                    (account_key,),
+                ).fetchone()[0])
+                if active_campaign_count:
+                    raise ValueError(
+                        "daily grade cannot be FINAL with an active campaign"
+                    )
+                pending_authorization_count = int(self.conn.execute(
+                    """SELECT COUNT(*) FROM risk_authorizations
+                       WHERE account_key=? AND session_date=?
+                         AND status IN ('ACTIVE','CONSUMED')""",
+                    (account_key, session_date),
+                ).fetchone()[0])
+                if pending_authorization_count:
+                    raise ValueError(
+                        "daily grade cannot be FINAL with a pending risk authorization"
+                    )
+
+            exact = self.conn.execute(
+                "SELECT * FROM daily_performance_grades WHERE payload_hash=?",
+                (payload_hash,),
+            ).fetchone()
+            if exact:
+                exact_id = str(exact["grade_id"])
+                replay = True
+            else:
+                latest = self.conn.execute(
+                    """SELECT * FROM daily_performance_grades
+                       WHERE account_key=? AND session_date=? AND strategy_version=?
+                       ORDER BY revision DESC LIMIT 1""",
+                    (account_key, session_date, strategy_version),
+                ).fetchone()
+                if latest is None:
+                    revision = 1
+                else:
+                    raise ValueError(
+                        "a different grade already exists and corrections are disabled"
+                    )
+                self.conn.execute(
+                    """INSERT INTO daily_performance_grades(
+                           grade_id,account_key,session_date,strategy_version,revision,
+                           corrects_grade_id,rubric_version,graded_at,broker_confirmed_at,
+                           recorded_at,payload_hash,payload_json,evidence_coverage_pct,
+                           process_score,outcome_score,raw_overall_score,overall_score,
+                           letter_grade,grade_status,evidence_ceiling,
+                           incomplete_reasons_json,hard_fail,hard_ceiling
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        grade_id, account_key, session_date, strategy_version, revision,
+                        corrects_grade_id, rubric_version, graded_at, broker_confirmed_at,
+                        utc_now(), payload_hash, canonical_json, float(evidence_coverage),
+                        _quantized_score(process_decimal),
+                        _quantized_score(outcome_decimal),
+                        _quantized_score(raw_overall_decimal), overall_score,
+                        letter_grade, grade_status,
+                        (
+                            float(evidence_ceiling_decimal)
+                            if evidence_ceiling_decimal is not None else None
+                        ),
+                        json.dumps(incomplete_reasons, separators=(",", ":")),
+                        int(any(ceiling == 0 for ceiling in active_ceilings)),
+                        float(hard_ceiling_decimal) if hard_ceiling_decimal is not None else None,
+                    ),
+                )
+                exact_id = grade_id
+                replay = False
+        row = self.conn.execute(
+            "SELECT * FROM daily_performance_grades WHERE grade_id=?", (exact_id,)
+        ).fetchone()
+        assert row is not None
+        result = self._performance_grade_item(row)
+        result["idempotent_replay"] = replay
+        return result
+
+    def performance_grade(
+        self,
+        *,
+        grade_id: str | None = None,
+        account_key: str | None = None,
+        session_date: str | None = None,
+        strategy_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        if grade_id:
+            row = self.conn.execute(
+                "SELECT * FROM daily_performance_grades WHERE grade_id=?", (grade_id,)
+            ).fetchone()
+        else:
+            if not account_key or not session_date or not strategy_version:
+                raise ValueError(
+                    "performance grade lookup requires grade_id or account/session/strategy"
+                )
+            row = self.conn.execute(
+                """SELECT * FROM daily_performance_grades
+                   WHERE account_key=? AND session_date=? AND strategy_version=?
+                   ORDER BY revision DESC LIMIT 1""",
+                (account_key, session_date, strategy_version),
+            ).fetchone()
+        return self._performance_grade_item(row) if row else None
+
+    def performance_grades(
+        self,
+        limit: int = 20,
+        *,
+        account_key: str | None = None,
+        session_date: str | None = None,
+        strategy_version: str | None = None,
+        include_revisions: bool = False,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            raise ValueError("performance grade limit must be positive")
+        clauses = []
+        values: list[object] = []
+        for field, value in (
+            ("account_key", account_key),
+            ("session_date", session_date),
+            ("strategy_version", strategy_version),
+        ):
+            if value is not None:
+                clauses.append(f"g.{field}=?")
+                values.append(value)
+        if not include_revisions:
+            clauses.append(
+                """NOT EXISTS (
+                    SELECT 1 FROM daily_performance_grades newer
+                    WHERE newer.account_key=g.account_key
+                      AND newer.session_date=g.session_date
+                      AND newer.strategy_version=g.strategy_version
+                      AND newer.revision>g.revision
+                )"""
+            )
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.conn.execute(
+            f"""SELECT g.* FROM daily_performance_grades g{where}
+                ORDER BY g.session_date DESC,g.recorded_at DESC,g.revision DESC LIMIT ?""",
+            (*values, limit),
+        ).fetchall()
+        return [self._performance_grade_item(row) for row in rows]
 
     def create_entry_plan(self, payload: dict[str, Any]) -> str:
         required = ("trade_date", "symbol", "setup", "lane", "structural_stop", "quantity", "capital")
