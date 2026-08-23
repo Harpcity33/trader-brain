@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-23",
+  "strategy_version": "titan_live_canonical_2026-08-23_v2",
+  "rubric_version": "titan_daily_performance_2026-08-23_v1",
+  "authorization": "explicit_user_standing_post_grade_improvement_authorization_recorded_activation_guard_required",
+  "objective": "Grade Titan every completed trading day, provide falsifiable self-improvement suggestions, and stage only non-authoritative evidence-qualified drafts; production activation remains disabled until a durable guard and single-use activation lease exist.",
+  "canonical_automation": {
+    "path": "config/live-automation/robinhood-momentum-engine.toml",
+    "sha256": "d29102b5cccea99fc195bb55fd46cb3947ec775a72317cf70432ca4316554918",
+    "effective_change_time": "next_new_york_trading_session_only"
+  },
+  "protected_semantics_sha256": "b5904463c93af8314ee1b8dff97e574d8209c4305cafa2a5a00ce53a0fa8ce7a",
+  "daily_grade": {
+    "window_et": "16:10-17:00",
+    "watcher_expected_complete_et": "16:05",
+    "process_weight_pct": 80,
+    "outcome_weight_pct": 20,
+    "minimum_final_evidence_coverage_pct": 80,
+    "minimum_shadow_promotion_evidence_coverage_pct": 95,
+    "minimum_shadow_promotion_process_score": 85,
+    "immutable_append_only": true,
+    "idempotent_exact_replay": true,
+    "corrections_require_superseding_revision": false,
+    "corrections_enabled": false,
+    "corrections_blocked_until_independent_evidence_sealer": true,
+    "broker_pnl_must_match_immutable_risk_snapshot": true,
+    "no_trade_no_qualified_setup_outcome_score": 50,
+    "maximum_improvement_proposals": 3,
+    "zero_proposals_require_nonempty_no_change_reason": true,
+    "report_label": "SELF-REPORTED / NOT INDEPENDENTLY SEALED",
+    "report_change_authority": false,
+    "final_flat_counts_required": [
+      "positions",
+      "working_orders",
+      "working_entry_orders",
+      "working_exit_orders",
+      "active_campaigns",
+      "active_or_consumed_risk_authorizations"
+    ]
+  },
+  "deterministic_formulas": {
+    "account_day_pnl": "current_equity - start_of_day_equity - confirmed_cash_flow_adjustment",
+    "net_r": "account_day_pnl / authorized_filled_risk_dollars",
+    "realized_after_cost_profit_dollars": "max(0, account_day_pnl)",
+    "capture_ratio_pct": "100 * realized_after_cost_profit_dollars / (executed_after_cost_favorable_opportunity_dollars + missed_after_cost_favorable_opportunity_dollars)"
+  },
+  "rubric": {
+    "process": {
+      "account_and_risk_integrity": 25,
+      "execution_and_protection": 15,
+      "causal_data_and_evidence": 15,
+      "opportunity_coverage_and_offense": 15,
+      "entry_quality_and_selectivity": 10,
+      "position_management_and_profit_capture": 12,
+      "audit_and_learning_quality": 8
+    },
+    "outcome": {
+      "broker_net_pnl_vs_objective_and_boundary": 40,
+      "net_r_after_execution_costs": 30,
+      "risk_weighted_after_cost_opportunity_capture": 30
+    }
+  },
+  "hard_grade_states": {
+    "unreconciled_broker_state": "INCOMPLETE",
+    "order_lifecycle_or_quantity_defect_max_score": 59,
+    "unprotected_or_overlapping_exit_or_overnight_max_score": 39,
+    "prohibited_or_unauthorized_action_score": 0,
+    "loss_lock_violation_score": 0,
+    "fabricated_or_future_data_score": 0,
+    "compliant_gap_halt_or_slippage_below_loss_boundary": "outcome_failure_not_automatic_process_violation"
+  },
+  "improvement_tiers": {
+    "IMMEDIATE_SAFE": "Draft-only nonexecutable report formatting, explanatory documentation, or descriptive metadata outside every live decision and deployment path; never automatic production activation.",
+    "SHADOW_FIRST": "Every performance-affecting rule, threshold, ranking, entry, exit, hold, add, sizing, allocation, lane, session, instrument, runner, reentry, rotation, protection, order-type, or eligibility change.",
+    "PROTECTED_USER_ONLY": "Account, broker truth, Massive data-only boundary, loss lock, profit objective/floor, leverage/debit/gross-exposure boundary, average-down and stop-widen bans, overnight boundary, fresh execution evidence, risk authorization, protection, authentication, and prohibited instruments."
+  },
+  "promotion_evidence_thresholds_non_authorizing": {
+    "minimum_distinct_prospective_ticker_sessions": 100,
+    "minimum_trading_sessions": 15,
+    "chronological_holdout_fraction": 0.3,
+    "minimum_holdout_opportunities": 30,
+    "minimum_holdout_sessions": 5,
+    "after_cost_clustered_ci_lower_bound_must_exceed_zero": true,
+    "median_noninferiority_r": -0.05,
+    "p01_max_degradation_r": -0.1,
+    "minimum_consecutive_live_shadow_sessions": 5,
+    "maximum_cohesive_performance_changes_per_session": 1,
+    "independent_adversarial_review_required": true,
+    "production_authority": false,
+    "result_label": "PROMOTION_EVIDENCE_COMPLETE_PENDING_GUARD"
+  },
+  "runtime": {
+    "tables_added": [
+      "daily_performance_grades"
+    ],
+    "cli": [
+      "performance grade FILE",
+      "performance show",
+      "performance list"
+    ],
+    "storage_sha256": "750e311841af208db08dc7a7f763f47ea5b59453c5d757e5900902c84546d090",
+    "cli_sha256": "48e46299621eb18516d240cc37f36db754d64df96308a07bec0a8c854511f6c5",
+    "validator_sha256": "e7015ca07d5174564e689dc24b10671a28e5aba7a009ab1888796add6f53e1ca",
+    "grade_recorder_grants_production_authority": false,
+    "production_activation_guard_installed": false,
+    "post_grade_production_activation": "disabled_until_durable_guard_lease"
+  },
+  "verification": {
+    "unit_tests_status": "58_passed",
+    "automation_toml_parse_status": "passed",
+    "python_compile_status": "passed",
+    "immutable_live_database_replay_status": "passed_39_candidates_zero_trade_authority",
+    "sqlite_quick_check": "passed_after_additive_migration",
+    "live_database_grade_count_after_migration": 0,
+    "live_database_active_campaign_count_after_migration": 0,
+    "live_database_pending_authorization_count_after_migration": 0,
+    "orders_created_during_build": 0
+  },
+  "deployment": {
+    "status": "deployed",
+    "deployed_at": "2026-08-23T16:30:00-04:00",
+    "installed_storage_sha256": "750e311841af208db08dc7a7f763f47ea5b59453c5d757e5900902c84546d090",
+    "installed_cli_sha256": "48e46299621eb18516d240cc37f36db754d64df96308a07bec0a8c854511f6c5",
+    "installed_automation_sha256": "d29102b5cccea99fc195bb55fd46cb3947ec775a72317cf70432ca4316554918",
+    "launch_agent_state_after": "enabled_not_running",
+    "backup_path": "work/deploy-backups/2026-08-23-daily-grade-v1",
+    "post_grade_production_activation": "blocked_without_durable_guard_and_single_use_lease",
+    "future_activation_requires_fresh_read_only_broker_reconciliation": true,
+    "watcher_trade_authority": false,
+    "live_broker_orders_created": 0
+  }
+}
