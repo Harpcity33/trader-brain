@@ -10,11 +10,216 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from titan_runtime.cli import cmd_risk_gate
+from titan_runtime.cli import (
+    build_parser,
+    cmd_performance_grade,
+    cmd_performance_list,
+    cmd_performance_show,
+    cmd_risk_gate,
+)
 from titan_runtime.storage import Store
 
 
 class CliTests(unittest.TestCase):
+    def test_performance_cli_grade_show_and_list(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "test.sqlite3"
+            grade_file = Path(directory) / "grade.json"
+            store = Store(database)
+            store.upsert_risk_session({
+                "account_key": "ending-7153",
+                "session_date": "2026-08-22",
+                "strategy_version": "grade-cli-v1",
+                "start_of_day_equity": 5000,
+                "baseline_confirmed_at": "2026-08-22T13:30:00+00:00",
+                "current_equity": 5010,
+                "realized_net_pnl": 10,
+                "confirmed_cash_flow_adjustment": 0,
+                "broker_confirmed_at": "2026-08-22T20:05:00+00:00",
+                "broker_state": {
+                    "account_state_readable": True,
+                    "orders_reconciled": True,
+                    "positions_reconciled": True,
+                    "unleveraged_buying_power_dollars": 5010,
+                    "current_gross_exposure_dollars": 0,
+                    "working_entry_notional_dollars": 0,
+                    "position_count": 0,
+                    "working_order_count": 0,
+                    "working_entry_order_count": 0,
+                    "working_exit_order_count": 0,
+                },
+            })
+            store.close()
+            payload = {
+                "account_key": "ending-7153",
+                "session_date": "2026-08-22",
+                "strategy_version": "grade-cli-v1",
+                "rubric_version": "titan_daily_performance_2026-08-23_v1",
+                "graded_at": "2026-08-22T20:10:00+00:00",
+                "broker_confirmed_pnl": {
+                    "broker_confirmed_at": "2026-08-22T20:05:00+00:00",
+                    "start_of_day_equity": 5000,
+                    "current_equity": 5010,
+                    "realized_net_pnl": 10,
+                    "confirmed_cash_flow_adjustment": 0,
+                    "account_day_pnl": 10,
+                },
+                "execution_metrics": {
+                    "campaigns_reviewed": 1,
+                    "campaigns_entered": 1,
+                    "campaigns_closed": 1,
+                    "winning_campaigns": 1,
+                    "losing_campaigns": 0,
+                    "orders_submitted": 2,
+                    "orders_filled": 2,
+                    "missed_qualified_setups": 0,
+                    "false_positive_entries": 0,
+                    "qualified_setups": 1,
+                    "mfe_dollars": 15,
+                    "mae_dollars": 5,
+                    "capture_ratio_pct": 66.67,
+                    "average_entry_slippage_bps": 1,
+                    "average_exit_slippage_bps": 1,
+                    "max_protection_latency_seconds": 1,
+                    "authorized_filled_risk_dollars": 20,
+                    "realized_after_cost_profit_dollars": 10,
+                    "executed_after_cost_favorable_opportunity_dollars": 15,
+                    "missed_after_cost_favorable_opportunity_dollars": 0,
+                },
+                "category_scores": {
+                    "account_and_risk_integrity": {
+                        "group": "process", "score": 95, "weight": 25,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["risk"],
+                        },
+                    },
+                    "execution_and_protection": {
+                        "group": "process", "score": 95, "weight": 15,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["orders"],
+                        },
+                    },
+                    "causal_data_and_evidence": {
+                        "group": "process", "score": 95, "weight": 15,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["decisions"],
+                        },
+                    },
+                    "opportunity_coverage_and_offense": {
+                        "group": "process", "score": 95, "weight": 15,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["board"],
+                        },
+                    },
+                    "entry_quality_and_selectivity": {
+                        "group": "process", "score": 95, "weight": 10,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["entries"],
+                        },
+                    },
+                    "position_management_and_profit_capture": {
+                        "group": "process", "score": 95, "weight": 12,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["campaigns"],
+                        },
+                    },
+                    "audit_and_learning_quality": {
+                        "group": "process", "score": 95, "weight": 8,
+                        "applicable": True, "evidence": {
+                            "eligible_items": 20, "passed_items": 19,
+                            "source_ids": ["audit"],
+                        },
+                    },
+                    "broker_net_pnl_vs_objective_and_boundary": {
+                        "group": "outcome", "score": 53.3333, "weight": 40,
+                        "applicable": True, "evidence": ["broker-pnl"],
+                    },
+                    "net_r_after_execution_costs": {
+                        "group": "outcome", "score": 66.6667, "weight": 30,
+                        "applicable": True, "evidence": ["risk"],
+                    },
+                    "risk_weighted_after_cost_opportunity_capture": {
+                        "group": "outcome", "score": 66.6667, "weight": 30,
+                        "applicable": True, "evidence": ["mfe"],
+                    },
+                },
+                "evidence_coverage_pct": 100,
+                "strengths": ["Reconciled every broker order."],
+                "mistakes": ["Exit captured less than all available MFE."],
+                "improvement_proposals": [{
+                    "title": "Measure trigger-to-submit latency",
+                    "causal_problem": "Latency may increase avoidable entry slippage.",
+                    "proposed_change": "Add append-only trigger and submission timestamps.",
+                    "evidence": {"source_ids": ["decisions", "orders"]},
+                    "independent_sample_count": 1,
+                    "independent_session_count": 1,
+                    "expected_primary_metric": "trigger_to_submit_latency_ms",
+                    "possible_adverse_effect": "Additional telemetry could increase log volume.",
+                    "test_horizon": "Five shadow sessions.",
+                    "success_threshold": "At least 95% timestamp coverage.",
+                    "rollback_trigger": "Any live decision-path behavior changes.",
+                    "classification": "IMMEDIATE_SAFE",
+                }],
+                "hard_failures": {
+                    "unreconciled_broker_state": False,
+                    "order_lifecycle_or_quantity_defect": False,
+                    "unprotected_or_overlapping_exit_or_overnight": False,
+                    "prohibited_or_unauthorized_action": False,
+                    "loss_lock_violation": False,
+                    "fabricated_or_future_data": False,
+                },
+                "evidence_manifest": {
+                    "sealed_at": "2026-08-22T20:06:00+00:00",
+                    "eligible_items": 100,
+                    "verified_items": 100,
+                    "source_hashes": {
+                        "risk_snapshot": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "decision_ledger": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    },
+                    "source_record_counts": {"risk_snapshot": 1, "decisions": 1},
+                    "massive_data_watermark": "2026-08-22T20:00:00+00:00",
+                    "decision_watermark": "2026-08-22T19:55:00+00:00"
+                },
+            }
+            grade_file.write_text(json.dumps(payload), encoding="utf-8")
+            config = SimpleNamespace(database_path=database)
+            buffer = StringIO()
+            with patch("titan_runtime.cli.load", return_value=config), redirect_stdout(buffer):
+                self.assertEqual(
+                    cmd_performance_grade(SimpleNamespace(file=str(grade_file))), 0
+                )
+            recorded = json.loads(buffer.getvalue())
+            self.assertEqual(recorded["status"], "immutable_daily_grade_recorded")
+            grade_id = recorded["grade"]["grade_id"]
+
+            buffer = StringIO()
+            with patch("titan_runtime.cli.load", return_value=config), redirect_stdout(buffer):
+                self.assertEqual(cmd_performance_show(SimpleNamespace(
+                    grade_id=grade_id, account_key=None, session_date=None,
+                    strategy_version=None,
+                )), 0)
+            self.assertEqual(json.loads(buffer.getvalue())["grade_id"], grade_id)
+
+            buffer = StringIO()
+            with patch("titan_runtime.cli.load", return_value=config), redirect_stdout(buffer):
+                self.assertEqual(cmd_performance_list(SimpleNamespace(
+                    limit=20, account_key=None, session_date=None,
+                    strategy_version=None, all_revisions=False,
+                )), 0)
+            self.assertEqual(len(json.loads(buffer.getvalue())), 1)
+
+            parser = build_parser()
+            self.assertEqual(
+                parser.parse_args(["performance", "grade", str(grade_file)]).file,
+                str(grade_file),
+            )
+
     def test_risk_gate_requires_exact_fresh_snapshot_and_positive_floor_buffer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "test.sqlite3"
