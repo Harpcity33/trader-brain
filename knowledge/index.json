@@ -58,6 +58,12 @@
       "path": "knowledge/adaptations/2026-08-23-concentrated-capital.json",
       "authorization": "explicit_user_authorization",
       "preserves_newer_live_rules": true
+    },
+    {
+      "date": "2026-08-23",
+      "path": "knowledge/adaptations/2026-08-23-daily-grade-self-improvement.json",
+      "authorization": "explicit_user_standing_post_grade_improvement_authorization",
+      "preserves_newer_live_rules": true
     }
   ]
 }
