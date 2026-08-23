@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 import unittest
 
+from titan_runtime.massive import expand_equity_ticker_types
 from titan_runtime.signals import (
     Bar,
     compute_market_signal,
     detect_controlled_base,
+    relative_volume_context,
     session_lane_context,
     trigger_cross_payload,
 )
@@ -51,6 +53,76 @@ class SignalTests(unittest.TestCase):
         self.assertFalse(signal["catalyst_verified"])
         self.assertEqual(signal["base_high"], 10.74)
         self.assertGreater(signal["dollar_volume"], 10_000_000)
+        self.assertIsNone(signal["relative_volume"])
+        self.assertEqual(signal["relative_volume_quality"], "UNAVAILABLE")
+        self.assertFalse(signal["relative_volume_legacy_full_day_used"])
+
+    def test_exactly_five_dollars_uses_stricter_lane(self) -> None:
+        bars = [replace(item, close=5.0, session_vwap=5.0) for item in self.bars]
+        signal = compute_market_signal(
+            bars,
+            {"prev_close": 4.75, "day_volume": 1_650_000},
+            None,
+            0.9375,
+        )
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        self.assertEqual(signal["lane"], "under5")
+
+    def test_relative_volume_uses_same_minute_median_not_prior_full_day(self) -> None:
+        snapshot = {
+            "prev_close": 9.50,
+            "prev_day_volume": 10_000_000,
+            "day_volume": 1_650_000,
+        }
+        signal = compute_market_signal(
+            self.bars,
+            snapshot,
+            None,
+            0.75,
+            same_minute_cumulative_history=[800_000, 1_000_000, 1_200_000],
+        )
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        self.assertEqual(signal["relative_volume"], 1.65)
+        self.assertEqual(signal["relative_volume_reference_median"], 1_000_000)
+        self.assertEqual(signal["relative_volume_sample_size"], 3)
+        self.assertEqual(signal["relative_volume_quality"], "LOW")
+        self.assertFalse(signal["relative_volume_fallback_used"])
+
+    def test_relative_volume_reports_insufficient_history_without_fallback(self) -> None:
+        context = relative_volume_context(1_500_000, [900_000, 1_100_000])
+        self.assertIsNone(context["relative_volume"])
+        self.assertEqual(context["relative_volume_quality"], "INSUFFICIENT")
+        self.assertEqual(
+            context["relative_volume_fallback_reason"],
+            "insufficient_prior_completed_sessions",
+        )
+        self.assertFalse(context["relative_volume_legacy_full_day_used"])
+
+    def test_emerging_intraday_leader_is_context_not_entry_authority(self) -> None:
+        bars = [replace(item, official_open=10.10) for item in self.bars[:3]]
+        signal = compute_market_signal(
+            bars,
+            {"prev_close": 10.00, "day_open": 10.10},
+            None,
+            0.75,
+            same_minute_cumulative_history=[700_000, 800_000, 900_000],
+        )
+        self.assertIsNotNone(signal)
+        assert signal is not None
+        self.assertTrue(signal["emerging_intraday_leader"])
+        self.assertFalse(signal["emerging_intraday_leader_provisional"])
+        self.assertEqual(
+            signal["emerging_intraday_leader_context"]["role"],
+            "ranking_context_only_never_entry_authority",
+        )
+
+    def test_equity_ticker_types_preserve_companies_and_expand_cef_alias(self) -> None:
+        self.assertEqual(
+            expand_equity_ticker_types(("CS", "ADRC", "ETF", "CEF", "FUND")),
+            ("CS", "ADRC", "ETF", "FUND"),
+        )
 
     def test_downside_mover_is_routed_to_long_put_discovery_only(self) -> None:
         bars = [
@@ -115,7 +187,27 @@ class SignalTests(unittest.TestCase):
         assert payload is not None
         self.assertTrue(payload["volume_pace_expanding"])
         self.assertTrue(payload["price_cross_confirmed"])
+        self.assertFalse(payload["trade_authority"])
         self.assertIn("Observation only", payload["signal_disclaimer"])
+
+    def test_trigger_cross_uses_five_eighth_atr_chase_ceiling(self) -> None:
+        candidate = {
+            "symbol": "TEST", "base_high": 10.0, "short_atr": 1.0,
+            "limit_ceiling": 10.7,
+            "payload_json": '{"pullback_volume_per_second":1000}',
+        }
+        second = {"h": 10.6, "c": 10.6, "v": 2000, "s": 1_700_000_500_000}
+        quote = {
+            "ask": 10.6, "spread_pct": 0.1,
+            "timestamp_ms": 1_700_000_500_000,
+        }
+        payload = trigger_cross_payload(
+            candidate, second, quote, 0.75, now_ms=1_700_000_500_500
+        )
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["chase_extension_limit_atr"], 0.625)
+        self.assertTrue(payload["inside_chase_ceiling"])
 
     def test_trigger_cross_rejects_bar_high_when_live_ask_is_below_trigger(self) -> None:
         candidate = {
