@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-22",
+  "strategy_version": "titan_live_canonical_2026-08-22_v1",
+  "authorization": "explicit_user_authorization",
+  "objective": "Increase qualified live participation and profit capture without increasing the fixed account-day loss boundary.",
+  "canonical_automation": {
+    "path": "config/live-automation/robinhood-momentum-engine.toml",
+    "sha256": "24924ff1d8fa446b1bcf70c3a943ab8a00ba76941ea171f4ea32e4c3fbeccd63",
+    "replaces_amendment_stack": true
+  },
+  "runtime_policy": {
+    "policy_version": "profit_seeking_live_preparation_2026-08-22_v1",
+    "sizing_policy_version": "profit_seeking_sizing_2026-08-22_v1",
+    "prepared_plan_trade_authority": false,
+    "broker_is_source_of_truth": true,
+    "changes": [
+      "Missing catalyst, sector, analog, float, and numeric dilution context is recorded as UNKNOWN instead of becoming an automatic veto.",
+      "Fresh catalyst is not mandatory for the under-$5 lane; verified adverse security evidence remains a hard rejection.",
+      "Reference targets are fixed at 1R, 2R, and 3R and are not capped by the ATR capacity heuristic.",
+      "The reference campaign starts near $15 risk, builds a profitable strengthened thesis toward $20, and permits up to $30 only when exceptional, profit-funded, and inside any stricter instrument-lane ceiling.",
+      "Winner builds use 40/35/25 trigger, profitable-retest, and renewed-expansion stages with open-risk-neutral add requirements.",
+      "Core and 20%-30% runner state is persisted with broker-confirmed lifecycle transitions and immutable original-stop history.",
+      "Causal relative volume uses prior completed sessions at the same local minute and never falls back to prior full-day volume.",
+      "ETFs and fund reference records are included for broker-specific ETF, CEF, and inverse-ETF classification.",
+      "Sub-gap emerging leaders are surfaced as ranking context only and never gain entry authority from the watcher.",
+      "Quantity and 1R/2R/3R references use the worst reviewed entry ceiling rather than the lower trigger price.",
+      "The fixed -$100 loss lock and first +$150 crossing are durable, broker-confirmed session latches with a fail-closed local entry gate.",
+      "Position campaigns preserve append-only broker transition evidence, reject backward state changes, and retain prior campaigns across reentry.",
+      "Active campaigns are exclusive by account and canonical underlying thesis so competing equity, option, or fund expressions cannot coexist accidentally.",
+      "Risk snapshots require an explicit broker-confirmed cash-flow adjustment; a missing value cannot silently become zero.",
+      "LULD events synchronously disarm pre-halt candidates, and the second-aggregate path fails closed until valid post-resumption structure is recomputed.",
+      "Prepared-plan deduplication includes policy, sizing, target, and management versions so legacy plans cannot suppress the new policy.",
+      "Exactly $5.00 remains in the stricter lane; under-$5 liquidity, spread, 0.625-ATR chase, and post-halt rules match the canonical automation.",
+      "Unknown score components are neutralized through covered-weight normalization instead of becoming a hidden zero penalty."
+    ]
+  },
+  "daily_rules": {
+    "profit_objective_dollars": 150,
+    "irreversible_loss_lock_dollars": -100,
+    "post_objective_profit_floor_dollars": 125,
+    "forced_trade_quota": false,
+    "blanket_later_exit_promoted": false
+  },
+  "evidence_boundary": {
+    "validated": [
+      "Causal same-minute relative-volume denominator",
+      "Removal of contradictory context-only blockers",
+      "Fixed reference-target arithmetic",
+      "Prepared-plan and ledger separation from broker authority"
+    ],
+    "live_policy_not_claimed_as_proven_edge": [
+      "40/35/25 winner pyramiding",
+      "Core-plus-runner trim matrix",
+      "Rotation and materially-new-thesis reentry"
+    ],
+    "research_result": "No universal later-exit rule qualified; profit capture remains conditional on structure and execution costs."
+  },
+  "verification": {
+    "unit_tests_passed": 46,
+    "deployed_python_compatibility": true,
+    "immutable_live_database_replay_passed": true,
+    "replay_candidate_count": 39,
+    "replay_trade_authority_count": 0,
+    "orders_created_during_build": 0
+  }
+}
