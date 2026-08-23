@@ -238,6 +238,61 @@ def cmd_changes_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_performance_grade(args: argparse.Namespace) -> int:
+    _, payload, _ = read_input_file(args.file)
+    if payload is None:
+        raise ValueError("daily performance grades must be JSON")
+    store = Store(load(args).database_path)
+    grade = store.record_performance_grade(payload)
+    store.close()
+    output({
+        "status": (
+            "idempotent_daily_grade_replay"
+            if grade["idempotent_replay"]
+            else "immutable_daily_grade_recorded"
+        ),
+        "grade": grade,
+        "automation_change_applied": False,
+    })
+    return 0
+
+
+def cmd_performance_show(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    if args.grade_id:
+        grade = store.performance_grade(grade_id=args.grade_id)
+    else:
+        identity = (args.account_key, args.session_date, args.strategy_version)
+        if not all(identity):
+            store.close()
+            raise ValueError(
+                "performance show requires --grade-id or all of "
+                "--account-key, --session-date, and --strategy-version"
+            )
+        grade = store.performance_grade(
+            account_key=args.account_key,
+            session_date=args.session_date,
+            strategy_version=args.strategy_version,
+        )
+    store.close()
+    output(grade)
+    return 0 if grade is not None else 1
+
+
+def cmd_performance_list(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    grades = store.performance_grades(
+        args.limit,
+        account_key=args.account_key,
+        session_date=args.session_date,
+        strategy_version=args.strategy_version,
+        include_revisions=args.all_revisions,
+    )
+    store.close()
+    output(grades)
+    return 0
+
+
 def cmd_research_plan(args: argparse.Namespace) -> int:
     _, payload, _ = read_input_file(args.file)
     if payload is None:
@@ -727,6 +782,35 @@ def build_parser() -> argparse.ArgumentParser:
     change_list = change_commands.add_parser("list", help="List recent proposals")
     change_list.add_argument("--limit", type=int, default=20)
     change_list.set_defaults(func=cmd_changes_list)
+
+    performance = commands.add_parser(
+        "performance", help="Record and read immutable daily performance grades"
+    )
+    performance_commands = performance.add_subparsers(
+        dest="performance_command", required=True
+    )
+    performance_grade = performance_commands.add_parser(
+        "grade", help="Record one broker-evidence-bound JSON daily grade"
+    )
+    performance_grade.add_argument("file")
+    performance_grade.set_defaults(func=cmd_performance_grade)
+    performance_show = performance_commands.add_parser(
+        "show", help="Show a grade by ID or the canonical account/session/strategy grade"
+    )
+    performance_show.add_argument("--grade-id")
+    performance_show.add_argument("--account-key")
+    performance_show.add_argument("--session-date")
+    performance_show.add_argument("--strategy-version")
+    performance_show.set_defaults(func=cmd_performance_show)
+    performance_list = performance_commands.add_parser(
+        "list", help="List canonical grades, optionally including prior revisions"
+    )
+    performance_list.add_argument("--limit", type=int, default=20)
+    performance_list.add_argument("--account-key")
+    performance_list.add_argument("--session-date")
+    performance_list.add_argument("--strategy-version")
+    performance_list.add_argument("--all-revisions", action="store_true")
+    performance_list.set_defaults(func=cmd_performance_list)
 
     research = commands.add_parser("research", help="Record pre-outcome entry plans and later outcomes")
     research_commands = research.add_subparsers(dest="research_command", required=True)
