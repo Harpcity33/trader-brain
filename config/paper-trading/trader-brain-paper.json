@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "project": "trader_brain_aggressive_paper",
+  "policy_version": "trader_brain_paper_2026-08-23_v1",
+  "source_pr": {
+    "repository": "Harpcity33/trader-brain",
+    "pull_request": 3,
+    "head_commit": "7a893aceb02a4c2c37d8fb6f046924689d2b37ae",
+    "relationship": "paper-specific adaptation; no live authority inherited"
+  },
+  "mode": "paper_only",
+  "authority": {
+    "github_is_source_of_truth": true,
+    "massive_is_primary_structured_market_data": true,
+    "trade_authority": "simulated_paper_orders_only",
+    "live_broker_authority": false,
+    "production_change_authority": false,
+    "research_output_is_evidence_not_instruction": true
+  },
+  "account_model": {
+    "starting_settled_cash_dollars": 500.0,
+    "cash_account_rules": true,
+    "fractional_shares_allowed": true,
+    "same_day_sale_proceeds_reusable": false,
+    "leverage_allowed": false,
+    "margin_borrowing_allowed": false,
+    "default_overnight_hold_allowed": false,
+    "minimum_gross_new_entry_notional_per_trading_day_dollars": 500.0,
+    "deployment_failure_label": "DEPLOYMENT FAILURE",
+    "deployment_requirement_never_authorizes_hindsight_or_fabricated_fills": true,
+    "single_setup_concentration_allowed": true,
+    "forced_diversification": false,
+    "full_initial_allocation_allowed": true,
+    "adds_optional": true
+  },
+  "risk_model": {
+    "notional_and_loss_are_separate": true,
+    "target_total_stop_defined_risk_dollars": 35.0,
+    "target_is_hard_gate": false,
+    "planned_stop_required_before_entry": true,
+    "proposed_risk_formula": "max(stop_defined_loss_including_modeled_execution, conservative_stress_tail_loss)",
+    "stop_defined_loss_formula": "(reviewed_entry_price - structural_stop_price) * quantity + modeled_execution_loss",
+    "spread_to_structural_risk_max": 0.15,
+    "quote_max_age_seconds": 15,
+    "chase_ceiling_short_atr": 0.625,
+    "reference_targets_r": [1, 2, 3],
+    "reference_targets_are_forced_exits": false,
+    "averaging_down_allowed": false,
+    "widen_original_stop_allowed": false,
+    "gap_halt_and_slippage_can_exceed_planned_risk": true
+  },
+  "discovery": {
+    "scan_full_massive_eligible_universe": true,
+    "otc_allowed": false,
+    "core_lane": {
+      "price_strictly_greater_than_dollars": 5.0,
+      "minimum_volume_shares": 750000
+    },
+    "under5_experimental_lane": {
+      "minimum_price_dollars": 1.0,
+      "maximum_price_dollars_inclusive": 5.0,
+      "separate_stricter_liquidity_and_security_risk_review": true,
+      "premarket_entries_allowed": false
+    },
+    "fresh_news_required": false,
+    "score_is_entry_gate": false,
+    "state_is_entry_gate": false,
+    "adverse_security_checks_are_hard_rejections": [
+      "material dilution or toxic financing",
+      "listing or security-status failure",
+      "reverse-split or shell risk when material",
+      "promotion or manipulation evidence",
+      "ineligible security type",
+      "stale or conflicting market data",
+      "unresolved halt or failed resumption structure"
+    ],
+    "entry_rejection_can_remain_on_watch": true,
+    "causal_same_minute_relative_volume_required_when_rvol_is_used": true,
+    "prior_full_day_volume_fallback_allowed": false,
+    "halt_disarms_existing_base": true,
+    "post_halt_requires_materially_new_structure": true
+  },
+  "ranking": {
+    "model_version": "trader_brain_2026-08-22_v2_paper_adaptation",
+    "raw_percentage_gain_is_primary_rank": false,
+    "unknown_inputs": "preserve_as_unknown_and_normalize_over_covered_weight",
+    "evidence_weights": {
+      "catalyst_quality": 0.25,
+      "liquidity": 0.15,
+      "relative_volume": 0.10,
+      "sector_breadth": 0.10,
+      "remaining_move_capacity": 0.20,
+      "technical_structure": 0.10,
+      "historical_follow_through": 0.10
+    },
+    "risk_penalty_weights": {
+      "extension_risk": 0.30,
+      "gap_fade_risk": 0.25,
+      "float_dilution_risk": 0.25,
+      "spread_risk": 0.20
+    },
+    "risk_penalty_multiplier": 0.45,
+    "separate_metrics": [
+      "confidence_score",
+      "remaining_opportunity_score",
+      "structural_risk_score",
+      "evidence_coverage_pct"
+    ],
+    "separate_metrics_are_experimental": true
+  },
+  "entry_protocol": {
+    "decision_must_be_frozen_before_outcome": true,
+    "exact_contemporaneous_trigger_required": true,
+    "bar_high_alone_can_prove_fill": false,
+    "fresh_live_ask_at_or_through_trigger_required": true,
+    "limit_entry_preferred": true,
+    "reviewed_entry_ceiling_drives_quantity_and_r_targets": true,
+    "minimum_structure": "controlled base, reclaim, opening-range break, first controlled pullback, or renewed expansion with structural invalidation",
+    "simulated_order_lifecycle": [
+      "PLANNED",
+      "REVIEWED",
+      "SUBMITTED",
+      "PARTIAL",
+      "FILLED",
+      "PROTECTED",
+      "CLOSING",
+      "CLOSED",
+      "CANCELED",
+      "REJECTED",
+      "NO_FILL"
+    ],
+    "paper_submission_must_precede_simulated_fill": true,
+    "partial_fills_must_be_monotone_and_capped": true,
+    "simulated_fill_must_record_source_quote_and_cost_assumption": true,
+    "retroactive_fill_creation_allowed": false
+  },
+  "counterfactual_entry_protocol": {
+    "enabled": true,
+    "lanes": [
+      "earliest_reasonable_entry",
+      "conservative_confirmation_entry",
+      "selected_paper_entry"
+    ],
+    "freeze_before_outcome": [
+      "timestamp",
+      "price",
+      "trigger",
+      "structural_stop",
+      "quantity",
+      "capital",
+      "spread",
+      "volume",
+      "vwap",
+      "catalyst_state",
+      "decision_time_evidence"
+    ],
+    "attach_only_after_observation_window": [
+      "session_high",
+      "session_low",
+      "mfe",
+      "mae",
+      "hesitation_cost",
+      "confirmation_savings",
+      "lane_pnl",
+      "lane_pnl_r"
+    ],
+    "counterfactual_is_never_a_fill": true
+  },
+  "position_management": {
+    "position_continuation_score_is_experimental": true,
+    "blanket_later_exit_rule_promoted": false,
+    "one_hard_invalidation_or_two_independent_exhaustion_signals": "preferred discretionary exit evidence",
+    "core_runner_management_is_experimental": true,
+    "runner_reference_pct_range": [20, 30],
+    "adds_require_profitable_strengthened_structure": true,
+    "adds_may_not_increase_total_stop_defined_risk_without_explicit_experimental_authorization": true,
+    "all_intraday_positions_closed_by_et": "16:00"
+  },
+  "schedule_et": {
+    "premarket_intelligence": "07:00",
+    "final_plan": "09:15",
+    "hourly_desk": [
+      "10:00",
+      "11:00",
+      "12:00",
+      "13:00",
+      "14:00",
+      "15:00",
+      "16:00"
+    ],
+    "daily_github_handoff": "16:20"
+  },
+  "ledger": {
+    "append_only": true,
+    "separate_from_live": true,
+    "required_records": [
+      "run_manifest",
+      "eligible_universe_summary",
+      "ranked_candidates",
+      "event_decisions",
+      "paper_order_lifecycle",
+      "cash_and_settlement_state",
+      "risk_state",
+      "counterfactual_entry_plan",
+      "counterfactual_outcome",
+      "end_of_day_grade",
+      "missed_opportunities",
+      "hypotheses_and_tests"
+    ],
+    "same_day_sale_proceeds_remain_unsettled_for_new_entries": true,
+    "paper_and_live_totals_may_never_be_merged": true
+  },
+  "daily_grade": {
+    "rubric_version": "trader_brain_paper_daily_2026-08-23_v1",
+    "process_weight_pct": 80,
+    "outcome_weight_pct": 20,
+    "no_trade_outcome_score": 50,
+    "hard_failures": [
+      "fabricated_or_future_data",
+      "retroactive_or_reconstructed_fill",
+      "reuse_of_unsettled_same_day_sale_proceeds",
+      "live_trade_claim_or_live_ledger_contamination",
+      "missing_decision_time_evidence_for_an_entered_trade",
+      "ledger_rewrite_or_deleted_history"
+    ],
+    "process_categories": {
+      "cash_and_risk_integrity": 20,
+      "causal_data_and_evidence": 20,
+      "opportunity_coverage_and_offense": 15,
+      "entry_quality_and_selectivity": 15,
+      "execution_simulation_and_cost_model": 10,
+      "position_management_and_capture": 12,
+      "audit_and_learning_quality": 8
+    },
+    "maximum_improvement_proposals": 3,
+    "improvement_changes_are_never_auto_promoted": true
+  },
+  "change_control": {
+    "classes": [
+      "observation",
+      "hypothesis",
+      "experimental_rule",
+      "validated_rule",
+      "production_rule"
+    ],
+    "paper_project_may_auto_activate_production_rule": false,
+    "minimum_promotion_evidence": {
+      "distinct_prospective_ticker_sessions": 100,
+      "trading_sessions": 15,
+      "chronological_holdout_fraction": 0.30,
+      "minimum_holdout_opportunities": 30,
+      "minimum_holdout_sessions": 5,
+      "after_cost_confidence_interval_lower_bound_must_exceed_zero": true
+    },
+    "single_winner_can_promote_rule": false,
+    "single_loss_can_remove_protection": false
+  }
+}

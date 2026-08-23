@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-23",
+  "adaptation_id": "pr3_to_trader_brain_paper_2026_08_23_v1",
+  "source": {
+    "repository": "Harpcity33/trader-brain",
+    "pull_request": 3,
+    "head_branch": "codex/add-2026-08-20-trader-brain-handoff",
+    "head_commit": "7a893aceb02a4c2c37d8fb6f046924689d2b37ae",
+    "source_status": "open_draft_unmerged"
+  },
+  "target_project": {
+    "name": "Trader Brain aggressive paper trader",
+    "policy_version": "trader_brain_paper_2026-08-23_v1",
+    "mode": "paper_only",
+    "starting_settled_cash_dollars": 500.0,
+    "live_trade_authority": false,
+    "production_change_authority": false
+  },
+  "authorization": "explicit_user_request_to_ingest_compare_and_adapt",
+  "objective": "Import PR #3's strongest causal-data, opportunity-ranking, lifecycle, risk-accounting, and learning controls into the $500 paper experiment without importing live account authority or overwriting the paper cash-account rules.",
+  "accepted_adaptations": [
+    {
+      "id": "full_massive_universe",
+      "category": "data_collection",
+      "rule": "Scan the full Massive eligible universe and preserve run timestamps, universe size, exclusions, failures, and data-quality conditions."
+    },
+    {
+      "id": "causal_same_minute_rvol",
+      "category": "analytics",
+      "rule": "Use prior completed sessions at the same local minute for relative volume; never fall back to prior full-day volume for a partial session."
+    },
+    {
+      "id": "covered_weight_normalization",
+      "category": "analytics",
+      "rule": "Preserve missing inputs as UNKNOWN, publish evidence coverage, and normalize the weighted score over covered weight rather than assigning hidden zero penalties."
+    },
+    {
+      "id": "score_news_state_ranking_only",
+      "category": "scanner_logic",
+      "rule": "Opportunity score, fresh news, and momentum-state labels are ranking/context inputs rather than standalone hard vetoes; adverse security, data, halt, liquidity, and structure failures remain hard gates."
+    },
+    {
+      "id": "remaining_opportunity_priority",
+      "category": "strategy_logic",
+      "rule": "Rank executable remaining opportunity, liquidity, structure, evidence coverage, and structural risk above raw percentage gain."
+    },
+    {
+      "id": "reject_entry_keep_watch",
+      "category": "scanner_logic",
+      "rule": "Separate immediate entry rejection from continued watch eligibility when a liquid leader may form a fresh valid base, reclaim, higher low, or renewed expansion."
+    },
+    {
+      "id": "quote_confirmed_trigger",
+      "category": "execution_logic",
+      "rule": "Do not infer a fill from a bar high. Require a pre-existing paper submission record, fresh observable ask, reviewed limit, chase ceiling, spread-to-risk gate, and contemporaneous trigger evidence."
+    },
+    {
+      "id": "counterfactual_entry_freeze",
+      "category": "analytics",
+      "rule": "Freeze earliest-reasonable, conservative-confirmation, and selected paper entry alternatives before outcomes, then attach MFE, MAE, hesitation cost, and confirmation savings after the observation window."
+    },
+    {
+      "id": "simulated_lifecycle_integrity",
+      "category": "execution_logic",
+      "rule": "Use an append-only simulated PLANNED/REVIEWED/SUBMITTED/PARTIAL/FILLED/PROTECTED/CLOSING/CLOSED lifecycle with terminal CANCELED, REJECTED, and NO_FILL states."
+    },
+    {
+      "id": "notional_vs_downside",
+      "category": "risk_logic",
+      "rule": "Treat paper notional separately from proposed downside, calculated as the worse of stop-defined loss including modeled execution and conservative stress/tail loss."
+    },
+    {
+      "id": "concentrated_capital_permission",
+      "category": "risk_logic",
+      "rule": "Allow the full $500 paper account in one materially best setup without forced diversification; adds remain optional and may never average down."
+    },
+    {
+      "id": "halt_and_health_disarm",
+      "category": "scanner_logic",
+      "rule": "A halt disarms the prior base, resumption requires fresh structure, and stale/disconnected/conflicting data suspend new paper entries."
+    },
+    {
+      "id": "process_weighted_grade",
+      "category": "analytics",
+      "rule": "Grade the paper project 80% process and 20% outcome, with hindsight, fabricated fills, settlement violations, and paper/live contamination as hard failures."
+    },
+    {
+      "id": "evidence_gated_rule_promotion",
+      "category": "strategy_logic",
+      "rule": "Keep observations, hypotheses, experimental rules, validated rules, and production rules separate; require prospective, chronological, cost-aware evidence before promotion."
+    }
+  ],
+  "experimental_only": [
+    {
+      "id": "position_continuation_score",
+      "reason": "Useful for measuring sponsored strength, but its action bands are not validated as a universal paper exit rule."
+    },
+    {
+      "id": "core_runner_management",
+      "reason": "A 20%-30% runner and conditional trims may be tested, but the PR #3 exit study did not validate blanket later exits after costs."
+    },
+    {
+      "id": "earliest_entry_aggression",
+      "reason": "Earlier participation must be compared prospectively with confirmation savings, hesitation cost, spread, slippage, missed fills, and MAE."
+    },
+    {
+      "id": "confidence_remaining_opportunity_structural_risk_triplet",
+      "reason": "The separated metrics improve diagnosis but remain experimental until calibrated against paper outcomes."
+    }
+  ],
+  "preserved_paper_rules": [
+    "Starting settled cash remains $500.",
+    "Gross new-entry notional must reach at least $500 each trading day or the session is labeled DEPLOYMENT FAILURE.",
+    "Same-day sale proceeds cannot be reused for another entry.",
+    "Total stop-defined risk target remains no more than $35 when technically possible; it is not converted into Titan's -$100 live loss lock.",
+    "The paper schedule remains 07:00 intelligence, 09:15 final plan, hourly 10:00-16:00 desk, and 16:20 GitHub handoff.",
+    "Paper fills, cash, settlement, P&L, and performance remain completely separate from live Titan and Robinhood."
+  ],
+  "explicitly_not_adapted": [
+    "Robinhood account identifiers, buying power, order, fill, Level 2, or protection claims",
+    "Titan's +$150 objective, -$100 loss lock, or +$125 post-objective floor",
+    "live broker risk-authorization leases and broker-reconciliation semantics",
+    "Limited Margin, margin, or PDT rules replacing the $500 cash-account model",
+    "automatic production activation after a grade",
+    "live order submission authority",
+    "short stock, option spreads, leverage, or default overnight exposure",
+    "Massive top-of-book represented as Level 2 depth",
+    "superseded fixed campaign caps or mandatory tranches from older playbook versions"
+  ],
+  "implementation": {
+    "paper_policy": "config/paper-trading/trader-brain-paper.json",
+    "comparison_contract": "outputs/trader-brain-paper-vs-titan-live.md",
+    "validator": "titan_runtime/paper_policy.py",
+    "tests": "tests/test_paper_policy.py",
+    "source_live_policy_unchanged": true,
+    "source_pr_merged": false
+  },
+  "evidence_boundary": {
+    "paper_expectancy_validated": false,
+    "live_edge_claimed": false,
+    "paper_fill_is_broker_fill": false,
+    "planned_stop_guarantees_loss_limit": false,
+    "note": "PR #3 contributes architecture and evidence discipline. It does not prove the paper entry strategy, a fixed score threshold, or a universal exit rule."
+  },
+  "rollback": {
+    "paper_policy": "supersede this immutable record and config with a newer version; do not rewrite history",
+    "live_policy": "not modified by this adaptation",
+    "source_change": "re-ingest and compare again whenever PR #3 head changes"
+  }
+}
