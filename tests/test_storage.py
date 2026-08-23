@@ -68,6 +68,204 @@ def risk_authorization(
     return reservation["authorization"]
 
 
+def grade_risk_snapshot(store: Store) -> dict:
+    payload = {
+        "account_key": "ending-7153",
+        "session_date": "2026-08-22",
+        "strategy_version": "grade-test-v1",
+        "start_of_day_equity": 5000,
+        "baseline_confirmed_at": "2026-08-22T13:30:00+00:00",
+        "current_equity": 5020,
+        "realized_net_pnl": 20,
+        "confirmed_cash_flow_adjustment": 0,
+        "broker_confirmed_at": "2026-08-22T20:05:00+00:00",
+        "broker_state": {
+            "account_state_readable": True,
+            "orders_reconciled": True,
+            "positions_reconciled": True,
+            "unleveraged_buying_power_dollars": 5020,
+            "current_gross_exposure_dollars": 0,
+            "working_entry_notional_dollars": 0,
+            "position_count": 0,
+            "working_order_count": 0,
+            "working_entry_order_count": 0,
+            "working_exit_order_count": 0,
+        },
+    }
+    store.upsert_risk_session(payload)
+    return payload
+
+
+def performance_proposal() -> dict:
+    return {
+        "title": "Measure trigger-to-submit latency",
+        "causal_problem": "Latency may increase avoidable entry slippage.",
+        "proposed_change": "Add append-only trigger and submission timestamps.",
+        "evidence": {"source_ids": ["decision-ledger", "order-ledger"]},
+        "independent_sample_count": 2,
+        "independent_session_count": 1,
+        "expected_primary_metric": "trigger_to_submit_latency_ms",
+        "possible_adverse_effect": "Additional telemetry could increase log volume.",
+        "test_horizon": "Five shadow sessions.",
+        "success_threshold": "At least 95% timestamp coverage.",
+        "rollback_trigger": "Any live decision-path behavior changes.",
+        "classification": "IMMEDIATE_SAFE",
+    }
+
+
+def performance_correction(
+    base: dict,
+    corrects_grade_id: str,
+    sequence: int,
+    **overrides: object,
+) -> dict:
+    result = {**base, **overrides}
+    result["corrects_grade_id"] = corrects_grade_id
+    result["correction_reason"] = f"Correction {sequence} uses newly sealed evidence."
+    result["graded_at"] = (
+        datetime.fromisoformat(base["graded_at"]) + timedelta(minutes=sequence)
+    ).isoformat()
+    supplied_manifest = result.get("evidence_manifest", base["evidence_manifest"])
+    source_hashes = dict(supplied_manifest["source_hashes"])
+    source_hashes["correction"] = f"{sequence:064x}"
+    result["evidence_manifest"] = {
+        **supplied_manifest,
+        "sealed_at": (
+            datetime.fromisoformat(base["evidence_manifest"]["sealed_at"])
+            + timedelta(minutes=sequence)
+        ).isoformat(),
+        "source_hashes": source_hashes,
+    }
+    return result
+
+
+def performance_grade_payload() -> dict:
+    return {
+        "account_key": "ending-7153",
+        "session_date": "2026-08-22",
+        "strategy_version": "grade-test-v1",
+        "rubric_version": "titan_daily_performance_2026-08-23_v1",
+        "graded_at": "2026-08-22T20:10:00+00:00",
+        "broker_confirmed_pnl": {
+            "broker_confirmed_at": "2026-08-22T20:05:00+00:00",
+            "start_of_day_equity": 5000,
+            "current_equity": 5020,
+            "realized_net_pnl": 20,
+            "confirmed_cash_flow_adjustment": 0,
+            "account_day_pnl": 20,
+        },
+        "execution_metrics": {
+            "campaigns_reviewed": 4,
+            "campaigns_entered": 2,
+            "campaigns_closed": 2,
+            "winning_campaigns": 1,
+            "losing_campaigns": 1,
+            "orders_submitted": 6,
+            "orders_filled": 6,
+            "missed_qualified_setups": 1,
+            "false_positive_entries": 1,
+            "qualified_setups": 3,
+            "mfe_dollars": 50,
+            "mae_dollars": 25,
+            "capture_ratio_pct": 40,
+            "average_entry_slippage_bps": 2.5,
+            "average_exit_slippage_bps": 3.0,
+            "max_protection_latency_seconds": 1.2,
+            "authorized_filled_risk_dollars": 40,
+            "realized_after_cost_profit_dollars": 20,
+            "executed_after_cost_favorable_opportunity_dollars": 40,
+            "missed_after_cost_favorable_opportunity_dollars": 10,
+        },
+        "category_scores": {
+            "account_and_risk_integrity": {
+                "group": "process", "score": 90, "weight": 25,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["risk-snapshot"],
+                },
+            },
+            "execution_and_protection": {
+                "group": "process", "score": 90, "weight": 15,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["order-ledger"],
+                },
+            },
+            "causal_data_and_evidence": {
+                "group": "process", "score": 90, "weight": 15,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["decision-ledger"],
+                },
+            },
+            "opportunity_coverage_and_offense": {
+                "group": "process", "score": 90, "weight": 15,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["board-audit"],
+                },
+            },
+            "entry_quality_and_selectivity": {
+                "group": "process", "score": 90, "weight": 10,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["entry-reviews"],
+                },
+            },
+            "position_management_and_profit_capture": {
+                "group": "process", "score": 90, "weight": 12,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["campaign-events"],
+                },
+            },
+            "audit_and_learning_quality": {
+                "group": "process", "score": 90, "weight": 8,
+                "applicable": True, "evidence": {
+                    "eligible_items": 10, "passed_items": 9,
+                    "source_ids": ["sealed-manifest"],
+                },
+            },
+            "broker_net_pnl_vs_objective_and_boundary": {
+                "group": "outcome", "score": 56.6667, "weight": 40,
+                "applicable": True, "evidence": ["broker P&L"],
+            },
+            "net_r_after_execution_costs": {
+                "group": "outcome", "score": 66.6667, "weight": 30,
+                "applicable": True, "evidence": ["authorized risk"],
+            },
+            "risk_weighted_after_cost_opportunity_capture": {
+                "group": "outcome", "score": 40, "weight": 30,
+                "applicable": True, "evidence": ["MFE and fills"],
+            },
+        },
+        "evidence_coverage_pct": 100,
+        "strengths": ["Loss lock and broker reconciliation were respected."],
+        "mistakes": ["One qualified setup was missed."],
+        "improvement_proposals": [performance_proposal()],
+        "hard_failures": {
+            "unreconciled_broker_state": False,
+            "order_lifecycle_or_quantity_defect": False,
+            "unprotected_or_overlapping_exit_or_overnight": False,
+            "prohibited_or_unauthorized_action": False,
+            "loss_lock_violation": False,
+            "fabricated_or_future_data": False,
+        },
+        "evidence_manifest": {
+            "sealed_at": "2026-08-22T20:06:00+00:00",
+            "eligible_items": 100,
+            "verified_items": 100,
+            "source_hashes": {
+                "risk_snapshot": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "decision_ledger": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "source_record_counts": {"risk_snapshot": 1, "decisions": 12},
+            "massive_data_watermark": "2026-08-22T20:00:00+00:00",
+            "decision_watermark": "2026-08-22T19:55:00+00:00"
+        },
+    }
+
+
 class StorageTests(unittest.TestCase):
     def test_eligible_universe_and_plan_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1042,6 +1240,331 @@ class StorageTests(unittest.TestCase):
                 ValueError, "confirmed_cash_flow_adjustment"
             ):
                 store.upsert_risk_session(payload)
+            store.close()
+
+    def test_daily_performance_grade_is_idempotent_append_only_and_revisioned(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            risk_snapshot = grade_risk_snapshot(store)
+            payload = performance_grade_payload()
+
+            first = store.record_performance_grade(payload)
+            self.assertFalse(first["idempotent_replay"])
+            self.assertEqual(first["revision"], 1)
+            self.assertEqual(first["process_score"], 90)
+            self.assertEqual(first["outcome_score"], 54.6667)
+            self.assertEqual(first["raw_overall_score"], 82.9333)
+            self.assertEqual(first["overall_score"], 82.9333)
+            self.assertEqual(first["letter_grade"], "B-")
+            self.assertEqual(first["grade_status"], "FINAL")
+            self.assertTrue(first["is_canonical"])
+            self.assertFalse(first["authoritative_evidence_verified"])
+            self.assertFalse(first["evidence_sufficient_for_change_evaluation"])
+            self.assertFalse(first["change_authority"])
+
+            replay = store.record_performance_grade(payload)
+            self.assertTrue(replay["idempotent_replay"])
+            self.assertEqual(replay["grade_id"], first["grade_id"])
+            self.assertEqual(replay["revision"], 1)
+
+            with self.assertRaisesRegex(ValueError, "corrections are disabled"):
+                store.record_performance_grade({**payload, "notes": "different"})
+
+            with self.assertRaisesRegex(ValueError, "corrections are disabled"):
+                store.record_performance_grade(performance_correction(
+                    payload,
+                    first["grade_id"],
+                    1,
+                    notes="New evidence arrived after sealing.",
+                ))
+            self.assertEqual(len(store.performance_grades()), 1)
+            self.assertEqual(len(store.performance_grades(include_revisions=True)), 1)
+            self.assertEqual(
+                store.performance_grade(
+                    account_key="ending-7153",
+                    session_date="2026-08-22",
+                    strategy_version="grade-test-v1",
+                )["grade_id"],
+                first["grade_id"],
+            )
+            with self.assertRaisesRegex(Exception, "append-only"):
+                store.conn.execute(
+                    "UPDATE daily_performance_grades SET rubric_version='x' WHERE grade_id=?",
+                    (first["grade_id"],),
+                )
+            with self.assertRaisesRegex(Exception, "append-only"):
+                store.conn.execute(
+                    "DELETE FROM daily_performance_grades WHERE grade_id=?",
+                    (first["grade_id"],),
+                )
+            store.upsert_risk_session({
+                **risk_snapshot,
+                "broker_confirmed_at": "2026-08-22T20:07:00+00:00",
+            })
+            advanced_state_replay = store.record_performance_grade(payload)
+            self.assertTrue(advanced_state_replay["idempotent_replay"])
+            self.assertEqual(advanced_state_replay["grade_id"], first["grade_id"])
+            self.assertEqual(len(store.performance_grades(include_revisions=True)), 1)
+            self.assertFalse(advanced_state_replay["change_authority"])
+            store.close()
+
+    def test_daily_grade_evidence_and_safety_ceilings_fail_closed(self) -> None:
+        payload = performance_grade_payload()
+
+        def record_variant(candidate: dict) -> dict:
+            with tempfile.TemporaryDirectory() as directory:
+                store = Store(Path(directory) / "test.sqlite3")
+                grade_risk_snapshot(store)
+                grade = store.record_performance_grade(candidate)
+                store.close()
+                return grade
+
+        low_confidence = record_variant({
+            **payload,
+            "evidence_coverage_pct": 90,
+            "evidence_manifest": {
+                **payload["evidence_manifest"], "verified_items": 90,
+            },
+        })
+        self.assertEqual(low_confidence["grade_status"], "FINAL")
+        self.assertEqual(low_confidence["evidence_ceiling"], 69)
+        self.assertEqual(low_confidence["overall_score"], 69)
+        self.assertEqual(low_confidence["letter_grade"], "D")
+        self.assertFalse(low_confidence["evidence_sufficient_for_change_evaluation"])
+
+        early_incomplete = {
+            **payload,
+            "broker_confirmed_pnl": None,
+            "hard_failures": {
+                **payload["hard_failures"],
+                "unreconciled_broker_state": True,
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "may not be sealed before 17:00"):
+            record_variant(early_incomplete)
+        incomplete = record_variant({
+            **early_incomplete,
+            "graded_at": "2026-08-22T21:00:00+00:00",
+        })
+        self.assertEqual(incomplete["grade_status"], "INCOMPLETE")
+        self.assertIsNone(incomplete["overall_score"])
+        self.assertIn("final_broker_confirmed_pnl_missing", incomplete["incomplete_reasons"])
+        self.assertIn("broker_state_unreconciled", incomplete["incomplete_reasons"])
+
+        lifecycle_failure = record_variant({
+            **payload,
+            "hard_failures": {
+                **payload["hard_failures"],
+                "order_lifecycle_or_quantity_defect": True,
+            },
+        })
+        self.assertEqual(lifecycle_failure["hard_ceiling"], 59)
+        self.assertEqual(lifecycle_failure["overall_score"], 59)
+
+        protection_failure = record_variant({
+            **payload,
+            "hard_failures": {
+                **payload["hard_failures"],
+                "unprotected_or_overlapping_exit_or_overnight": True,
+            },
+        })
+        self.assertEqual(protection_failure["hard_ceiling"], 39)
+        self.assertEqual(protection_failure["overall_score"], 39)
+
+        safety_failure = record_variant({
+            **payload,
+            "hard_failures": {
+                **payload["hard_failures"],
+                "loss_lock_violation": True,
+            },
+        })
+        self.assertEqual(safety_failure["overall_score"], 0)
+        self.assertEqual(safety_failure["letter_grade"], "F")
+        self.assertTrue(safety_failure["hard_fail"])
+
+        invalid_score = {
+            **payload,
+            "category_scores": {
+                **payload["category_scores"],
+                "execution_and_protection": {
+                    **payload["category_scores"]["execution_and_protection"],
+                    "score": 100.01,
+                },
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "within 0..100"):
+            record_variant(invalid_score)
+
+        with self.assertRaisesRegex(ValueError, "must contain exactly"):
+            record_variant({
+                **payload,
+                "hard_failures": {
+                    "unreconciled_broker_state": False,
+                    "loss_lock_violation": False,
+                },
+            })
+
+        with self.assertRaisesRegex(ValueError, "positive broker account-day P&L"):
+            record_variant({
+                **payload,
+                "broker_confirmed_pnl": {
+                    **payload["broker_confirmed_pnl"],
+                    "current_equity": 5021,
+                    "account_day_pnl": 21,
+                },
+            })
+
+    def test_compliant_gap_loss_does_not_infer_a_hard_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            store.upsert_risk_session({
+                "account_key": "ending-7153",
+                "session_date": "2026-08-22",
+                "strategy_version": "gap-loss-test-v1",
+                "start_of_day_equity": 5000,
+                "baseline_confirmed_at": "2026-08-22T13:30:00+00:00",
+                "current_equity": 4880,
+                "realized_net_pnl": -120,
+                "confirmed_cash_flow_adjustment": 0,
+                "broker_confirmed_at": "2026-08-22T20:05:00+00:00",
+                "broker_state": {
+                    "account_state_readable": True,
+                    "orders_reconciled": True,
+                    "positions_reconciled": True,
+                    "unleveraged_buying_power_dollars": 4880,
+                    "current_gross_exposure_dollars": 0,
+                    "working_entry_notional_dollars": 0,
+                    "position_count": 0,
+                    "working_order_count": 0,
+                    "working_entry_order_count": 0,
+                    "working_exit_order_count": 0,
+                },
+            })
+            base = performance_grade_payload()
+            payload = {
+                **base,
+                "strategy_version": "gap-loss-test-v1",
+                "broker_confirmed_pnl": {
+                    **base["broker_confirmed_pnl"],
+                    "current_equity": 4880,
+                    "realized_net_pnl": -120,
+                    "account_day_pnl": -120,
+                },
+                "category_scores": {
+                    **base["category_scores"],
+                    "broker_net_pnl_vs_objective_and_boundary": {
+                        **base["category_scores"]["broker_net_pnl_vs_objective_and_boundary"],
+                        "score": 0,
+                    },
+                    "net_r_after_execution_costs": {
+                        **base["category_scores"]["net_r_after_execution_costs"],
+                        "score": 0,
+                    },
+                    "risk_weighted_after_cost_opportunity_capture": {
+                        **base["category_scores"]["risk_weighted_after_cost_opportunity_capture"],
+                        "score": 0,
+                    },
+                },
+                "execution_metrics": {
+                    **base["execution_metrics"],
+                    "capture_ratio_pct": 0,
+                    "realized_after_cost_profit_dollars": 0,
+                },
+                "mistakes": [
+                    "A compliant stop experienced gap-through loss; no post-lock order occurred."
+                ],
+            }
+            grade = store.record_performance_grade(payload)
+            self.assertEqual(grade["broker_confirmed_pnl"]["account_day_pnl"], -120)
+            self.assertIsNone(grade["hard_ceiling"])
+            self.assertFalse(grade["hard_fail"])
+            self.assertGreater(grade["overall_score"], 0)
+            store.close()
+
+    def test_change_evaluation_requires_process_score_of_at_least_85(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            grade_risk_snapshot(store)
+            base = performance_grade_payload()
+            low_process_categories = {}
+            for name, category in base["category_scores"].items():
+                if category["group"] == "process":
+                    low_process_categories[name] = {
+                        **category,
+                        "score": 84,
+                        "evidence": {
+                            "eligible_items": 100, "passed_items": 84,
+                            "source_ids": [f"{name}-audit"],
+                        },
+                    }
+                else:
+                    low_process_categories[name] = category
+            grade = store.record_performance_grade({
+                **base,
+                "category_scores": low_process_categories,
+            })
+            self.assertEqual(grade["grade_status"], "FINAL")
+            self.assertEqual(grade["evidence_coverage_pct"], 100)
+            self.assertIsNone(grade["hard_ceiling"])
+            self.assertFalse(grade["evidence_sufficient_for_change_evaluation"])
+            store.close()
+
+    def test_daily_grade_requires_terminal_broker_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            risk = grade_risk_snapshot(store)
+            store.close()
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            store.upsert_risk_session({
+                **risk,
+                "broker_state": {
+                    **risk["broker_state"],
+                    "working_exit_order_count": 1,
+                },
+            })
+            with self.assertRaisesRegex(ValueError, "not terminal: working_exit_order_count"):
+                store.record_performance_grade(performance_grade_payload())
+            store.close()
+
+    def test_daily_grade_allows_an_evidence_backed_no_change_day(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            grade_risk_snapshot(store)
+            base = performance_grade_payload()
+            grade = store.record_performance_grade({
+                **base,
+                "improvement_proposals": [],
+                "no_change_reason": (
+                    "No causal defect or sufficiently supported improvement hypothesis "
+                    "was found in the sealed evidence."
+                ),
+            })
+            self.assertEqual(grade["improvement_proposals"], [])
+            self.assertIn("No causal defect", grade["no_change_reason"])
+            self.assertFalse(grade["change_authority"])
+            store.close()
+
+    def test_strategy_change_proposal_cannot_self_approve(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            proposal = {
+                "title": "Shadow telemetry experiment",
+                "change_class": "experimental_rule",
+                "category": "analytics",
+                "evidence": {"grade_id": "grade-1"},
+                "expected_effect": "Improve measurement coverage.",
+            }
+            with self.assertRaisesRegex(ValueError, "must start as proposed"):
+                store.propose_strategy_change({**proposal, "status": "approved"})
+            with self.assertRaisesRegex(ValueError, "cannot self-assert"):
+                store.propose_strategy_change({**proposal, "production_approved": True})
+            change_id = store.propose_strategy_change(proposal)
+            stored = store.strategy_changes()[0]
+            self.assertEqual(stored["change_id"], change_id)
+            self.assertEqual(stored["status"], "proposed")
+            self.assertFalse(stored["production_approved"])
             store.close()
 
 
