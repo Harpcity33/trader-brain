@@ -3,6 +3,8 @@ from __future__ import annotations
 from math import floor
 from typing import Any
 
+from .config import SizingPolicy
+
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
@@ -28,7 +30,7 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
 
     liquidity = _clamp(dollar_volume / 25_000_000 * 100)
     if spread_pct is not None:
-        lane_limit = 0.75 if signal.get("lane") == "under5" else 0.35
+        lane_limit = 0.9375 if signal.get("lane") == "under5" else 0.35
         liquidity *= _clamp(1.0 - float(spread_pct) / max(lane_limit, 0.01), 0.0, 1.0)
         liquidity = _clamp(liquidity)
     relative = _scale(relative_volume, 5.0)
@@ -63,12 +65,16 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
         "historical_follow_through": 0.10,
     }
     known_weight = sum(weights[key] for key, value in factors.items() if value is not None)
-    base = sum(weights[key] * float(value or 0) for key, value in factors.items())
+    covered_contribution = sum(
+        weights[key] * float(value)
+        for key, value in factors.items()
+        if value is not None
+    )
 
     extension_risk = _clamp(extension_atr / 4.0 * 100)
     spread_risk = None
     if spread_pct is not None:
-        lane_limit = 0.75 if signal.get("lane") == "under5" else 0.35
+        lane_limit = 0.9375 if signal.get("lane") == "under5" else 0.35
         spread_risk = _clamp(float(spread_pct) / lane_limit * 100)
     penalties: dict[str, float | None] = {
         "extension_risk": round(extension_risk, 2),
@@ -82,11 +88,23 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
         "float_dilution_risk": 0.25,
         "spread_risk": 0.20,
     }
-    penalty = sum(
-        penalty_weights[key] * float(value or 0) for key, value in penalties.items()
+    known_penalty_weight = sum(
+        penalty_weights[key] for key, value in penalties.items() if value is not None
     )
-    final_score = _clamp(base - 0.45 * penalty)
-    available_score = _clamp(base / known_weight) if known_weight else 0.0
+    covered_penalty = sum(
+        penalty_weights[key] * float(value)
+        for key, value in penalties.items()
+        if value is not None
+    )
+    available_score = (
+        _clamp(covered_contribution / known_weight) if known_weight else 0.0
+    )
+    available_penalty = (
+        _clamp(covered_penalty / known_penalty_weight)
+        if known_penalty_weight
+        else 0.0
+    )
+    final_score = _clamp(available_score - 0.45 * available_penalty)
 
     price = float(signal.get("price") or 0)
     atr = float(signal.get("short_atr") or 0)
@@ -97,12 +115,15 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
     )
     signal.update(
         {
-            "weighted_scale_version": "trader_brain_2026-08-20_v1",
+            "weighted_scale_version": "trader_brain_2026-08-22_v2",
             "weighted_factors": factors,
             "weighted_penalties": penalties,
             "weighted_opportunity_score": round(final_score, 2),
             "available_evidence_score": round(available_score, 2),
+            "available_risk_score": round(available_penalty, 2),
+            "raw_covered_contribution_score": round(covered_contribution, 2),
             "weighted_evidence_coverage_pct": round(known_weight * 100, 1),
+            "weighted_risk_coverage_pct": round(known_penalty_weight * 100, 1),
             "missing_weighted_inputs": [key for key, value in factors.items() if value is None]
             + [key for key, value in penalties.items() if value is None],
             "modeled_move_capacity_pct": (
@@ -116,19 +137,42 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
     return signal
 
 
-def build_preliminary_trade_plan(signal: dict[str, Any]) -> dict[str, Any]:
+def _resolve_sizing_policy(config: Any | None) -> tuple[SizingPolicy, str, str | None]:
+    if isinstance(config, SizingPolicy):
+        return config, "profit_seeking_live_preparation_2026-08-22_v1", None
+    if config is not None and isinstance(getattr(config, "sizing_policy", None), SizingPolicy):
+        return (
+            config.sizing_policy,
+            str(getattr(config, "policy_version", "unversioned")),
+            getattr(config, "supersedes_policy_version", None),
+        )
+    return (
+        SizingPolicy.defaults(),
+        "profit_seeking_live_preparation_2026-08-22_v1",
+        None,
+    )
+
+
+def build_preliminary_trade_plan(
+    signal: dict[str, Any], config: Any | None = None
+) -> dict[str, Any]:
+    sizing, policy_version, supersedes_policy_version = _resolve_sizing_policy(config)
     symbol = str(signal["symbol"])
     direction = str(signal.get("direction") or "UP")
     lane = str(signal.get("lane") or "regular_equity")
     trigger = signal.get("base_high")
     stop = signal.get("invalidation")
     blockers = list(signal.get("entry_rejection_reasons") or [])
+    context_missing = sorted(set(signal.get("missing_weighted_inputs") or []))
+    context_notes: list[str] = []
     if direction == "DOWN":
         blockers.append("exact long-put contract, chain liquidity, debit and option stop are unresolved")
     if lane == "under5":
-        blockers.append("fresh independently verified catalyst and under-$5 compliance checks required")
-    for item in signal.get("missing_weighted_inputs") or []:
-        blockers.append(f"weighted input unresolved: {item}")
+        context_notes.append(
+            "Fresh catalyst is useful context but is not an unconditional eligibility gate; "
+            "adverse filing, dilution, listing, manipulation, promotion, and security-status "
+            "checks still apply."
+        )
     if not trigger or stop is None:
         blockers.append("controlled base trigger and structural invalidation are not complete")
     if signal.get("exhaustion_lock"):
@@ -139,21 +183,44 @@ def build_preliminary_trade_plan(signal: dict[str, Any]) -> dict[str, Any]:
         blockers.append("live spread/liquidity gate unresolved")
 
     risk_per_share = None
+    reference_entry_price = None
     t1 = None
     t2 = None
+    t3 = None
     quantity_cap = 0
-    allocation_cap = 400.0 if lane == "under5" else 700.0
-    planned_risk_cap = 12.0 if lane == "under5" else 20.0
-    if direction == "UP" and trigger and stop is not None and float(trigger) > float(stop):
-        risk_per_share = float(trigger) - float(stop)
-        capacity_pct = float(signal.get("modeled_move_capacity_pct") or 0)
-        capacity_price = float(trigger) * (1 + capacity_pct / 100)
-        t1 = float(trigger) + risk_per_share
-        t2 = min(float(trigger) + 2 * risk_per_share, capacity_price) if capacity_price > t1 else t1
-        entry_ceiling = float(signal.get("limit_ceiling") or trigger)
+    if lane == "under5":
+        sizing_tier = "under5_initial_probe"
+        allocation_cap = sizing.under5_allocation_ceiling
+        lane_risk_ceiling = sizing.under5_risk_ceiling
+    else:
+        sizing_tier = "initial_probe"
+        allocation_cap = sizing.probe_allocation_cap
+        lane_risk_ceiling = sizing.regular_risk_ceiling
+    planned_risk_cap = min(
+        sizing.probe_risk_cap,
+        sizing.initial_risk,
+        lane_risk_ceiling,
+    )
+    if direction == "UP" and trigger and stop is not None:
+        reference_entry_price = max(
+            float(trigger),
+            float(signal.get("limit_ceiling") or trigger),
+        )
+    if (
+        direction == "UP"
+        and reference_entry_price is not None
+        and reference_entry_price > float(stop)
+    ):
+        risk_per_share = reference_entry_price - float(stop)
+        t1 = reference_entry_price + risk_per_share
+        t2 = reference_entry_price + 2 * risk_per_share
+        t3 = reference_entry_price + 3 * risk_per_share
         quantity_cap = max(
             0,
-            min(floor(allocation_cap / entry_ceiling), floor(planned_risk_cap / risk_per_share)),
+            min(
+                floor(allocation_cap / reference_entry_price),
+                floor(planned_risk_cap / risk_per_share),
+            ),
         )
         if quantity_cap < 1:
             blockers.append("one whole share cannot fit preliminary allocation/risk caps")
@@ -163,8 +230,28 @@ def build_preliminary_trade_plan(signal: dict[str, Any]) -> dict[str, Any]:
         status = "WATCH_ONLY"
     if direction == "DOWN":
         status = "UNDERLYING_WATCH_ONLY"
+    build_tranches = [
+        {
+            "stage": stage,
+            "allocation_pct": percentage,
+            "condition": condition,
+        }
+        for stage, percentage, condition in zip(
+            ("trigger", "profitable_retest", "renewed_expansion"),
+            sizing.build_tranches_pct,
+            (
+                "exact contemporaneous trigger and every execution gate passes",
+                "position is profitable and a completed hold, higher low, or retest confirms",
+                "renewed price and volume expansion forms from strengthened structure",
+            ),
+        )
+    ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "policy_version": policy_version,
+        "supersedes_policy_version": supersedes_policy_version,
+        "sizing_policy_version": sizing.version,
+        "weighted_scale_version": signal.get("weighted_scale_version"),
         "symbol": symbol,
         "observed_at": signal["observed_at"],
         "status": status,
@@ -177,21 +264,73 @@ def build_preliminary_trade_plan(signal: dict[str, Any]) -> dict[str, Any]:
         "modeled_move_capacity_pct": signal.get("modeled_move_capacity_pct"),
         "trigger": trigger,
         "review_limit_ceiling": signal.get("limit_ceiling"),
+        "reference_entry_price": (
+            round(reference_entry_price, 6)
+            if reference_entry_price is not None
+            else None
+        ),
         "structural_stop": stop,
         "risk_per_share": round(risk_per_share, 6) if risk_per_share is not None else None,
         "t1": round(t1, 6) if t1 is not None else None,
         "t2": round(t2, 6) if t2 is not None else None,
+        "t3": round(t3, 6) if t3 is not None else None,
+        "targets": [
+            {"name": "T1", "r_multiple": 1, "price": round(t1, 6) if t1 is not None else None},
+            {"name": "T2", "r_multiple": 2, "price": round(t2, 6) if t2 is not None else None},
+            {"name": "T3", "r_multiple": 3, "price": round(t3, 6) if t3 is not None else None},
+        ],
+        "sizing_tier": sizing_tier,
         "preliminary_quantity_cap": quantity_cap,
         "preliminary_allocation_cap": allocation_cap,
         "preliminary_risk_cap": planned_risk_cap,
+        "normal_regular_allocation_ceiling": sizing.regular_allocation_ceiling,
+        "configured_regular_hard_risk_ceiling": sizing.regular_risk_ceiling,
+        "under5_allocation_ceiling": sizing.under5_allocation_ceiling,
+        "under5_risk_ceiling": sizing.under5_risk_ceiling,
+        "risk_campaign": {
+            "reference_risk_unit": sizing.reference_risk_unit,
+            "initial_risk": sizing.initial_risk,
+            "normal_campaign_risk": min(
+                sizing.reference_risk_unit, lane_risk_ceiling
+            ),
+            "strengthened_winner_risk_cap": min(
+                sizing.strengthened_winner_risk_cap, lane_risk_ceiling
+            ),
+            "lane_risk_ceiling": lane_risk_ceiling,
+            "profit_funded_only": True,
+            "open_risk_neutral_adds_only": True,
+            "reference_only": True,
+        },
+        "build_tranches_pct": list(sizing.build_tranches_pct),
+        "build_tranches": build_tranches,
+        "core_runner_policy": {
+            "at_1r": "no_automatic_trim; protect only at valid higher structure",
+            "at_2r_dominant_expanding_trim_pct": [0, 15],
+            "at_2r_healthy_opportunity_trim_pct": [25, 33],
+            "extended_or_vulnerable_trim_pct": 50,
+            "runner_pct": [20, 30],
+            "runner_exit": "hard failure, broken continuation, or mandatory closeout",
+            "reference_only": True,
+        },
+        "add_policy": {
+            "profit_funded": True,
+            "open_risk_neutral": True,
+            "requires_profitable_strengthened_structure": True,
+            "may_not_widen_original_catastrophe_stop": True,
+            "reference_only": True,
+        },
         "blockers": sorted(set(blockers)),
+        "context_missing": context_missing,
+        "context_notes": context_notes,
         "skip_conditions": [
             "support or structural stop fails",
             "spread/depth deteriorates",
             "price exceeds chase ceiling",
             "volume pace fails",
             "exhaustion cluster or halt appears",
-            "filing, catalyst, dilution, manipulation, eligibility, broker or risk checks fail",
+            "verified catalyst is contradicted or invalidated",
+            "adverse filing, dilution, manipulation, promotion, listing, security-status, "
+            "eligibility, broker, or risk check fails",
         ],
         "trade_authority": False,
         "broker_review_complete": False,
