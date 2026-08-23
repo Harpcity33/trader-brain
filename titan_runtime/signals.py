@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
-from statistics import mean
+from math import isfinite
+from statistics import mean, median
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
@@ -43,6 +44,75 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 def _safe_ratio(numerator: float, denominator: float, default: float = 0.0) -> float:
     return numerator / denominator if denominator else default
+
+
+def relative_volume_context(
+    accumulated_volume: float,
+    same_minute_cumulative_history: Sequence[float] | None,
+    *,
+    minimum_sessions: int = 3,
+) -> dict[str, Any]:
+    """Calculate causal RVOL against prior sessions at the same local minute.
+
+    A prior *full-day* volume is not a valid denominator for a partial current
+    session.  Callers must supply cumulative volumes from prior completed
+    sessions observed at the same wall-clock minute.  When that history is not
+    available, RVOL stays unknown and the result explains why; it never falls
+    back to the legacy biased comparison.
+    """
+    if minimum_sessions < 1:
+        raise ValueError("minimum_sessions must be positive")
+
+    valid_history: list[float] = []
+    if same_minute_cumulative_history is not None:
+        for raw_value in same_minute_cumulative_history:
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if isfinite(value) and value > 0:
+                valid_history.append(value)
+
+    sample_size = len(valid_history)
+    reference_median = median(valid_history) if valid_history else None
+    current_volume = float(accumulated_volume or 0)
+    relative_volume: float | None = None
+    missing_reason: str | None = None
+
+    if same_minute_cumulative_history is None:
+        quality = "UNAVAILABLE"
+        missing_reason = "same_minute_history_not_supplied"
+    elif sample_size < minimum_sessions:
+        quality = "INSUFFICIENT"
+        missing_reason = "insufficient_prior_completed_sessions"
+    elif not isfinite(current_volume) or current_volume < 0:
+        quality = "UNAVAILABLE"
+        missing_reason = "current_accumulated_volume_invalid"
+    elif reference_median is None or reference_median <= 0:
+        quality = "UNAVAILABLE"
+        missing_reason = "same_minute_reference_volume_invalid"
+    else:
+        relative_volume = current_volume / reference_median
+        if sample_size >= 20:
+            quality = "HIGH"
+        elif sample_size >= 10:
+            quality = "MEDIUM"
+        else:
+            quality = "LOW"
+
+    return {
+        "relative_volume": round(relative_volume, 3) if relative_volume is not None else None,
+        "relative_volume_method": "causal_same_minute_session_median",
+        "relative_volume_quality": quality,
+        "relative_volume_sample_size": sample_size,
+        "relative_volume_reference_median": (
+            round(reference_median, 3) if reference_median is not None else None
+        ),
+        "relative_volume_minimum_sessions": minimum_sessions,
+        "relative_volume_fallback_used": False,
+        "relative_volume_fallback_reason": missing_reason,
+        "relative_volume_legacy_full_day_used": False,
+    }
 
 
 def session_lane_context(
@@ -177,11 +247,71 @@ def consecutive_expansion_bars(bars: Sequence[Bar], direction: str) -> int:
     return count
 
 
+def emerging_intraday_leader_context(
+    *,
+    opening_gap_pct: float | None,
+    current_move_pct: float | None,
+    intraday_move_pct: float | None,
+    dollar_volume: float,
+    volume_acceleration: float,
+    controls_vwap: bool,
+    relative_volume: float | None,
+) -> dict[str, Any]:
+    """Describe a small-opening-gap name developing momentum intraday.
+
+    This is intentionally context for ranking and research.  It does not alter
+    policy eligibility or grant entry authority.
+    """
+    criteria = {
+        "small_opening_gap": (
+            opening_gap_pct is not None and abs(opening_gap_pct) < 4.0
+        ),
+        "material_current_move": (
+            current_move_pct is not None and abs(current_move_pct) >= 2.0
+        ),
+        "material_move_from_open": (
+            intraday_move_pct is not None and abs(intraday_move_pct) >= 2.0
+        ),
+        "dollar_volume_developed": dollar_volume >= 2_000_000,
+        "volume_pace_expanding": volume_acceleration >= 1.25,
+        "controls_directional_vwap": controls_vwap,
+        "causal_relative_volume_confirmed": (
+            relative_volume is not None and relative_volume >= 1.5
+        ),
+    }
+    causal_rvol_available = relative_volume is not None
+    core_detected = all(
+        value
+        for key, value in criteria.items()
+        if key != "causal_relative_volume_confirmed"
+    )
+    detected = bool(core_detected and criteria["causal_relative_volume_confirmed"])
+    provisional = bool(core_detected and not causal_rvol_available)
+    return {
+        "detected": detected,
+        "provisional": provisional,
+        "role": "ranking_context_only_never_entry_authority",
+        "criteria": criteria,
+        "thresholds": {
+            "maximum_absolute_opening_gap_pct": 4.0,
+            "minimum_absolute_current_move_pct": 2.0,
+            "minimum_absolute_move_from_open_pct": 2.0,
+            "minimum_dollar_volume": 2_000_000,
+            "minimum_volume_acceleration": 1.25,
+            "minimum_causal_relative_volume": 1.5,
+        },
+        "missing_confirmation": (
+            "causal_same_minute_relative_volume" if provisional else None
+        ),
+    }
+
+
 def compute_market_signal(
     bars: Sequence[Bar],
     snapshot: dict[str, Any] | None,
     quote: dict[str, Any] | None,
     max_spread_pct: float,
+    same_minute_cumulative_history: Sequence[float] | None = None,
 ) -> dict[str, Any] | None:
     """Return a market-data signal, deliberately not Titan's Acceleration Score."""
     if len(bars) < 3:
@@ -193,16 +323,32 @@ def compute_market_signal(
     snapshot = snapshot or {}
     prev_close = float(snapshot.get("prev_close") or 0)
     gap_pct = ((latest.close / prev_close) - 1) * 100 if prev_close > 0 else None
-    direction = "DOWN" if gap_pct is not None and gap_pct < 0 else "UP"
+    official_open = float(latest.official_open or snapshot.get("day_open") or 0)
+    opening_gap_pct = (
+        ((official_open / prev_close) - 1) * 100
+        if prev_close > 0 and official_open > 0
+        else None
+    )
+    intraday_move_pct = (
+        ((latest.close / official_open) - 1) * 100 if official_open > 0 else None
+    )
+    directional_change = gap_pct if gap_pct is not None else intraday_move_pct
+    direction = "DOWN" if directional_change is not None and directional_change < 0 else "UP"
     board = "DOWNSIDE_LONG_PUT" if direction == "DOWN" else "LONG_MOMENTUM"
-    accumulated = float(latest.accumulated_volume or snapshot.get("day_volume") or 0)
+    accumulated = float(
+        latest.accumulated_volume
+        if latest.accumulated_volume is not None
+        else snapshot.get("day_volume") or 0
+    )
     dollar_volume = accumulated * latest.close
     prev_volumes = [bar.volume for bar in bars[-4:-1] if bar.volume >= 0]
     volume_accel = _safe_ratio(latest.volume, mean(prev_volumes), 1.0) if prev_volumes else 1.0
     price_accel = _safe_ratio(latest.close - bars[-3].close, bars[-3].close)
 
-    prev_day_volume = float(snapshot.get("prev_day_volume") or 0)
-    relative_volume = _safe_ratio(accumulated, prev_day_volume) if prev_day_volume else None
+    rvol_context = relative_volume_context(
+        accumulated, same_minute_cumulative_history
+    )
+    relative_volume = rvol_context["relative_volume"]
     atr = short_atr(bars)
     session_vwap = latest.session_vwap or latest.window_vwap or latest.close
     controls_vwap = latest.close <= session_vwap if direction == "DOWN" else latest.close >= session_vwap
@@ -253,7 +399,16 @@ def compute_market_signal(
         limit_ceiling = base["base_high"] + buffer
 
     state = classify_state(bars, volume_accel, price_accel, direction)
-    lane = "under5" if latest.close < 5 else "regular_equity"
+    lane = "under5" if latest.close <= 5 else "regular_equity"
+    emerging_context = emerging_intraday_leader_context(
+        opening_gap_pct=opening_gap_pct,
+        current_move_pct=gap_pct,
+        intraday_move_pct=intraday_move_pct,
+        dollar_volume=dollar_volume,
+        volume_acceleration=volume_accel,
+        controls_vwap=controls_vwap,
+        relative_volume=relative_volume,
+    )
     observed_at = datetime.fromtimestamp(latest.end_ms / 1000, tz=timezone.utc).isoformat()
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -267,10 +422,17 @@ def compute_market_signal(
         "signal_disclaimer": "Market-data strength only; not the Titan Acceleration Score and never trade authority.",
         "price": latest.close,
         "gap_pct": round(gap_pct, 3) if gap_pct is not None else None,
+        "opening_gap_pct": round(opening_gap_pct, 3) if opening_gap_pct is not None else None,
+        "intraday_move_from_open_pct": (
+            round(intraday_move_pct, 3) if intraday_move_pct is not None else None
+        ),
         "dollar_volume": round(dollar_volume, 2),
         "volume_acceleration": round(volume_accel, 3),
         "price_acceleration": round(price_accel, 5),
-        "relative_volume": round(relative_volume, 3) if relative_volume is not None else None,
+        **rvol_context,
+        "emerging_intraday_leader": emerging_context["detected"],
+        "emerging_intraday_leader_provisional": emerging_context["provisional"],
+        "emerging_intraday_leader_context": emerging_context,
         "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
         "short_atr": round(atr, 6),
         "session_vwap": session_vwap,
@@ -372,7 +534,8 @@ def trigger_cross_payload(
         "reviewed_limit_ceiling": ceiling,
         "short_atr": atr,
         "extension_atr": round(extension_atr, 3),
-        "inside_half_atr_chase_ceiling": extension_atr <= 0.5,
+        "chase_extension_limit_atr": 0.625,
+        "inside_chase_ceiling": extension_atr <= 0.625,
         "inside_review_limit_ceiling": ceiling is not None and live_price <= ceiling,
         "second_volume": pace,
         "pullback_volume_per_second": pullback_pace,
@@ -390,5 +553,6 @@ def trigger_cross_payload(
         "session_lane_eligible": bool(details.get("session_lane_eligible", False)),
         "session_blockers": details.get("session_blockers") or [],
         "next_eligible_window": details.get("next_eligible_window"),
+        "trade_authority": False,
         "signal_disclaimer": "Observation only. Robinhood review and every Titan gate remain mandatory.",
     }
