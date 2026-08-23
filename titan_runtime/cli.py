@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -271,6 +271,119 @@ def cmd_research_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_campaign_record(args: argparse.Namespace) -> int:
+    _, payload, _ = read_input_file(args.file)
+    if payload is None:
+        raise ValueError("position campaign state must be JSON")
+    store = Store(load(args).database_path)
+    campaign_id = store.upsert_position_campaign(payload)
+    rows = [
+        row for row in store.position_campaigns(include_terminal=True)
+        if row["campaign_id"] == campaign_id
+    ]
+    store.close()
+    output({
+        "status": "local_management_state_recorded",
+        "campaign_id": campaign_id,
+        "campaign": rows[0] if rows else None,
+        "trade_authority": False,
+        "broker_confirmation_required": True,
+    })
+    return 0
+
+
+def cmd_campaign_list(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    rows = store.position_campaigns(include_terminal=args.all)
+    store.close()
+    output(rows)
+    return 0
+
+
+def cmd_campaign_history(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    rows = store.position_campaign_events(args.campaign_id)
+    store.close()
+    output(rows)
+    return 0
+
+
+def cmd_risk_record(args: argparse.Namespace) -> int:
+    _, payload, _ = read_input_file(args.file)
+    if payload is None:
+        raise ValueError("risk session state must be JSON")
+    store = Store(load(args).database_path)
+    row = store.upsert_risk_session(payload)
+    store.close()
+    output({
+        "status": "broker_confirmed_risk_session_recorded",
+        "risk_session": row,
+        "trade_authority": False,
+    })
+    return 0
+
+
+def cmd_risk_list(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    rows = store.risk_sessions(args.limit)
+    store.close()
+    output(rows)
+    return 0
+
+
+def cmd_risk_gate(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    row = store.risk_session(args.account_key, args.session_date)
+    store.close()
+    if row is None:
+        output({
+            "new_entries_allowed": False,
+            "reason": "broker-confirmed risk session is missing",
+            "trade_authority": False,
+        })
+        return 2
+    expected_raw = str(args.expected_broker_confirmed_at).replace("Z", "+00:00")
+    try:
+        expected = datetime.fromisoformat(expected_raw)
+    except ValueError as error:
+        raise ValueError(
+            "--expected-broker-confirmed-at must be an ISO-8601 timestamp"
+        ) from error
+    if expected.tzinfo is None or expected.utcoffset() is None:
+        raise ValueError("--expected-broker-confirmed-at must include a UTC offset")
+    expected_utc = expected.astimezone(timezone.utc)
+    actual = datetime.fromisoformat(str(row["broker_confirmed_at"]))
+    now_utc = datetime.now(timezone.utc)
+    age_seconds = (now_utc - actual).total_seconds()
+    reasons = []
+    if actual != expected_utc:
+        reasons.append("ledger snapshot does not match the just-confirmed broker timestamp")
+    if age_seconds < -15:
+        reasons.append("broker snapshot timestamp is in the future")
+    if age_seconds > args.max_age_seconds:
+        reasons.append("broker snapshot is stale")
+    broker_state = row.get("broker_state") or {}
+    for field in (
+        "account_state_readable",
+        "orders_reconciled",
+        "positions_reconciled",
+    ):
+        if broker_state.get(field) is not True:
+            reasons.append(f"broker evidence missing {field}")
+    if row["loss_lock"]:
+        reasons.append("irreversible account-day loss lock is active")
+    if (
+        row["profit_objective_reached"]
+        and float(row["post_objective_new_risk_buffer"] or 0) <= 0
+    ):
+        reasons.append("post-objective new-risk buffer is not positive")
+    row["broker_snapshot_age_seconds"] = round(age_seconds, 3)
+    row["risk_gate_reasons"] = reasons
+    row["new_entries_allowed"] = not reasons
+    output(row)
+    return 0 if row["new_entries_allowed"] else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Titan Massive market-intelligence runtime (shadow only)")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to runtime JSON configuration")
@@ -348,6 +461,49 @@ def build_parser() -> argparse.ArgumentParser:
     research_report = research_commands.add_parser("report", help="Compare entry timing lanes")
     research_report.add_argument("--limit", type=int, default=20)
     research_report.set_defaults(func=cmd_research_report)
+
+    campaigns = commands.add_parser(
+        "campaigns", help="Persist broker-reconciled core/runner management state"
+    )
+    campaign_commands = campaigns.add_subparsers(dest="campaign_command", required=True)
+    campaign_record = campaign_commands.add_parser(
+        "record", help="Record one broker-reconciled JSON campaign snapshot"
+    )
+    campaign_record.add_argument("file")
+    campaign_record.set_defaults(func=cmd_campaign_record)
+    campaign_list = campaign_commands.add_parser(
+        "list", help="List active core/runner campaigns"
+    )
+    campaign_list.add_argument("--all", action="store_true", help="Include terminal campaigns")
+    campaign_list.set_defaults(func=cmd_campaign_list)
+    campaign_history = campaign_commands.add_parser(
+        "history", help="List append-only broker transition evidence"
+    )
+    campaign_history.add_argument("--campaign-id")
+    campaign_history.set_defaults(func=cmd_campaign_history)
+
+    risk = commands.add_parser(
+        "risk", help="Persist the irreversible broker-confirmed account-day risk ledger"
+    )
+    risk_commands = risk.add_subparsers(dest="risk_command", required=True)
+    risk_record = risk_commands.add_parser(
+        "record", help="Record one broker-confirmed JSON account-day snapshot"
+    )
+    risk_record.add_argument("file")
+    risk_record.set_defaults(func=cmd_risk_record)
+    risk_list = risk_commands.add_parser(
+        "list", help="List durable account-day risk sessions"
+    )
+    risk_list.add_argument("--limit", type=int, default=20)
+    risk_list.set_defaults(func=cmd_risk_list)
+    risk_gate = risk_commands.add_parser(
+        "gate", help="Fail closed when the session is missing or loss-locked"
+    )
+    risk_gate.add_argument("--account-key", required=True)
+    risk_gate.add_argument("--session-date", required=True)
+    risk_gate.add_argument("--expected-broker-confirmed-at", required=True)
+    risk_gate.add_argument("--max-age-seconds", type=int, default=90)
+    risk_gate.set_defaults(func=cmd_risk_gate)
     return parser
 
 
