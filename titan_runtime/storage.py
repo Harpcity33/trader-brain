@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+from math import isfinite
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterable, Iterator
 import uuid
+from zoneinfo import ZoneInfo
 
 
 SCHEMA = """
@@ -277,11 +280,120 @@ CREATE TABLE IF NOT EXISTS research_entry_outcomes (
     mae REAL,
     outcome_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS position_campaigns (
+    campaign_id TEXT PRIMARY KEY,
+    account_key TEXT NOT NULL,
+    instrument_key TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    thesis_key TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('UP','DOWN')),
+    asset_class TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN (
+        'PLANNED','REVIEWED','SUBMITTED','PARTIAL','FILLED','PROTECTED',
+        'CLOSING','CLOSED','CANCELED','REJECTED','FAILED'
+    )),
+    strategy_version TEXT NOT NULL,
+    opened_at TEXT,
+    updated_at TEXT NOT NULL,
+    broker_confirmed_at TEXT,
+    entry_price REAL,
+    original_stop REAL,
+    current_stop REAL,
+    initial_quantity REAL NOT NULL DEFAULT 0,
+    current_quantity REAL NOT NULL DEFAULT 0,
+    core_quantity REAL NOT NULL DEFAULT 0,
+    runner_quantity REAL NOT NULL DEFAULT 0,
+    reference_risk_dollars REAL,
+    high_water_price REAL,
+    mfe_r REAL,
+    mae_r REAL,
+    continuation_health TEXT CHECK(continuation_health IN (
+        'DOMINANT','HEALTHY','VULNERABLE','BROKEN','UNKNOWN'
+    )),
+    remaining_opportunity TEXT CHECK(remaining_opportunity IN (
+        'EXPANDING','AVAILABLE','DEPLETED','UNKNOWN'
+    )),
+    last_action TEXT,
+    next_actions_json TEXT NOT NULL,
+    broker_state_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_position_campaigns_status
+    ON position_campaigns(status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_position_campaigns_one_active
+    ON position_campaigns(account_key, instrument_key)
+    WHERE status NOT IN ('CLOSED','CANCELED','REJECTED','FAILED');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_position_campaigns_one_active_thesis
+    ON position_campaigns(account_key, thesis_key)
+    WHERE status NOT IN ('CLOSED','CANCELED','REJECTED','FAILED');
+
+CREATE TABLE IF NOT EXISTS position_campaign_events (
+    event_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES position_campaigns(campaign_id),
+    status TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    broker_confirmed_at TEXT,
+    event_hash TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    UNIQUE(campaign_id, event_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_position_campaign_events_campaign
+    ON position_campaign_events(campaign_id, observed_at ASC);
+
+CREATE TABLE IF NOT EXISTS risk_sessions (
+    account_key TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    start_of_day_equity REAL NOT NULL,
+    baseline_confirmed_at TEXT NOT NULL,
+    current_equity REAL NOT NULL,
+    realized_net_pnl REAL NOT NULL,
+    confirmed_cash_flow_adjustment REAL NOT NULL DEFAULT 0,
+    account_day_pnl REAL NOT NULL,
+    loss_gauge REAL NOT NULL,
+    loss_limit_dollars REAL NOT NULL DEFAULT -100,
+    loss_lock INTEGER NOT NULL DEFAULT 0 CHECK(loss_lock IN (0,1)),
+    loss_lock_triggered_at TEXT,
+    profit_objective_dollars REAL NOT NULL DEFAULT 150,
+    profit_objective_reached INTEGER NOT NULL DEFAULT 0
+        CHECK(profit_objective_reached IN (0,1)),
+    profit_objective_reached_at TEXT,
+    active_profit_floor_dollars REAL,
+    updated_at TEXT NOT NULL,
+    broker_confirmed_at TEXT NOT NULL,
+    broker_state_json TEXT NOT NULL,
+    PRIMARY KEY(account_key, session_date)
+);
+CREATE INDEX IF NOT EXISTS idx_risk_sessions_date
+    ON risk_sessions(session_date DESC, account_key);
 """
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _aware_timestamp(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a nonempty ISO-8601 timestamp")
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise ValueError(f"{field} must be an ISO-8601 timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include an explicit UTC offset")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _finite_float(value: Any, field: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} must be a finite number") from error
+    if not isfinite(result):
+        raise ValueError(f"{field} must be a finite number")
+    return result
 
 
 class Store:
@@ -402,6 +514,18 @@ class Store:
         ).fetchone()
         return bool(row)
 
+    def get_eligible_security(self, symbol: str) -> dict[str, Any] | None:
+        """Return provider reference metadata without implying broker tradability."""
+        row = self.conn.execute(
+            "SELECT * FROM eligible_universe WHERE symbol=? AND active=1", (symbol,)
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json"))
+        item["broker_tradability_verified"] = False
+        return item
+
     def eligible_universe_count(self) -> int:
         return int(
             self.conn.execute(
@@ -486,6 +610,51 @@ class Store:
         ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
+    def same_minute_cumulative_history(
+        self,
+        symbol: str,
+        reference_ms: int,
+        timezone_name: str,
+        max_sessions: int = 20,
+    ) -> list[float]:
+        """Return causal same-clock-minute cumulative volume from prior sessions.
+
+        Matching happens in the configured market timezone so daylight-saving
+        changes cannot shift the comparison minute.  The current local session
+        is excluded even when an earlier bar happens to share the same UTC
+        clock value.  Missing bars remain missing and are never synthesized.
+        """
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be positive")
+        market_tz = ZoneInfo(timezone_name)
+        reference = datetime.fromtimestamp(reference_ms / 1000, timezone.utc).astimezone(market_tz)
+        target_clock = (reference.hour, reference.minute)
+        target_date = reference.date()
+        # Pull a bounded calendar window large enough to find prior completed
+        # sessions around weekends and exchange holidays.
+        cutoff = reference - timedelta(days=max(45, max_sessions * 3))
+        rows = self.conn.execute(
+            """SELECT start_ms, accumulated_volume
+               FROM bars_1m
+               WHERE symbol=? AND start_ms<? AND start_ms>=?
+                     AND accumulated_volume IS NOT NULL AND accumulated_volume>0
+               ORDER BY start_ms DESC""",
+            (symbol, reference_ms, int(cutoff.timestamp() * 1000)),
+        ).fetchall()
+        by_session: dict[str, float] = {}
+        for row in rows:
+            observed = datetime.fromtimestamp(
+                int(row["start_ms"]) / 1000, timezone.utc
+            ).astimezone(market_tz)
+            if observed.date() >= target_date or (observed.hour, observed.minute) != target_clock:
+                continue
+            session_key = observed.date().isoformat()
+            if session_key not in by_session:
+                by_session[session_key] = float(row["accumulated_volume"])
+            if len(by_session) >= max_sessions:
+                break
+        return list(by_session.values())
+
     def clear_candidates(self) -> None:
         self.conn.execute("DELETE FROM candidates")
         self.conn.execute("DELETE FROM quotes")
@@ -557,9 +726,20 @@ class Store:
         rows = self.conn.execute(
             """SELECT * FROM candidates
                ORDER BY COALESCE(
+                   CASE
+                       WHEN json_extract(payload_json,'$.weighted_scale_version') =
+                            'trader_brain_2026-08-22_v2'
+                       THEN CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL)
+                   END,
+                   CAST(json_extract(payload_json,'$.available_evidence_score') AS REAL),
                    CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL),
                    signal_strength
-               ) DESC, dollar_volume DESC LIMIT ?""",
+               ) DESC,
+               COALESCE(
+                   CAST(json_extract(payload_json,'$.weighted_evidence_coverage_pct') AS REAL),
+                   0
+               ) DESC,
+               dollar_volume DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -568,9 +748,20 @@ class Store:
         rows = self.conn.execute(
             """SELECT symbol FROM candidates
                ORDER BY COALESCE(
+                   CASE
+                       WHEN json_extract(payload_json,'$.weighted_scale_version') =
+                            'trader_brain_2026-08-22_v2'
+                       THEN CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL)
+                   END,
+                   CAST(json_extract(payload_json,'$.available_evidence_score') AS REAL),
                    CAST(json_extract(payload_json,'$.weighted_opportunity_score') AS REAL),
                    signal_strength
-               ) DESC, dollar_volume DESC"""
+               ) DESC,
+               COALESCE(
+                   CAST(json_extract(payload_json,'$.weighted_evidence_coverage_pct') AS REAL),
+                   0
+               ) DESC,
+               dollar_volume DESC"""
         ).fetchall()
         return [str(row["symbol"]) for row in rows]
 
@@ -578,12 +769,15 @@ class Store:
         fingerprint = {
             key: payload.get(key)
             for key in (
-                "symbol", "status", "direction", "lane", "setup", "trigger",
-                "structural_stop", "t1", "t2", "weighted_opportunity_score",
-                "modeled_move_capacity_pct", "blockers",
+                "schema_version", "policy_version", "sizing_policy_version",
+                "weighted_scale_version", "symbol", "status", "direction", "lane",
+                "setup", "trigger", "review_limit_ceiling", "reference_entry_price",
+                "structural_stop", "risk_per_share", "t1", "t2", "t3",
+                "weighted_opportunity_score", "modeled_move_capacity_pct",
+                "preliminary_quantity_cap", "preliminary_risk_cap", "risk_campaign",
+                "build_tranches_pct", "core_runner_policy", "add_policy", "blockers",
             )
         }
-        import hashlib
         digest = hashlib.sha256(
             json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
@@ -689,7 +883,13 @@ class Store:
         # observation per symbol/type pending and retain older rows as
         # superseded history.  Excluding the new row also preserves exact-key
         # deduplication when an insert is rejected above.
-        if event_type in {"LEADER_CANDIDATE", "MOMENTUM_WATCH", "BASE_READY", "TRIGGER_CROSS"}:
+        if event_type in {
+            "LEADER_CANDIDATE",
+            "MOMENTUM_WATCH",
+            "EMERGING_INTRADAY_LEADER_WATCH",
+            "BASE_READY",
+            "TRIGGER_CROSS",
+        }:
             self.conn.execute(
                 """UPDATE events
                    SET status='superseded', acknowledged_at=?
@@ -797,6 +997,67 @@ class Store:
                 json.dumps(event, separators=(",", ":")),
             ),
         )
+
+    def post_halt_context(
+        self,
+        symbol: str,
+        reference_ms: int,
+        timezone_name: str,
+    ) -> dict[str, Any] | None:
+        """Return causal same-session LULD state for an entry rearm check.
+
+        The latest halt indicator is authoritative.  A halt remains entry-blocking
+        until a resumption arrives, and an under-$5 resumption remains blocking
+        until two completed one-minute bars have been persisted.  Callers still
+        require a newly recomputed structure before emitting another entry event.
+        """
+        row = self.conn.execute(
+            """SELECT timestamp_ms, indicator FROM halt_events
+               WHERE symbol=? AND indicator IN (17,18) AND timestamp_ms<=?
+               ORDER BY timestamp_ms DESC LIMIT 1""",
+            (symbol, reference_ms),
+        ).fetchone()
+        if not row:
+            return None
+        latest_event_ms = int(row["timestamp_ms"])
+        latest_indicator = int(row["indicator"])
+        market_tz = ZoneInfo(timezone_name)
+        reference_date = datetime.fromtimestamp(
+            reference_ms / 1000, timezone.utc
+        ).astimezone(market_tz).date()
+        latest_event_date = datetime.fromtimestamp(
+            latest_event_ms / 1000, timezone.utc
+        ).astimezone(market_tz).date()
+        if latest_event_date != reference_date:
+            return None
+        if latest_indicator == 17:
+            return {
+                "halt_timestamp_ms": latest_event_ms,
+                "resumption_timestamp_ms": None,
+                "active_halt": True,
+                "completed_post_resumption_bars": 0,
+                "minimum_completed_bars": 2,
+                "entry_rearmed": False,
+                "trade_authority": False,
+            }
+
+        resumption_ms = latest_event_ms
+        completed_bars = int(
+            self.conn.execute(
+                """SELECT COUNT(*) FROM bars_1m
+                   WHERE symbol=? AND start_ms>? AND start_ms<=?""",
+                (symbol, resumption_ms, reference_ms),
+            ).fetchone()[0]
+        )
+        return {
+            "halt_timestamp_ms": None,
+            "resumption_timestamp_ms": resumption_ms,
+            "active_halt": False,
+            "completed_post_resumption_bars": completed_bars,
+            "minimum_completed_bars": 2,
+            "entry_rearmed": completed_bars >= 2,
+            "trade_authority": False,
+        }
 
     def ingest_lesson(
         self,
@@ -964,6 +1225,596 @@ class Store:
             item["outcome_locked"] = bool(item["outcome_locked"])
             result.append(item)
         return result
+
+    def upsert_position_campaign(self, payload: dict[str, Any]) -> str:
+        """Persist management state; this never creates broker authority.
+
+        Filled/protected/closing/closed states require a broker confirmation
+        timestamp so local inference cannot silently become the source of truth.
+        The original thesis stop is immutable after the campaign is created.
+        """
+        required = (
+            "account_key", "instrument_key", "symbol", "thesis_key", "direction",
+            "asset_class", "status", "strategy_version",
+        )
+        missing = [field for field in required if not payload.get(field)]
+        if missing:
+            raise ValueError(f"missing position-campaign fields: {', '.join(missing)}")
+        status = str(payload["status"]).upper()
+        valid_statuses = {
+            "PLANNED", "REVIEWED", "SUBMITTED", "PARTIAL", "FILLED", "PROTECTED",
+            "CLOSING", "CLOSED", "CANCELED", "REJECTED", "FAILED",
+        }
+        if status not in valid_statuses:
+            raise ValueError(f"invalid position-campaign status: {status}")
+        thesis_key = str(payload["thesis_key"]).strip().upper()
+        direction = str(payload["direction"]).strip().upper()
+        if not thesis_key:
+            raise ValueError("thesis_key cannot be empty")
+        if direction not in {"UP", "DOWN"}:
+            raise ValueError("position-campaign direction must be UP or DOWN")
+        broker_confirmed_statuses = {
+            "SUBMITTED", "PARTIAL", "FILLED", "PROTECTED", "CLOSING", "CLOSED",
+            "CANCELED", "REJECTED", "FAILED",
+        }
+        broker_confirmed_at = None
+        broker_state = payload.get("broker_state") or {}
+        if not isinstance(broker_state, dict):
+            raise ValueError("broker_state must be an object")
+        if status in broker_confirmed_statuses:
+            if not payload.get("broker_confirmed_at"):
+                raise ValueError(f"{status} requires broker_confirmed_at")
+            broker_confirmed_at = _aware_timestamp(
+                payload.get("broker_confirmed_at"), "broker_confirmed_at"
+            )
+            if not broker_state:
+                raise ValueError(f"{status} requires nonempty broker_state evidence")
+        opened_at = (
+            _aware_timestamp(payload.get("opened_at"), "opened_at")
+            if payload.get("opened_at")
+            else None
+        )
+        quantities = {
+            key: _finite_float(payload.get(key) or 0, key)
+            for key in ("initial_quantity", "current_quantity", "core_quantity", "runner_quantity")
+        }
+        if any(value < 0 for value in quantities.values()):
+            raise ValueError("position-campaign quantities cannot be negative")
+        if quantities["core_quantity"] + quantities["runner_quantity"] > quantities["current_quantity"] + 1e-9:
+            raise ValueError("core plus runner quantity cannot exceed current quantity")
+        zero_position_statuses = {"PLANNED", "REVIEWED", "SUBMITTED", "CLOSED", "CANCELED", "REJECTED", "FAILED"}
+        if status in zero_position_statuses and quantities["current_quantity"] != 0:
+            raise ValueError(f"{status} requires current_quantity=0")
+        position_statuses = {"PARTIAL", "FILLED", "PROTECTED"}
+        if status in position_statuses and quantities["current_quantity"] <= 0:
+            raise ValueError(f"{status} requires a positive current_quantity")
+        if quantities["current_quantity"] > 0 and abs(
+            quantities["core_quantity"]
+            + quantities["runner_quantity"]
+            - quantities["current_quantity"]
+        ) > 1e-9:
+            raise ValueError("core plus runner quantity must equal current quantity")
+        entry_price = (
+            _finite_float(payload.get("entry_price"), "entry_price")
+            if payload.get("entry_price") is not None
+            else None
+        )
+        if status in position_statuses and (entry_price is None or entry_price <= 0):
+            raise ValueError(f"{status} requires a positive entry_price")
+        original_stop_input = (
+            _finite_float(payload.get("original_stop"), "original_stop")
+            if payload.get("original_stop") is not None
+            else None
+        )
+        current_stop = (
+            _finite_float(payload.get("current_stop"), "current_stop")
+            if payload.get("current_stop") is not None
+            else None
+        )
+        if original_stop_input is not None and original_stop_input <= 0:
+            raise ValueError("original_stop must be positive")
+        if current_stop is not None and current_stop <= 0:
+            raise ValueError("current_stop must be positive")
+        if (
+            original_stop_input is not None
+            and current_stop is not None
+            and current_stop + 1e-9 < original_stop_input
+        ):
+            raise ValueError("current_stop may not widen below original_stop")
+        if status == "PROTECTED":
+            if broker_state.get("protection_confirmed") is not True:
+                raise ValueError("PROTECTED requires broker-confirmed protection evidence")
+            if current_stop is None:
+                raise ValueError("PROTECTED requires current_stop")
+
+        terminal_statuses = ("CLOSED", "CANCELED", "REJECTED", "FAILED")
+        placeholders = ",".join("?" for _ in terminal_statuses)
+        with self.transaction():
+            existing = self.conn.execute(
+                f"""SELECT campaign_id, original_stop, current_stop, status,
+                           broker_confirmed_at, symbol, thesis_key, direction,
+                           asset_class, strategy_version
+                    FROM position_campaigns
+                    WHERE account_key=? AND instrument_key=?
+                      AND status NOT IN ({placeholders})
+                    ORDER BY updated_at DESC LIMIT 1""",
+                (payload["account_key"], payload["instrument_key"], *terminal_statuses),
+            ).fetchone()
+            if not existing:
+                thesis_conflict = self.conn.execute(
+                    f"""SELECT campaign_id, instrument_key FROM position_campaigns
+                        WHERE account_key=? AND thesis_key=?
+                          AND status NOT IN ({placeholders})
+                        ORDER BY updated_at DESC LIMIT 1""",
+                    (payload["account_key"], thesis_key, *terminal_statuses),
+                ).fetchone()
+                if thesis_conflict:
+                    raise ValueError(
+                        "an active campaign already exists for account and thesis_key; "
+                        "reconcile or close it before opening another expression"
+                    )
+            if not existing and status in {"CLOSED", "CANCELED", "REJECTED", "FAILED"}:
+                raise ValueError(f"{status} requires an existing active campaign")
+            if existing:
+                ordered_statuses = {
+                    "PLANNED": 0,
+                    "REVIEWED": 1,
+                    "SUBMITTED": 2,
+                    "PARTIAL": 3,
+                    "FILLED": 4,
+                    "PROTECTED": 5,
+                    "CLOSING": 6,
+                    "CLOSED": 7,
+                }
+                old_status = str(existing["status"])
+                immutable_identity = {
+                    "symbol": str(payload["symbol"]).upper(),
+                    "thesis_key": thesis_key,
+                    "direction": direction,
+                    "asset_class": str(payload["asset_class"]).lower(),
+                    "strategy_version": str(payload["strategy_version"]),
+                }
+                for field, value in immutable_identity.items():
+                    if str(existing[field]) != value:
+                        raise ValueError(f"{field} is immutable for an active campaign")
+                if status in {"CANCELED", "REJECTED", "FAILED"} and old_status not in {
+                    "PLANNED", "REVIEWED", "SUBMITTED"
+                }:
+                    raise ValueError(
+                        f"{old_status} may not transition to terminal status {status}; "
+                        "broker exposure must remain active, closing, or closed"
+                    )
+                if status == "CLOSED" and old_status not in {
+                    "PARTIAL", "FILLED", "PROTECTED", "CLOSING"
+                }:
+                    raise ValueError(f"{old_status} may not transition directly to CLOSED")
+                if (
+                    status in ordered_statuses
+                    and old_status in ordered_statuses
+                    and ordered_statuses[status] < ordered_statuses[old_status]
+                ):
+                    raise ValueError(f"invalid backward campaign transition: {old_status} -> {status}")
+                if (
+                    broker_confirmed_at
+                    and existing["broker_confirmed_at"]
+                    and datetime.fromisoformat(broker_confirmed_at)
+                    < datetime.fromisoformat(str(existing["broker_confirmed_at"]))
+                ):
+                    raise ValueError("broker_confirmed_at may not move backward")
+            original_stop = original_stop_input
+            if existing and existing["original_stop"] is not None:
+                if (
+                    original_stop is not None
+                    and abs(float(original_stop) - float(existing["original_stop"])) > 1e-9
+                ):
+                    raise ValueError("original_stop is immutable for an existing campaign")
+                original_stop = existing["original_stop"]
+            if status == "PROTECTED" and original_stop is None:
+                raise ValueError("PROTECTED requires an immutable original_stop")
+            if (
+                original_stop is not None
+                and current_stop is not None
+                and current_stop + 1e-9 < float(original_stop)
+            ):
+                raise ValueError("current_stop may not widen below original_stop")
+            if (
+                existing
+                and existing["current_stop"] is not None
+                and current_stop is not None
+                and current_stop + 1e-9 < float(existing["current_stop"])
+            ):
+                raise ValueError("current_stop may not be widened for an active campaign")
+            campaign_id = str(existing["campaign_id"]) if existing else str(uuid.uuid4())
+            now = utc_now()
+            self.conn.execute(
+                """INSERT INTO position_campaigns(
+                       campaign_id,account_key,instrument_key,symbol,thesis_key,direction,
+                       asset_class,status,
+                       strategy_version,opened_at,updated_at,broker_confirmed_at,
+                       entry_price,original_stop,current_stop,initial_quantity,current_quantity,
+                       core_quantity,runner_quantity,reference_risk_dollars,high_water_price,
+                       mfe_r,mae_r,continuation_health,remaining_opportunity,last_action,
+                       next_actions_json,broker_state_json
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(campaign_id) DO UPDATE SET
+                       symbol=excluded.symbol,asset_class=excluded.asset_class,status=excluded.status,
+                       strategy_version=excluded.strategy_version,
+                       opened_at=COALESCE(position_campaigns.opened_at,excluded.opened_at),
+                       updated_at=excluded.updated_at,
+                       broker_confirmed_at=COALESCE(excluded.broker_confirmed_at,position_campaigns.broker_confirmed_at),
+                       entry_price=COALESCE(excluded.entry_price,position_campaigns.entry_price),
+                       current_stop=COALESCE(excluded.current_stop,position_campaigns.current_stop),
+                       initial_quantity=MAX(position_campaigns.initial_quantity,excluded.initial_quantity),
+                       current_quantity=excluded.current_quantity,core_quantity=excluded.core_quantity,
+                       runner_quantity=excluded.runner_quantity,
+                       reference_risk_dollars=COALESCE(excluded.reference_risk_dollars,position_campaigns.reference_risk_dollars),
+                       high_water_price=MAX(COALESCE(position_campaigns.high_water_price,0),COALESCE(excluded.high_water_price,0)),
+                       mfe_r=MAX(COALESCE(position_campaigns.mfe_r,0),COALESCE(excluded.mfe_r,0)),
+                       mae_r=MIN(COALESCE(position_campaigns.mae_r,0),COALESCE(excluded.mae_r,0)),
+                       continuation_health=excluded.continuation_health,
+                       remaining_opportunity=excluded.remaining_opportunity,
+                       last_action=excluded.last_action,next_actions_json=excluded.next_actions_json,
+                       broker_state_json=excluded.broker_state_json""",
+                (
+                    campaign_id, payload["account_key"], payload["instrument_key"],
+                    str(payload["symbol"]).upper(), thesis_key, direction,
+                    str(payload["asset_class"]).lower(), status,
+                    payload["strategy_version"], opened_at, now,
+                    broker_confirmed_at, entry_price, original_stop,
+                    current_stop, quantities["initial_quantity"],
+                    quantities["current_quantity"], quantities["core_quantity"],
+                    quantities["runner_quantity"], payload.get("reference_risk_dollars"),
+                    payload.get("high_water_price"), payload.get("mfe_r"), payload.get("mae_r"),
+                    str(payload.get("continuation_health") or "UNKNOWN").upper(),
+                    str(payload.get("remaining_opportunity") or "UNKNOWN").upper(),
+                    payload.get("last_action"),
+                    json.dumps(payload.get("next_actions") or {}, separators=(",", ":")),
+                    json.dumps(broker_state, separators=(",", ":")),
+                ),
+            )
+            event_payload = {
+                "campaign_id": campaign_id,
+                "account_key": str(payload["account_key"]),
+                "instrument_key": str(payload["instrument_key"]),
+                "symbol": str(payload["symbol"]).upper(),
+                "thesis_key": thesis_key,
+                "direction": direction,
+                "asset_class": str(payload["asset_class"]).lower(),
+                "strategy_version": str(payload["strategy_version"]),
+                "status": status,
+                "observed_at": now,
+                "broker_confirmed_at": broker_confirmed_at,
+                "entry_price": entry_price,
+                "original_stop": original_stop,
+                "current_stop": current_stop,
+                **quantities,
+                "reference_risk_dollars": payload.get("reference_risk_dollars"),
+                "high_water_price": payload.get("high_water_price"),
+                "mfe_r": payload.get("mfe_r"),
+                "mae_r": payload.get("mae_r"),
+                "continuation_health": str(
+                    payload.get("continuation_health") or "UNKNOWN"
+                ).upper(),
+                "remaining_opportunity": str(
+                    payload.get("remaining_opportunity") or "UNKNOWN"
+                ).upper(),
+                "last_action": payload.get("last_action"),
+                "next_actions": payload.get("next_actions") or {},
+                "broker_state": broker_state,
+            }
+            event_hash = hashlib.sha256(
+                json.dumps(
+                    {key: value for key, value in event_payload.items() if key != "observed_at"},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            self.conn.execute(
+                """INSERT OR IGNORE INTO position_campaign_events(
+                       event_id,campaign_id,status,observed_at,broker_confirmed_at,
+                       event_hash,payload_json
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                (
+                    str(uuid.uuid4()), campaign_id, status, now, broker_confirmed_at,
+                    event_hash, json.dumps(event_payload, separators=(",", ":")),
+                ),
+            )
+        return campaign_id
+
+    def position_campaigns(self, include_terminal: bool = False) -> list[dict[str, Any]]:
+        terminal = ("CLOSED", "CANCELED", "REJECTED", "FAILED")
+        if include_terminal:
+            rows = self.conn.execute(
+                "SELECT * FROM position_campaigns ORDER BY updated_at DESC"
+            ).fetchall()
+        else:
+            placeholders = ",".join("?" for _ in terminal)
+            rows = self.conn.execute(
+                f"SELECT * FROM position_campaigns WHERE status NOT IN ({placeholders}) ORDER BY updated_at DESC",
+                terminal,
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["next_actions"] = json.loads(item.pop("next_actions_json"))
+            item["broker_state"] = json.loads(item.pop("broker_state_json"))
+            item["trade_authority"] = False
+            result.append(item)
+        return result
+
+    def position_campaign_events(self, campaign_id: str | None = None) -> list[dict[str, Any]]:
+        if campaign_id:
+            rows = self.conn.execute(
+                """SELECT * FROM position_campaign_events
+                   WHERE campaign_id=? ORDER BY observed_at ASC""",
+                (campaign_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM position_campaign_events ORDER BY observed_at DESC"
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            item["trade_authority"] = False
+            result.append(item)
+        return result
+
+    def upsert_risk_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist broker-confirmed account-day risk state with irreversible latches.
+
+        This ledger does not grant order authority.  It makes the fixed -$100
+        loss lock and the first +$150 objective crossing durable across prompt
+        compaction, heartbeat overlap, and process restarts.
+        """
+        required = (
+            "account_key",
+            "session_date",
+            "strategy_version",
+            "start_of_day_equity",
+            "baseline_confirmed_at",
+            "current_equity",
+            "realized_net_pnl",
+            "confirmed_cash_flow_adjustment",
+            "broker_confirmed_at",
+        )
+        missing = [field for field in required if payload.get(field) is None]
+        if missing:
+            raise ValueError(f"missing risk-session fields: {', '.join(missing)}")
+        account_key = str(payload["account_key"]).strip()
+        strategy_version = str(payload["strategy_version"]).strip()
+        if not account_key or not strategy_version:
+            raise ValueError("account_key and strategy_version cannot be empty")
+        session_date = str(payload["session_date"])
+        try:
+            parsed_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+        except ValueError as error:
+            raise ValueError("session_date must use YYYY-MM-DD") from error
+        if parsed_date.isoformat() != session_date:
+            raise ValueError("session_date must use YYYY-MM-DD")
+        baseline_confirmed_at = _aware_timestamp(
+            payload["baseline_confirmed_at"], "baseline_confirmed_at"
+        )
+        broker_confirmed_at = _aware_timestamp(
+            payload["broker_confirmed_at"], "broker_confirmed_at"
+        )
+        start_equity = _finite_float(
+            payload["start_of_day_equity"], "start_of_day_equity"
+        )
+        current_equity = _finite_float(payload["current_equity"], "current_equity")
+        realized_net_pnl = _finite_float(
+            payload["realized_net_pnl"], "realized_net_pnl"
+        )
+        cash_flow_adjustment = _finite_float(
+            payload["confirmed_cash_flow_adjustment"],
+            "confirmed_cash_flow_adjustment",
+        )
+        if start_equity <= 0 or current_equity <= 0:
+            raise ValueError("broker-confirmed account equity must be positive")
+        if payload.get("loss_limit_dollars", -100) != -100:
+            raise ValueError("the account-day loss limit is fixed at -100 dollars")
+        if payload.get("profit_objective_dollars", 150) != 150:
+            raise ValueError("the primary daily profit objective is fixed at 150 dollars")
+        broker_state = payload.get("broker_state") or {}
+        if not isinstance(broker_state, dict) or not broker_state:
+            raise ValueError("risk sessions require nonempty broker_state evidence")
+        required_broker_checks = (
+            "account_state_readable",
+            "orders_reconciled",
+            "positions_reconciled",
+        )
+        missing_checks = [
+            field for field in required_broker_checks if broker_state.get(field) is not True
+        ]
+        if missing_checks:
+            raise ValueError(
+                "risk-session broker evidence is incomplete: " + ", ".join(missing_checks)
+            )
+        baseline_time = datetime.fromisoformat(baseline_confirmed_at)
+        broker_time = datetime.fromisoformat(broker_confirmed_at)
+        now_utc = datetime.now(timezone.utc)
+        if baseline_time > broker_time:
+            raise ValueError("baseline_confirmed_at may not follow broker_confirmed_at")
+        if broker_time > now_utc + timedelta(seconds=15):
+            raise ValueError("broker_confirmed_at may not be in the future")
+
+        account_day_pnl = current_equity - start_equity - cash_flow_adjustment
+        loss_gauge = min(account_day_pnl, realized_net_pnl)
+        with self.transaction():
+            existing = self.conn.execute(
+                """SELECT * FROM risk_sessions
+                   WHERE account_key=? AND session_date=?""",
+                (account_key, session_date),
+            ).fetchone()
+            if existing:
+                if abs(float(existing["start_of_day_equity"]) - start_equity) > 0.005:
+                    raise ValueError("start_of_day_equity is immutable for the session")
+                if str(existing["baseline_confirmed_at"]) != baseline_confirmed_at:
+                    raise ValueError("baseline_confirmed_at is immutable for the session")
+                if str(existing["strategy_version"]) != strategy_version:
+                    raise ValueError("strategy_version is immutable for the session")
+                if (
+                    abs(
+                        float(existing["confirmed_cash_flow_adjustment"])
+                        - cash_flow_adjustment
+                    )
+                    > 0.005
+                    and broker_state.get("cash_flow_confirmed") is not True
+                ):
+                    raise ValueError(
+                        "cash-flow adjustment changes require broker confirmation evidence"
+                    )
+                if datetime.fromisoformat(broker_confirmed_at) < datetime.fromisoformat(
+                    str(existing["broker_confirmed_at"])
+                ):
+                    raise ValueError("broker_confirmed_at may not move backward")
+                if broker_confirmed_at == str(existing["broker_confirmed_at"]):
+                    conflicting_same_timestamp = bool(
+                        abs(float(existing["current_equity"]) - current_equity) > 0.005
+                        or abs(float(existing["realized_net_pnl"]) - realized_net_pnl) > 0.005
+                        or abs(
+                            float(existing["confirmed_cash_flow_adjustment"])
+                            - cash_flow_adjustment
+                        ) > 0.005
+                        or json.loads(str(existing["broker_state_json"])) != broker_state
+                    )
+                    if conflicting_same_timestamp:
+                        raise ValueError(
+                            "conflicting risk snapshots share broker_confirmed_at"
+                        )
+            existing_lock = bool(existing["loss_lock"]) if existing else False
+            loss_lock = bool(
+                existing_lock
+                or loss_gauge <= -100
+                or payload.get("loss_lock") is True
+            )
+            loss_lock_triggered_at = (
+                str(existing["loss_lock_triggered_at"])
+                if existing and existing["loss_lock_triggered_at"]
+                else (broker_confirmed_at if loss_lock else None)
+            )
+            existing_objective = (
+                bool(existing["profit_objective_reached"]) if existing else False
+            )
+            objective_reached = bool(
+                existing_objective
+                or account_day_pnl >= 150
+                or payload.get("profit_objective_reached") is True
+            )
+            objective_reached_at = (
+                str(existing["profit_objective_reached_at"])
+                if existing and existing["profit_objective_reached_at"]
+                else (broker_confirmed_at if objective_reached else None)
+            )
+            profit_floor = 125.0 if objective_reached else None
+            now = utc_now()
+            self.conn.execute(
+                """INSERT INTO risk_sessions(
+                       account_key,session_date,strategy_version,start_of_day_equity,
+                       baseline_confirmed_at,current_equity,realized_net_pnl,
+                       confirmed_cash_flow_adjustment,account_day_pnl,loss_gauge,
+                       loss_limit_dollars,loss_lock,loss_lock_triggered_at,
+                       profit_objective_dollars,profit_objective_reached,
+                       profit_objective_reached_at,active_profit_floor_dollars,
+                       updated_at,broker_confirmed_at,broker_state_json
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(account_key,session_date) DO UPDATE SET
+                       current_equity=excluded.current_equity,
+                       realized_net_pnl=excluded.realized_net_pnl,
+                       confirmed_cash_flow_adjustment=excluded.confirmed_cash_flow_adjustment,
+                       account_day_pnl=excluded.account_day_pnl,
+                       loss_gauge=excluded.loss_gauge,
+                       loss_lock=MAX(risk_sessions.loss_lock,excluded.loss_lock),
+                       loss_lock_triggered_at=COALESCE(
+                           risk_sessions.loss_lock_triggered_at,
+                           excluded.loss_lock_triggered_at
+                       ),
+                       profit_objective_reached=MAX(
+                           risk_sessions.profit_objective_reached,
+                           excluded.profit_objective_reached
+                       ),
+                       profit_objective_reached_at=COALESCE(
+                           risk_sessions.profit_objective_reached_at,
+                           excluded.profit_objective_reached_at
+                       ),
+                       active_profit_floor_dollars=COALESCE(
+                           risk_sessions.active_profit_floor_dollars,
+                           excluded.active_profit_floor_dollars
+                       ),
+                       updated_at=excluded.updated_at,
+                       broker_confirmed_at=excluded.broker_confirmed_at,
+                       broker_state_json=excluded.broker_state_json""",
+                (
+                    account_key,
+                    session_date,
+                    strategy_version,
+                    start_equity,
+                    baseline_confirmed_at,
+                    current_equity,
+                    realized_net_pnl,
+                    cash_flow_adjustment,
+                    account_day_pnl,
+                    loss_gauge,
+                    -100.0,
+                    int(loss_lock),
+                    loss_lock_triggered_at,
+                    150.0,
+                    int(objective_reached),
+                    objective_reached_at,
+                    profit_floor,
+                    now,
+                    broker_confirmed_at,
+                    json.dumps(broker_state, separators=(",", ":")),
+                ),
+            )
+        row = self.risk_session(account_key, session_date)
+        assert row is not None
+        return row
+
+    def risk_session(self, account_key: str, session_date: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            """SELECT * FROM risk_sessions
+               WHERE account_key=? AND session_date=?""",
+            (account_key, session_date),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["broker_state"] = json.loads(item.pop("broker_state_json"))
+        item["loss_lock"] = bool(item["loss_lock"])
+        item["profit_objective_reached"] = bool(item["profit_objective_reached"])
+        item["post_objective_new_risk_buffer"] = (
+            max(0.0, float(item["account_day_pnl"]) - 125.0)
+            if item["profit_objective_reached"]
+            else None
+        )
+        item["new_entries_allowed"] = bool(
+            not item["loss_lock"]
+            and (
+                not item["profit_objective_reached"]
+                or float(item["post_objective_new_risk_buffer"] or 0) > 0
+            )
+        )
+        item["trade_authority"] = False
+        return item
+
+    def risk_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """SELECT account_key,session_date FROM risk_sessions
+               ORDER BY session_date DESC,updated_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [
+            item
+            for row in rows
+            if (
+                item := self.risk_session(
+                    str(row["account_key"]), str(row["session_date"])
+                )
+            )
+            is not None
+        ]
 
     def prune(self, retention_days: int) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
