@@ -26,6 +26,33 @@ from .storage import Store, utc_now
 from .websocket_client import MinimalWebSocket, WebSocketError
 
 
+MASSIVE_EQUITY_TICKER_TYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    # Massive reports exchange-listed closed-end funds under its broader FUND
+    # reference type.  Accept the human-facing CEF name in configuration while
+    # keeping the provider query explicit and auditable.
+    "CEF": ("FUND",),
+    "CLOSED_END_FUND": ("FUND",),
+}
+
+
+def expand_equity_ticker_types(ticker_types: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize configured equity types without dropping CS/ADRC or fund types."""
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for raw_type in ticker_types:
+        ticker_type = str(raw_type).strip().upper()
+        if not ticker_type:
+            continue
+        provider_types = MASSIVE_EQUITY_TICKER_TYPE_ALIASES.get(
+            ticker_type, (ticker_type,)
+        )
+        for provider_type in provider_types:
+            if provider_type not in seen:
+                seen.add(provider_type)
+                expanded.append(provider_type)
+    return tuple(expanded)
+
+
 def load_api_key(service: str) -> str:
     env_value = os.environ.get("MASSIVE_API_KEY", "").strip()
     if env_value:
@@ -101,7 +128,7 @@ class MassiveREST:
     def active_equity_universe(self, ticker_types: tuple[str, ...]) -> list[dict[str, Any]]:
         """Fetch every active eligible U.S. equity reference record with pagination."""
         results: list[dict[str, Any]] = []
-        for ticker_type in ticker_types:
+        for ticker_type in expand_equity_ticker_types(ticker_types):
             query = urlencode(
                 {
                     "market": "stocks", "locale": "us", "active": "true",
@@ -299,6 +326,9 @@ class TitanWatcher:
     def _bootstrap_market_scope(self) -> None:
         """Refresh the full universe and baseline at the 04:00 live-data start."""
         rest = MassiveREST(self.config, self.api_key)
+        provider_ticker_types = expand_equity_ticker_types(
+            self.config.eligible_ticker_types
+        )
         universe = rest.active_equity_universe(self.config.eligible_ticker_types)
         universe_count = self.store.replace_eligible_universe(universe)
         snapshots = rest.full_snapshot()
@@ -309,6 +339,7 @@ class TitanWatcher:
                 "reference_records": universe_count,
                 "raw_snapshot_records": snapshot_count,
                 "eligible_ticker_types": list(self.config.eligible_ticker_types),
+                "massive_query_ticker_types": list(provider_ticker_types),
                 "current_session_plan_count": 0,
                 "note": (
                     "04:00 startup refreshes the eligible universe and baseline, then current-session "
@@ -385,10 +416,84 @@ class TitanWatcher:
             bars.append(bar)
         snapshot = self.store.get_snapshot(bar.symbol)
         quote = self.store.get_quote(bar.symbol)
-        threshold = self.config.under5_max_quote_spread_pct if bar.close < 5 else self.config.max_quote_spread_pct
+        threshold = self.config.under5_max_quote_spread_pct if bar.close <= 5 else self.config.max_quote_spread_pct
         signal = compute_market_signal(list(bars), snapshot, quote, threshold)
         if not signal:
             return
+
+        # Load the causal same-minute denominator only for names that have
+        # already passed the inexpensive broad policy screen, or whose
+        # intraday development is strong enough to merit a research-only watch.
+        # The first pass deliberately leaves RVOL unknown rather than using the
+        # prior full trading day's volume as a biased fallback.
+        preliminary_policy = evaluate_shadow_candidate(signal, self.config)
+        should_load_rvol = bool(
+            preliminary_policy.entry_eligible
+            or preliminary_policy.watch_eligible
+            or signal.get("emerging_intraday_leader_provisional")
+        )
+        history_loader = getattr(
+            self.store, "same_minute_cumulative_history", None
+        )
+        if should_load_rvol and callable(history_loader):
+            same_minute_history = history_loader(
+                bar.symbol,
+                bar.start_ms,
+                self.config.timezone,
+                20,
+            )
+            signal = compute_market_signal(
+                list(bars),
+                snapshot,
+                quote,
+                threshold,
+                same_minute_cumulative_history=same_minute_history,
+            )
+            if not signal:
+                return
+
+        halt_context_loader = getattr(self.store, "post_halt_context", None)
+        if callable(halt_context_loader):
+            post_halt = halt_context_loader(
+                bar.symbol,
+                bar.start_ms,
+                self.config.timezone,
+            )
+            if post_halt:
+                signal["post_halt_context"] = post_halt
+                halt_blocks_entry = bool(post_halt.get("active_halt"))
+                under5_rearm_pending = bool(
+                    signal.get("lane") == "under5"
+                    and not post_halt["entry_rearmed"]
+                )
+                if halt_blocks_entry or under5_rearm_pending:
+                    signal["entry_setup_eligible"] = False
+                    signal["post_halt_entry_blocked"] = True
+                    signal["post_halt_rearm_requirement"] = (
+                        "Resumption, two completed post-resumption bars for the "
+                        "under-$5 lane, and materially new executable structure "
+                        "are required."
+                    )
+
+        security_loader = getattr(self.store, "get_eligible_security", None)
+        if callable(security_loader):
+            security = security_loader(bar.symbol)
+            if security:
+                ticker_type = str(security.get("ticker_type") or "").upper()
+                signal["ticker_type"] = ticker_type or None
+                if ticker_type in {"ETF", "ETV"}:
+                    instrument_group = "exchange_traded_product"
+                elif ticker_type == "FUND":
+                    instrument_group = "fund_reference_requires_broker_classification"
+                else:
+                    instrument_group = "operating_company_equity"
+                signal["instrument_group"] = instrument_group
+                signal["broker_tradability_verified"] = bool(
+                    security.get("broker_tradability_verified", False)
+                )
+                signal["instrument_group_role"] = (
+                    "context_only; instrument-specific live eligibility remains external"
+                )
 
         previous = self.store.get_candidate(bar.symbol)
         previous_payload: dict[str, Any] = {}
@@ -400,7 +505,15 @@ class TitanWatcher:
         policy = evaluate_shadow_candidate(signal, self.config)
         entry_eligible = policy.entry_eligible
         watch_eligible = policy.watch_eligible
-        if not entry_eligible and not watch_eligible:
+        emerging_only = bool(
+            not entry_eligible
+            and not watch_eligible
+            and (
+                signal.get("emerging_intraday_leader")
+                or signal.get("emerging_intraday_leader_provisional")
+            )
+        )
+        if not entry_eligible and not watch_eligible and not emerging_only:
             self.store.delete_candidate(bar.symbol)
             self.crossed_triggers.pop(bar.symbol, None)
             return
@@ -411,8 +524,17 @@ class TitanWatcher:
         )
         signal["fresh_news_required"] = self.config.fresh_news_required
         signal["state_is_entry_gate"] = self.config.state_is_entry_gate
-        signal["disposition"] = "ENTRY_CANDIDATE" if entry_eligible else "ENTRY_REJECTED_KEEP_WATCH"
+        signal["disposition"] = (
+            "ENTRY_CANDIDATE"
+            if entry_eligible
+            else (
+                "EMERGING_INTRADAY_RANKING_CONTEXT"
+                if emerging_only
+                else "ENTRY_REJECTED_KEEP_WATCH"
+            )
+        )
         signal["entry_rejection_reasons"] = rejection_reasons
+        signal["trade_authority"] = False
         signal["watch_rearm_requirement"] = (
             "A fresh controlled base, reclaim, or renewed acceleration must independently satisfy every structural and liquidity gate."
             if not entry_eligible else None
@@ -431,7 +553,34 @@ class TitanWatcher:
             self.candidate_enricher.request(bar.symbol, signal["direction"])
         apply_weighted_opportunity_scale(signal)
         self.store.upsert_candidate(signal)
-        self.store.save_prepared_trade_plan(build_preliminary_trade_plan(signal))
+        self.store.save_prepared_trade_plan(
+            build_preliminary_trade_plan(signal, self.config)
+        )
+        if emerging_only:
+            emerging_payload = dict(signal)
+            emerging_payload["event"] = "EMERGING_INTRADAY_LEADER_WATCH"
+            emerging_payload["confirmation_status"] = (
+                "CONFIRMED_CAUSAL_RVOL"
+                if signal.get("emerging_intraday_leader")
+                else "PROVISIONAL_RVOL_UNAVAILABLE"
+            )
+            emerging_payload["warning"] = (
+                "Ranking context only. Existing live eligibility and every broker, "
+                "execution, liquidity, structure and risk gate remain unchanged."
+            )
+            session_date = datetime.fromtimestamp(
+                bar.start_ms / 1000, tz=timezone.utc
+            ).astimezone(self.et).date().isoformat()
+            refresh_bucket = bar.start_ms // 300_000
+            self.emit(
+                "EMERGING_INTRADAY_LEADER_WATCH",
+                bar.symbol,
+                45 if signal.get("emerging_intraday_leader") else 35,
+                emerging_payload,
+                f"emerging:{bar.symbol}:{session_date}:{refresh_bucket}",
+            )
+            self.crossed_triggers.pop(bar.symbol, None)
+            return
         if signal.get("base_high") != (previous or {}).get("base_high"):
             self.crossed_triggers.pop(bar.symbol, None)
         if not entry_eligible:
@@ -501,6 +650,31 @@ class TitanWatcher:
             or candidate_payload.get("direction") != "UP"
         ):
             return
+        halt_context_loader = getattr(self.store, "post_halt_context", None)
+        if callable(halt_context_loader):
+            event_ms = int(event.get("s") or event.get("e") or 0)
+            halt_context = halt_context_loader(
+                symbol,
+                event_ms,
+                self.config.timezone,
+            )
+            if halt_context and (
+                halt_context.get("active_halt")
+                or (
+                    candidate.get("lane") == "under5"
+                    and not halt_context.get("entry_rearmed", False)
+                )
+            ):
+                return
+            resumption_ms = (
+                halt_context.get("resumption_timestamp_ms")
+                if halt_context else None
+            )
+            base_end_ms = candidate_payload.get("base_end_ms")
+            if resumption_ms is not None and (
+                base_end_ms is None or int(base_end_ms) <= int(resumption_ms)
+            ):
+                return
         if self.crossed_triggers.get(symbol) == candidate.get("base_high"):
             return
         quote = self.store.get_quote(symbol)
@@ -518,7 +692,7 @@ class TitanWatcher:
         )
         if not payload:
             return
-        if payload["inside_half_atr_chase_ceiling"] and payload["volume_pace_expanding"]:
+        if payload["inside_chase_ceiling"] and payload["volume_pace_expanding"]:
             if not payload.get("session_lane_eligible"):
                 priority = 60
             else:
@@ -541,6 +715,12 @@ class TitanWatcher:
             if indicator not in (17, 18):
                 continue
             self.store.insert_halt(event, int(indicator))
+            # A pre-halt base is never eligible to survive a halt transition.
+            # Persistently remove it before any later second aggregate can emit
+            # a trigger; the minute path must construct and review a new base.
+            if symbol:
+                self.store.delete_candidate(symbol)
+                self.crossed_triggers.pop(symbol, None)
             event_type = "HALT" if indicator == 17 else "RESUMPTION"
             payload = {
                 "schema_version": 1,
@@ -552,7 +732,7 @@ class TitanWatcher:
                 "required_action": (
                     "Disarm entries and reassess protection; do not assume stop execution while halted."
                     if indicator == 17
-                    else "Restart the 15-minute post-halt waiting clock before any under-$5 entry."
+                    else "Require two completed post-resumption bars and materially new executable structure before any under-$5 entry."
                 ),
             }
             self.emit(
