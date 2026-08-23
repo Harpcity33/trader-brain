@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-23",
+  "strategy_version": "titan_live_canonical_2026-08-23_v1",
+  "authorization": "explicit_user_authorization",
+  "objective": "Permit one materially best qualified setup to use any unleveraged notional through the full account without requiring multiple plays, while retaining the fixed account-day loss boundary.",
+  "canonical_automation": {
+    "path": "config/live-automation/robinhood-momentum-engine.toml",
+    "sha256": "a567b694eb40a30ffb46db542ba634041a6f3f23a5cb32d3cdd1af0336bf47f4",
+    "replaces_amendment_stack": true
+  },
+  "supersedes": {
+    "adaptation": "knowledge/adaptations/2026-08-22-profitability-automation.json",
+    "passages": [
+      "The fixed $15 initial, $20 reference, and $30 strengthened-winner campaign-risk caps are removed.",
+      "The mandatory 40/35/25 trigger, retest, and expansion build is removed; an initial order may receive the full dynamically authorized position.",
+      "Adds remain available but are optional and never required merely to reach the intended allocation."
+    ],
+    "preserved_rules": [
+      "The irreversible account-day loss lock remains exactly -$100.",
+      "The first +$150 crossing activates the +$125 profit-floor objective.",
+      "Fresh executable quotes, stop geometry, spread, slippage, depth, protection, halt, and no-leverage controls remain in force.",
+      "The Massive watcher remains shadow-only and has no broker authority."
+    ]
+  },
+  "runtime_policy": {
+    "policy_version": "capital_flexible_live_preparation_2026-08-23_v2",
+    "sizing_policy_version": "capital_flexible_sizing_2026-08-23_v2",
+    "prepared_plan_trade_authority": false,
+    "initial_allocation_pct_range": [0, 100],
+    "full_initial_allocation_allowed": true,
+    "adds_optional": true,
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "leverage_allowed": false,
+    "fixed_notional_cap_dollars": null,
+    "fixed_per_campaign_loss_cap_dollars": null
+  },
+  "dynamic_risk_authorization": {
+    "reviewed_notional_formula": "reviewed_entry_price * quantity * contract_multiplier",
+    "proposed_new_risk_formula": "max(stop_defined_loss_including_execution, conservative_stress_tail_loss)",
+    "execution_reserve_minimum_dollars": 5,
+    "broker_snapshot_max_age_seconds": 90,
+    "broker_snapshot_minimum_submit_buffer_seconds": 5,
+    "reservation_max_seconds": 180,
+    "one_pending_authorization_per_account_session": true,
+    "consumed_authorization_released_only_by_newer_broker_reconciliation": true,
+    "broker_notional_checks": [
+      "unleveraged_buying_power",
+      "current_gross_exposure",
+      "working_entry_notional",
+      "current_equity"
+    ]
+  },
+  "order_ledger": {
+    "entry_lifecycle": [
+      "SUBMITTED",
+      "PARTIAL",
+      "FILLED",
+      "PROTECTED"
+    ],
+    "entry_submission_required_before_exposure": true,
+    "immutable_fields": [
+      "entry_order_id",
+      "entry_order_submitted_at",
+      "entry_order_quantity",
+      "entry_risk_gate_authorization",
+      "initial_quantity"
+    ],
+    "partial_fills_monotone_and_capped": true,
+    "position_increase_must_equal_fill_increment": true,
+    "add_lifecycle_preserved": true
+  },
+  "evidence_boundary": {
+    "profit_guarantee": false,
+    "realized_loss_cap_guarantee": false,
+    "limitation": "Gaps, halts, spread expansion, and broker slippage can exceed the planned stop or the -$100 lock despite pre-order stress reserves.",
+    "allocation_principle": "Notional deployment is separate from stop-defined and stressed downside; full account notional never authorizes risking the account balance."
+  },
+  "verification": {
+    "unit_tests_passed": 50,
+    "python_compile_passed": true,
+    "toml_parse_passed": true,
+    "immutable_live_database_replay_passed": true,
+    "replay_candidate_count": 39,
+    "replay_trade_authority_count": 0,
+    "sqlite_quick_check": "ok",
+    "orders_created_during_build": 0
+  },
+  "deployment": {
+    "installed_date_et": "2026-08-23",
+    "watcher_mode": "shadow",
+    "watcher_trade_authority": false,
+    "launch_agent_state": "enabled_not_running",
+    "next_scheduled_start_et": "2026-08-24T04:00:00-04:00",
+    "schema_change": "additive",
+    "risk_session_count_after_migration": 0,
+    "risk_authorization_count_after_migration": 0,
+    "position_campaign_count_after_migration": 0,
+    "live_broker_orders_created": 0
+  }
+}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from math import floor
 from typing import Any
 
 from .config import SizingPolicy
@@ -139,7 +138,7 @@ def apply_weighted_opportunity_scale(signal: dict[str, Any]) -> dict[str, Any]:
 
 def _resolve_sizing_policy(config: Any | None) -> tuple[SizingPolicy, str, str | None]:
     if isinstance(config, SizingPolicy):
-        return config, "profit_seeking_live_preparation_2026-08-22_v1", None
+        return config, "capital_flexible_live_preparation_2026-08-23_v2", None
     if config is not None and isinstance(getattr(config, "sizing_policy", None), SizingPolicy):
         return (
             config.sizing_policy,
@@ -148,7 +147,7 @@ def _resolve_sizing_policy(config: Any | None) -> tuple[SizingPolicy, str, str |
         )
     return (
         SizingPolicy.defaults(),
-        "profit_seeking_live_preparation_2026-08-22_v1",
+        "capital_flexible_live_preparation_2026-08-23_v2",
         None,
     )
 
@@ -187,20 +186,11 @@ def build_preliminary_trade_plan(
     t1 = None
     t2 = None
     t3 = None
-    quantity_cap = 0
+    quantity_status = "STRUCTURE_REQUIRED"
     if lane == "under5":
-        sizing_tier = "under5_initial_probe"
-        allocation_cap = sizing.under5_allocation_ceiling
-        lane_risk_ceiling = sizing.under5_risk_ceiling
+        sizing_tier = "under5_broker_resolved_capital"
     else:
-        sizing_tier = "initial_probe"
-        allocation_cap = sizing.probe_allocation_cap
-        lane_risk_ceiling = sizing.regular_risk_ceiling
-    planned_risk_cap = min(
-        sizing.probe_risk_cap,
-        sizing.initial_risk,
-        lane_risk_ceiling,
-    )
+        sizing_tier = "broker_resolved_capital"
     if direction == "UP" and trigger and stop is not None:
         reference_entry_price = max(
             float(trigger),
@@ -215,37 +205,13 @@ def build_preliminary_trade_plan(
         t1 = reference_entry_price + risk_per_share
         t2 = reference_entry_price + 2 * risk_per_share
         t3 = reference_entry_price + 3 * risk_per_share
-        quantity_cap = max(
-            0,
-            min(
-                floor(allocation_cap / reference_entry_price),
-                floor(planned_risk_cap / risk_per_share),
-            ),
-        )
-        if quantity_cap < 1:
-            blockers.append("one whole share cannot fit preliminary allocation/risk caps")
+        quantity_status = "BROKER_CONFIRMED_LIMITS_REQUIRED"
 
     status = "PRELIMINARY"
     if blockers:
         status = "WATCH_ONLY"
     if direction == "DOWN":
         status = "UNDERLYING_WATCH_ONLY"
-    build_tranches = [
-        {
-            "stage": stage,
-            "allocation_pct": percentage,
-            "condition": condition,
-        }
-        for stage, percentage, condition in zip(
-            ("trigger", "profitable_retest", "renewed_expansion"),
-            sizing.build_tranches_pct,
-            (
-                "exact contemporaneous trigger and every execution gate passes",
-                "position is profitable and a completed hold, higher low, or retest confirms",
-                "renewed price and volume expansion forms from strengthened structure",
-            ),
-        )
-    ]
     return {
         "schema_version": 2,
         "policy_version": policy_version,
@@ -280,29 +246,74 @@ def build_preliminary_trade_plan(
             {"name": "T3", "r_multiple": 3, "price": round(t3, 6) if t3 is not None else None},
         ],
         "sizing_tier": sizing_tier,
-        "preliminary_quantity_cap": quantity_cap,
-        "preliminary_allocation_cap": allocation_cap,
-        "preliminary_risk_cap": planned_risk_cap,
-        "normal_regular_allocation_ceiling": sizing.regular_allocation_ceiling,
-        "configured_regular_hard_risk_ceiling": sizing.regular_risk_ceiling,
-        "under5_allocation_ceiling": sizing.under5_allocation_ceiling,
-        "under5_risk_ceiling": sizing.under5_risk_ceiling,
-        "risk_campaign": {
-            "reference_risk_unit": sizing.reference_risk_unit,
-            "initial_risk": sizing.initial_risk,
-            "normal_campaign_risk": min(
-                sizing.reference_risk_unit, lane_risk_ceiling
+        "preliminary_quantity_cap": None,
+        "preliminary_allocation_cap": None,
+        "preliminary_risk_cap": None,
+        "quantity_status": quantity_status,
+        "position_notional_policy": {
+            "fixed_notional_cap_dollars": None,
+            "max_unleveraged_buying_power_fraction": (
+                sizing.max_unleveraged_buying_power_fraction
             ),
-            "strengthened_winner_risk_cap": min(
-                sizing.strengthened_winner_risk_cap, lane_risk_ceiling
+            "single_setup_concentration_allowed": (
+                sizing.single_setup_concentration_allowed
             ),
-            "lane_risk_ceiling": lane_risk_ceiling,
-            "profit_funded_only": True,
-            "open_risk_neutral_adds_only": True,
+            "full_buying_power_requires_materially_best_available_setup": True,
+            "materially_best_condition": (
+                "highest-quality current executable opportunity after comparative "
+                "ranking, live execution checks, and all risk checks"
+            ),
+            "concentration_is_permission_not_instruction": True,
+            "confirmed_buying_power_source": "broker",
+            "requires_fresh_broker_buying_power": True,
+            "leverage_allowed": sizing.leverage_allowed,
+            "notional_quantity_formula": (
+                "floor(fresh_broker_unleveraged_buying_power * "
+                "max_unleveraged_buying_power_fraction / reviewed_entry_price)"
+            ),
             "reference_only": True,
         },
-        "build_tranches_pct": list(sizing.build_tranches_pct),
-        "build_tranches": build_tranches,
+        "loss_at_stop_policy": {
+            "fixed_per_trade_loss_cap_dollars": None,
+            "account_day_loss_limit_dollars": sizing.account_day_loss_limit_dollars,
+            "available_new_stressed_risk_capacity_source": (
+                "exact_geometry_risk_gate_plus_broker_confirmed_reconciled_risk_session"
+            ),
+            "requires_fresh_reconciled_account_state": True,
+            "requires_existing_open_risk_reservation": True,
+            "requires_loss_lock_and_profit_floor_checks": True,
+            "requires_unleveraged_buying_power_and_gross_exposure_check": True,
+            "requires_max_of_stop_or_stress_tail_loss": True,
+            "stressed_risk_quantity_formula": (
+                "floor(dynamic_new_risk_capacity / max(stop_loss_including_execution, "
+                "stress_tail_loss))"
+            ),
+            "final_quantity_formula": (
+                "min(notional_quantity, stressed_risk_quantity, broker_order_limits)"
+            ),
+            "stop_execution_not_guaranteed": True,
+            "reference_only": True,
+        },
+        "risk_campaign": {
+            "fixed_initial_risk_dollars": None,
+            "fixed_campaign_risk_cap_dollars": None,
+            "account_day_loss_limit_dollars": sizing.account_day_loss_limit_dollars,
+            "available_new_stressed_risk_capacity_source": (
+                "exact_geometry_risk_gate_plus_broker_confirmed_reconciled_risk_session"
+            ),
+            "single_setup_may_consume_dynamic_new_stressed_risk_capacity": True,
+            "reference_only": True,
+        },
+        "initial_entry_allocation_policy": {
+            "initial_allocation_pct_range": list(
+                sizing.initial_allocation_pct_range
+            ),
+            "full_initial_allocation_allowed": sizing.full_initial_allocation_allowed,
+            "initial_entry_requires_profit_funding": False,
+            "initial_entry_requires_staging": False,
+            "adds_optional": sizing.adds_optional,
+            "reference_only": True,
+        },
         "core_runner_policy": {
             "at_1r": "no_automatic_trim; protect only at valid higher structure",
             "at_2r_dominant_expanding_trim_pct": [0, 15],
@@ -313,8 +324,12 @@ def build_preliminary_trade_plan(
             "reference_only": True,
         },
         "add_policy": {
-            "profit_funded": True,
-            "open_risk_neutral": True,
+            "adds_optional": sizing.adds_optional,
+            "risk_constraint_logic": "OR",
+            "allowed_when_any": [
+                "add is profit-funded after protection",
+                "aggregate open loss-at-stop does not increase",
+            ],
             "requires_profitable_strengthened_structure": True,
             "may_not_widen_original_catastrophe_stop": True,
             "reference_only": True,

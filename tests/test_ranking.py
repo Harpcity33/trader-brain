@@ -57,28 +57,107 @@ class RankingTests(unittest.TestCase):
         plan = build_preliminary_trade_plan(signal, RuntimeConfig.load(config_path))
         self.assertEqual(plan["status"], "PRELIMINARY")
         self.assertFalse(plan["trade_authority"])
-        self.assertGreater(plan["preliminary_quantity_cap"], 0)
+        self.assertIsNone(plan["preliminary_quantity_cap"])
         self.assertEqual(plan["blockers"], [])
         self.assertIn("catalyst_quality", plan["context_missing"])
-        self.assertEqual(plan["preliminary_allocation_cap"], 437.5)
-        self.assertEqual(plan["preliminary_risk_cap"], 15.0)
-        self.assertEqual(plan["normal_regular_allocation_ceiling"], 1062.5)
-        self.assertEqual(plan["configured_regular_hard_risk_ceiling"], 37.5)
+        self.assertIsNone(plan["preliminary_allocation_cap"])
+        self.assertIsNone(plan["preliminary_risk_cap"])
+        self.assertEqual(plan["quantity_status"], "BROKER_CONFIRMED_LIMITS_REQUIRED")
+        self.assertEqual(
+            plan["position_notional_policy"]["max_unleveraged_buying_power_fraction"],
+            1.0,
+        )
+        self.assertTrue(
+            plan["position_notional_policy"]["single_setup_concentration_allowed"]
+        )
+        self.assertTrue(
+            plan["position_notional_policy"][
+                "full_buying_power_requires_materially_best_available_setup"
+            ]
+        )
+        self.assertFalse(plan["position_notional_policy"]["leverage_allowed"])
+        self.assertIsNone(
+            plan["position_notional_policy"]["fixed_notional_cap_dollars"]
+        )
+        self.assertEqual(
+            plan["loss_at_stop_policy"]["account_day_loss_limit_dollars"],
+            100.0,
+        )
+        self.assertIsNone(
+            plan["loss_at_stop_policy"]["fixed_per_trade_loss_cap_dollars"]
+        )
         self.assertAlmostEqual(plan["reference_entry_price"], 10.12)
         self.assertAlmostEqual(plan["risk_per_share"], 0.22)
         self.assertAlmostEqual(plan["t1"], 10.34)
         self.assertAlmostEqual(plan["t2"], 10.56)
         self.assertAlmostEqual(plan["t3"], 10.78)
-        self.assertLessEqual(
-            plan["preliminary_quantity_cap"] * plan["risk_per_share"],
-            plan["preliminary_risk_cap"],
-        )
         self.assertLess(plan["modeled_move_capacity_pct"], 1.0)
-        self.assertEqual(plan["build_tranches_pct"], [40, 35, 25])
-        self.assertEqual(plan["risk_campaign"]["reference_risk_unit"], 20.0)
-        self.assertEqual(plan["risk_campaign"]["strengthened_winner_risk_cap"], 30.0)
+        self.assertIsNone(plan["risk_campaign"]["fixed_initial_risk_dollars"])
+        self.assertTrue(
+            plan["risk_campaign"][
+                "single_setup_may_consume_dynamic_new_stressed_risk_capacity"
+            ]
+        )
+        self.assertTrue(
+            plan["loss_at_stop_policy"][
+                "requires_unleveraged_buying_power_and_gross_exposure_check"
+            ]
+        )
+        self.assertTrue(
+            plan["loss_at_stop_policy"][
+                "requires_max_of_stop_or_stress_tail_loss"
+            ]
+        )
+        self.assertTrue(
+            plan["loss_at_stop_policy"]["requires_existing_open_risk_reservation"]
+        )
+        self.assertTrue(
+            plan["loss_at_stop_policy"]["requires_loss_lock_and_profit_floor_checks"]
+        )
+        self.assertEqual(
+            plan["initial_entry_allocation_policy"]["initial_allocation_pct_range"],
+            [0, 100],
+        )
+        self.assertTrue(
+            plan["initial_entry_allocation_policy"]["full_initial_allocation_allowed"]
+        )
+        self.assertFalse(
+            plan["initial_entry_allocation_policy"][
+                "initial_entry_requires_profit_funding"
+            ]
+        )
+        self.assertFalse(
+            plan["initial_entry_allocation_policy"]["initial_entry_requires_staging"]
+        )
+        self.assertTrue(plan["initial_entry_allocation_policy"]["adds_optional"])
         self.assertEqual(plan["core_runner_policy"]["runner_pct"], [20, 30])
-        self.assertTrue(plan["add_policy"]["open_risk_neutral"])
+        self.assertTrue(plan["add_policy"]["adds_optional"])
+        self.assertEqual(plan["add_policy"]["risk_constraint_logic"], "OR")
+        self.assertEqual(len(plan["add_policy"]["allowed_when_any"]), 2)
+
+    def test_default_policy_resolution_uses_capital_flexible_version(self) -> None:
+        signal = {
+            "symbol": "TEST",
+            "observed_at": "2026-08-20T14:00:00+00:00",
+            "lane": "regular_equity",
+            "direction": "UP",
+            "base_high": 10.10,
+            "invalidation": 9.90,
+            "limit_ceiling": 10.12,
+            "quote_fresh": True,
+            "preliminary_liquidity_pass": True,
+            "entry_rejection_reasons": [],
+            "exhaustion_lock": False,
+        }
+        plan = build_preliminary_trade_plan(signal)
+        self.assertEqual(
+            plan["policy_version"],
+            "capital_flexible_live_preparation_2026-08-23_v2",
+        )
+        self.assertEqual(
+            plan["sizing_policy_version"],
+            "capital_flexible_sizing_2026-08-23_v2",
+        )
 
     def test_under5_uses_lane_sizing_without_fresh_catalyst_blocker(self) -> None:
         signal = {
@@ -93,14 +172,16 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(plan["status"], "PRELIMINARY")
         self.assertEqual(plan["blockers"], [])
         self.assertIn("catalyst_quality", plan["context_missing"])
-        self.assertEqual(plan["preliminary_allocation_cap"], 625.0)
-        self.assertEqual(plan["sizing_tier"], "under5_initial_probe")
-        self.assertEqual(plan["preliminary_risk_cap"], 15.0)
-        self.assertEqual(plan["risk_campaign"]["normal_campaign_risk"], 20.0)
-        self.assertEqual(plan["risk_campaign"]["strengthened_winner_risk_cap"], 22.5)
-        self.assertLessEqual(
-            plan["preliminary_quantity_cap"] * plan["risk_per_share"],
-            plan["preliminary_risk_cap"],
+        self.assertIsNone(plan["preliminary_allocation_cap"])
+        self.assertEqual(plan["sizing_tier"], "under5_broker_resolved_capital")
+        self.assertIsNone(plan["preliminary_risk_cap"])
+        self.assertEqual(
+            plan["position_notional_policy"]["max_unleveraged_buying_power_fraction"],
+            1.0,
+        )
+        self.assertEqual(
+            plan["risk_campaign"]["account_day_loss_limit_dollars"],
+            100.0,
         )
         self.assertTrue(any("not an unconditional" in note for note in plan["context_notes"]))
         self.assertTrue(any("adverse filing" in item for item in plan["skip_conditions"]))

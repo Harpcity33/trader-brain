@@ -366,6 +366,47 @@ CREATE TABLE IF NOT EXISTS risk_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_risk_sessions_date
     ON risk_sessions(session_date DESC, account_key);
+
+CREATE TABLE IF NOT EXISTS risk_session_snapshots (
+    account_key TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    broker_confirmed_at TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(account_key, session_date, broker_confirmed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_risk_session_snapshots_date
+    ON risk_session_snapshots(session_date DESC, broker_confirmed_at DESC);
+
+CREATE TABLE IF NOT EXISTS risk_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    account_key TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    instrument_key TEXT NOT NULL,
+    thesis_key TEXT NOT NULL,
+    risk_action TEXT NOT NULL CHECK(risk_action IN ('ENTRY','ADD')),
+    status TEXT NOT NULL CHECK(status IN (
+        'ACTIVE','CONSUMED','RECONCILED','RELEASED','EXPIRED'
+    )),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    bound_at TEXT,
+    reconciled_at TEXT,
+    broker_order_id TEXT,
+    campaign_id TEXT,
+    release_reason TEXT,
+    evidence_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_risk_authorizations_session
+    ON risk_authorizations(account_key, session_date, status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_active
+    ON risk_authorizations(account_key, session_date)
+    WHERE status='ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_pending
+    ON risk_authorizations(account_key, session_date)
+    WHERE status IN ('ACTIVE','CONSUMED');
 """
 
 
@@ -394,6 +435,372 @@ def _finite_float(value: Any, field: str) -> float:
     if not isfinite(result):
         raise ValueError(f"{field} must be a finite number")
     return result
+
+
+def _validate_risk_gate_authorization(
+    authorization: Any,
+    *,
+    account_key: str,
+    instrument_key: str,
+    thesis_key: str,
+    strategy_version: str,
+    expected_action: str,
+    order_submitted_at: str,
+) -> None:
+    """Validate the exact pre-order risk-gate evidence carried into a campaign.
+
+    The watcher still has no broker or order authority.  This check makes it
+    impossible for an entry/add transition to silently omit the notional,
+    downside, reserve, or fresh risk-gate decision that authorized submission.
+    """
+    if not isinstance(authorization, dict):
+        raise ValueError(
+            "broker_state.risk_gate_authorization must be an object"
+        )
+    required = (
+        "authorization_id", "account_key", "session_date", "strategy_version",
+        "broker_confirmed_at", "broker_snapshot_valid_until", "checked_at",
+        "reservation_expires_at",
+        "reservation_scope", "current_equity_dollars",
+        "instrument_key", "thesis_key", "risk_action",
+        "reviewed_entry_price", "structural_stop_price", "quantity",
+        "contract_multiplier", "modeled_execution_loss_dollars",
+        "stress_tail_loss_dollars", "reviewed_notional_dollars",
+        "calculated_stop_defined_loss_dollars", "proposed_new_risk_dollars",
+        "existing_open_downside_dollars", "existing_pending_risk_dollars",
+        "execution_reserve_dollars",
+        "unleveraged_buying_power_dollars",
+        "current_gross_exposure_dollars",
+        "working_entry_notional_dollars",
+        "broker_new_notional_capacity_dollars",
+        "post_order_gross_exposure_dollars",
+        "uncredited_open_profit_dollars",
+        "open_loss_gauge_degradation_dollars",
+        "loss_lock_new_risk_capacity_dollars",
+        "profit_floor_new_risk_capacity_dollars",
+        "dynamic_new_risk_capacity_dollars",
+    )
+    missing = [field for field in required if field not in authorization]
+    if missing:
+        raise ValueError(
+            "risk-gate authorization is missing: " + ", ".join(missing)
+        )
+    evidence = {
+        key: value for key, value in authorization.items()
+        if key != "authorization_id"
+    }
+    expected_id = hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if str(authorization["authorization_id"]) != expected_id:
+        raise ValueError("risk-gate authorization hash does not match its evidence")
+    exact_identity = {
+        "account_key": account_key,
+        "instrument_key": instrument_key,
+        "thesis_key": thesis_key,
+        "strategy_version": strategy_version,
+        "risk_action": expected_action,
+    }
+    for field, expected in exact_identity.items():
+        actual = str(authorization[field])
+        if field in {"thesis_key", "risk_action"}:
+            actual = actual.upper()
+        if actual != expected:
+            raise ValueError(
+                f"risk-gate authorization {field} does not match campaign"
+            )
+    checked_at = datetime.fromisoformat(
+        _aware_timestamp(authorization["checked_at"], "risk authorization checked_at")
+    )
+    expires_at = datetime.fromisoformat(
+        _aware_timestamp(
+            authorization["reservation_expires_at"],
+            "risk authorization reservation_expires_at",
+        )
+    )
+    snapshot_valid_until = datetime.fromisoformat(
+        _aware_timestamp(
+            authorization["broker_snapshot_valid_until"],
+            "risk authorization broker_snapshot_valid_until",
+        )
+    )
+    broker_confirmed_at = datetime.fromisoformat(
+        _aware_timestamp(
+            authorization["broker_confirmed_at"],
+            "risk authorization broker_confirmed_at",
+        )
+    )
+    if str(authorization["reservation_scope"]) != "one_active_per_account_session":
+        raise ValueError("risk-gate authorization has an invalid reservation scope")
+    if broker_confirmed_at > checked_at:
+        raise ValueError("risk-gate authorization predates its broker snapshot")
+    if checked_at >= snapshot_valid_until:
+        raise ValueError("risk-gate authorization uses an expired broker snapshot")
+    if expires_at <= checked_at or expires_at - checked_at > timedelta(seconds=180):
+        raise ValueError("risk-gate authorization has an invalid reservation lease")
+    if expires_at > snapshot_valid_until + timedelta(milliseconds=1):
+        raise ValueError("risk authorization outlives its broker snapshot")
+    submitted_at = datetime.fromisoformat(
+        _aware_timestamp(order_submitted_at, "broker order_submitted_at")
+    )
+    if checked_at > submitted_at + timedelta(seconds=15):
+        raise ValueError("risk-gate authorization cannot postdate broker submission")
+    if submitted_at - checked_at > timedelta(seconds=180):
+        raise ValueError("risk-gate authorization is too old for broker submission")
+    if submitted_at > expires_at:
+        raise ValueError("broker submission occurred after risk authorization expired")
+    current_equity = _finite_float(
+        authorization["current_equity_dollars"],
+        "risk authorization current_equity_dollars",
+    )
+    entry_price = _finite_float(
+        authorization["reviewed_entry_price"],
+        "risk authorization reviewed_entry_price",
+    )
+    stop_price = _finite_float(
+        authorization["structural_stop_price"],
+        "risk authorization structural_stop_price",
+    )
+    quantity = _finite_float(
+        authorization["quantity"], "risk authorization quantity"
+    )
+    multiplier = _finite_float(
+        authorization["contract_multiplier"],
+        "risk authorization contract_multiplier",
+    )
+    modeled_execution_loss = _finite_float(
+        authorization["modeled_execution_loss_dollars"],
+        "risk authorization modeled_execution_loss_dollars",
+    )
+    stress_tail_loss = _finite_float(
+        authorization["stress_tail_loss_dollars"],
+        "risk authorization stress_tail_loss_dollars",
+    )
+    reviewed_notional = _finite_float(
+        authorization["reviewed_notional_dollars"],
+        "risk authorization reviewed_notional_dollars",
+    )
+    stop_defined_loss = _finite_float(
+        authorization["calculated_stop_defined_loss_dollars"],
+        "risk authorization calculated_stop_defined_loss_dollars",
+    )
+    proposed_risk = _finite_float(
+        authorization["proposed_new_risk_dollars"],
+        "risk authorization proposed_new_risk_dollars",
+    )
+    reserve = _finite_float(
+        authorization["execution_reserve_dollars"],
+        "risk authorization execution_reserve_dollars",
+    )
+    capacity = _finite_float(
+        authorization["dynamic_new_risk_capacity_dollars"],
+        "risk authorization dynamic_new_risk_capacity_dollars",
+    )
+    for field in (
+        "existing_open_downside_dollars", "existing_pending_risk_dollars",
+        "uncredited_open_profit_dollars",
+        "open_loss_gauge_degradation_dollars",
+        "loss_lock_new_risk_capacity_dollars",
+        "unleveraged_buying_power_dollars",
+        "current_gross_exposure_dollars",
+        "working_entry_notional_dollars",
+        "broker_new_notional_capacity_dollars",
+        "post_order_gross_exposure_dollars",
+    ):
+        if _finite_float(authorization[field], f"risk authorization {field}") < 0:
+            raise ValueError(f"risk authorization {field} cannot be negative")
+    floor_capacity = authorization["profit_floor_new_risk_capacity_dollars"]
+    if floor_capacity is not None and _finite_float(
+        floor_capacity, "risk authorization profit_floor_new_risk_capacity_dollars"
+    ) < 0:
+        raise ValueError(
+            "risk authorization profit_floor_new_risk_capacity_dollars cannot be negative"
+        )
+    if (
+        current_equity <= 0 or entry_price <= 0 or stop_price <= 0
+        or quantity <= 0 or stop_price >= entry_price
+    ):
+        raise ValueError("risk-gate authorization has invalid entry geometry")
+    if multiplier not in {1.0, 100.0}:
+        raise ValueError("risk-gate authorization multiplier must be 1 or 100")
+    if modeled_execution_loss < 0 or stress_tail_loss < 0:
+        raise ValueError("risk-gate execution and stress losses cannot be negative")
+    expected_notional = entry_price * quantity * multiplier
+    expected_stop_loss = (
+        (entry_price - stop_price) * quantity * multiplier
+        + modeled_execution_loss
+    )
+    expected_proposed_risk = max(expected_stop_loss, stress_tail_loss)
+    buying_power = float(authorization["unleveraged_buying_power_dollars"])
+    gross_exposure = float(authorization["current_gross_exposure_dollars"])
+    working_notional = float(authorization["working_entry_notional_dollars"])
+    expected_notional_capacity = min(
+        buying_power,
+        max(0.0, current_equity - gross_exposure - working_notional),
+    )
+    expected_post_order_gross = gross_exposure + working_notional + expected_notional
+    calculated_pairs = (
+        (reviewed_notional, expected_notional, "reviewed notional"),
+        (stop_defined_loss, expected_stop_loss, "stop-defined loss"),
+        (proposed_risk, expected_proposed_risk, "proposed risk"),
+        (
+            float(authorization["broker_new_notional_capacity_dollars"]),
+            expected_notional_capacity,
+            "broker notional capacity",
+        ),
+        (
+            float(authorization["post_order_gross_exposure_dollars"]),
+            expected_post_order_gross,
+            "post-order gross exposure",
+        ),
+    )
+    for actual, expected, label in calculated_pairs:
+        if abs(actual - expected) > 0.005:
+            raise ValueError(f"risk-gate authorization {label} is inconsistent")
+    if reviewed_notional <= 0 or proposed_risk <= 0:
+        raise ValueError("risk-gate authorization requires positive notional and risk")
+    if reviewed_notional > expected_notional_capacity + 0.005:
+        raise ValueError("risk-gate authorization exceeds broker notional capacity")
+    if reserve < 5:
+        raise ValueError("risk-gate authorization requires at least a $5 reserve")
+    if capacity < 0 or proposed_risk > capacity + 0.005:
+        raise ValueError("risk-gate authorization exceeds dynamic risk capacity")
+
+
+def _validate_risk_authorization_against_session(
+    connection: sqlite3.Connection,
+    authorization: dict[str, Any],
+    *,
+    account_key: str,
+    strategy_version: str,
+) -> None:
+    """Bind a new order authorization to the exact durable broker snapshot."""
+    snapshot_row = connection.execute(
+        """SELECT snapshot_json FROM risk_session_snapshots
+           WHERE account_key=? AND session_date=? AND broker_confirmed_at=?""",
+        (
+            account_key,
+            str(authorization["session_date"]),
+            _aware_timestamp(
+                authorization["broker_confirmed_at"],
+                "risk authorization broker_confirmed_at",
+            ),
+        ),
+    ).fetchone()
+    if not snapshot_row:
+        raise ValueError(
+            "risk-gate authorization has no matching immutable risk snapshot"
+        )
+    risk_row = json.loads(str(snapshot_row["snapshot_json"]))
+    if str(risk_row["strategy_version"]) != strategy_version:
+        raise ValueError(
+            "risk-gate authorization strategy does not match risk session"
+        )
+    latest_row = connection.execute(
+        """SELECT loss_lock FROM risk_sessions
+           WHERE account_key=? AND session_date=?""",
+        (account_key, str(authorization["session_date"])),
+    ).fetchone()
+    if not latest_row or bool(latest_row["loss_lock"]):
+        raise ValueError(
+            "risk-gate authorization cannot bind without a current unlocked session"
+        )
+    if _aware_timestamp(
+        authorization["broker_confirmed_at"],
+        "risk authorization broker_confirmed_at",
+    ) != str(risk_row["broker_confirmed_at"]):
+        raise ValueError(
+            "risk-gate authorization broker timestamp does not match risk session"
+        )
+    if abs(
+        float(authorization["current_equity_dollars"])
+        - float(risk_row["current_equity"])
+    ) > 0.005:
+        raise ValueError("risk-gate authorization equity does not match risk session")
+    risk_broker_state = risk_row["broker_state"]
+    for field in (
+        "unleveraged_buying_power_dollars",
+        "current_gross_exposure_dollars",
+        "working_entry_notional_dollars",
+    ):
+        if abs(
+            float(authorization[field]) - float(risk_broker_state[field])
+        ) > 0.005:
+            raise ValueError(
+                f"risk-gate authorization {field} does not match risk session"
+            )
+    uncredited_open_profit = max(
+        0.0,
+        float(risk_row["account_day_pnl"]) - float(risk_row["loss_gauge"]),
+    )
+    open_degradation = max(
+        0.0,
+        float(authorization["existing_open_downside_dollars"])
+        - uncredited_open_profit,
+    )
+    loss_headroom = max(
+        0.0,
+        float(risk_row["loss_gauge"])
+        - float(risk_row["loss_limit_dollars"]),
+    )
+    loss_capacity = max(
+        0.0,
+        loss_headroom
+        - open_degradation
+        - float(authorization["existing_pending_risk_dollars"])
+        - float(authorization["execution_reserve_dollars"]),
+    )
+    floor_capacity = None
+    if bool(risk_row["profit_objective_reached"]):
+        floor_capacity = max(
+            0.0,
+            float(risk_row["account_day_pnl"]) - 125.0
+            - float(authorization["existing_open_downside_dollars"])
+            - float(authorization["existing_pending_risk_dollars"])
+            - float(authorization["execution_reserve_dollars"]),
+        )
+    dynamic_capacity = (
+        min(loss_capacity, floor_capacity)
+        if floor_capacity is not None
+        else loss_capacity
+    )
+    session_pairs = (
+        (
+            float(authorization["uncredited_open_profit_dollars"]),
+            uncredited_open_profit,
+            "uncredited open profit",
+        ),
+        (
+            float(authorization["open_loss_gauge_degradation_dollars"]),
+            open_degradation,
+            "open loss-gauge degradation",
+        ),
+        (
+            float(authorization["loss_lock_new_risk_capacity_dollars"]),
+            loss_capacity,
+            "loss-lock capacity",
+        ),
+        (
+            authorization["profit_floor_new_risk_capacity_dollars"],
+            floor_capacity,
+            "profit-floor capacity",
+        ),
+        (
+            float(authorization["dynamic_new_risk_capacity_dollars"]),
+            dynamic_capacity,
+            "dynamic capacity",
+        ),
+    )
+    for actual, expected, label in session_pairs:
+        if actual is None or expected is None:
+            if actual is not expected:
+                raise ValueError(
+                    f"risk-gate authorization {label} does not match risk session"
+                )
+        elif abs(float(actual) - float(expected)) > 0.005:
+            raise ValueError(
+                f"risk-gate authorization {label} does not match risk session"
+            )
 
 
 class Store:
@@ -775,7 +1182,8 @@ class Store:
                 "structural_stop", "risk_per_share", "t1", "t2", "t3",
                 "weighted_opportunity_score", "modeled_move_capacity_pct",
                 "preliminary_quantity_cap", "preliminary_risk_cap", "risk_campaign",
-                "build_tranches_pct", "core_runner_policy", "add_policy", "blockers",
+                "initial_entry_allocation_policy", "core_runner_policy", "add_policy",
+                "blockers",
             )
         }
         digest = hashlib.sha256(
@@ -1332,6 +1740,7 @@ class Store:
         with self.transaction():
             existing = self.conn.execute(
                 f"""SELECT campaign_id, original_stop, current_stop, status,
+                           initial_quantity,current_quantity,broker_state_json,
                            broker_confirmed_at, symbol, thesis_key, direction,
                            asset_class, strategy_version
                     FROM position_campaigns
@@ -1340,6 +1749,7 @@ class Store:
                     ORDER BY updated_at DESC LIMIT 1""",
                 (payload["account_key"], payload["instrument_key"], *terminal_statuses),
             ).fetchone()
+            prior_status = str(existing["status"]) if existing else None
             if not existing:
                 thesis_conflict = self.conn.execute(
                     f"""SELECT campaign_id, instrument_key FROM position_campaigns
@@ -1355,6 +1765,373 @@ class Store:
                     )
             if not existing and status in {"CLOSED", "CANCELED", "REJECTED", "FAILED"}:
                 raise ValueError(f"{status} requires an existing active campaign")
+            last_action = str(payload.get("last_action") or "").strip().upper()
+            risk_lease_to_bind = None
+            risk_lease_order_id = None
+            risk_lease_submitted_at = None
+            prior_broker_state = (
+                json.loads(str(existing["broker_state_json"])) if existing else {}
+            )
+            entry_order_fields = (
+                "entry_order_id",
+                "entry_order_submitted_at",
+                "entry_order_quantity",
+                "entry_cumulative_filled_quantity",
+                "entry_risk_gate_authorization",
+            )
+
+            def entry_order_state(
+                state: dict[str, Any], *, required: bool, label: str
+            ) -> dict[str, Any] | None:
+                present = any(field in state for field in entry_order_fields)
+                if not required and not present:
+                    return None
+                missing_entry_fields = [
+                    field for field in entry_order_fields if state.get(field) is None
+                ]
+                if missing_entry_fields:
+                    raise ValueError(
+                        f"{label} is missing dedicated entry-order evidence: "
+                        + ", ".join(missing_entry_fields)
+                    )
+                order_id = str(state["entry_order_id"]).strip()
+                if not order_id:
+                    raise ValueError(f"{label}.entry_order_id cannot be empty")
+                submitted_at = _aware_timestamp(
+                    state["entry_order_submitted_at"],
+                    f"{label}.entry_order_submitted_at",
+                )
+                order_quantity = _finite_float(
+                    state["entry_order_quantity"],
+                    f"{label}.entry_order_quantity",
+                )
+                cumulative_filled = _finite_float(
+                    state["entry_cumulative_filled_quantity"],
+                    f"{label}.entry_cumulative_filled_quantity",
+                )
+                authorization = state["entry_risk_gate_authorization"]
+                if not isinstance(authorization, dict):
+                    raise ValueError(
+                        f"{label}.entry_risk_gate_authorization must be an object"
+                    )
+                if order_quantity <= 0:
+                    raise ValueError(f"{label}.entry_order_quantity must be positive")
+                if not 0 <= cumulative_filled <= order_quantity:
+                    raise ValueError(
+                        "entry cumulative fill must be within entry_order_quantity"
+                    )
+                return {
+                    "order_id": order_id,
+                    "submitted_at": submitted_at,
+                    "order_quantity": order_quantity,
+                    "cumulative_filled": cumulative_filled,
+                    "authorization": authorization,
+                }
+
+            entry_required_statuses = {
+                "SUBMITTED", "PARTIAL", "FILLED", "PROTECTED", "CLOSING", "CLOSED",
+            }
+            prior_entry = entry_order_state(
+                prior_broker_state, required=False, label="prior broker_state"
+            )
+            incoming_entry = entry_order_state(
+                broker_state,
+                required=status in entry_required_statuses or prior_entry is not None,
+                label="broker_state",
+            )
+            if status in {"PLANNED", "REVIEWED"} and incoming_entry is not None:
+                raise ValueError(
+                    "entry-order evidence may begin only with a durable SUBMITTED transition"
+                )
+            if status in {"PARTIAL", "FILLED", "PROTECTED"} and prior_entry is None:
+                raise ValueError(
+                    f"{status} requires a prior durable SUBMITTED entry-order transition"
+                )
+
+            if incoming_entry is not None:
+                incoming_authorization = incoming_entry["authorization"]
+                if abs(
+                    float(incoming_authorization.get("quantity") or 0)
+                    - incoming_entry["order_quantity"]
+                ) > 1e-9:
+                    raise ValueError(
+                        "entry risk-gate authorization quantity must equal entry_order_quantity"
+                    )
+                if abs(
+                    quantities["initial_quantity"] - incoming_entry["order_quantity"]
+                ) > 1e-9:
+                    raise ValueError(
+                        "initial_quantity must equal the immutable entry_order_quantity"
+                    )
+                _validate_risk_gate_authorization(
+                    incoming_authorization,
+                    account_key=str(payload["account_key"]),
+                    instrument_key=str(payload["instrument_key"]),
+                    thesis_key=thesis_key,
+                    strategy_version=str(payload["strategy_version"]),
+                    expected_action="ENTRY",
+                    order_submitted_at=incoming_entry["submitted_at"],
+                )
+                if original_stop_input is not None and abs(
+                    float(incoming_authorization["structural_stop_price"])
+                    - original_stop_input
+                ) > 1e-9:
+                    raise ValueError(
+                        "entry risk-gate stop does not match original_stop"
+                    )
+
+                if prior_entry is None:
+                    if status != "SUBMITTED":
+                        raise ValueError(
+                            f"{status} requires a prior durable SUBMITTED entry-order transition"
+                        )
+                    if incoming_entry["cumulative_filled"] != 0:
+                        raise ValueError(
+                            "SUBMITTED must precede entry fills and requires cumulative fill 0"
+                        )
+                    if existing and float(existing["initial_quantity"]) not in {
+                        0.0, incoming_entry["order_quantity"]
+                    }:
+                        raise ValueError(
+                            "planned initial_quantity must match entry_order_quantity"
+                        )
+                    _validate_risk_authorization_against_session(
+                        self.conn,
+                        incoming_authorization,
+                        account_key=str(payload["account_key"]),
+                        strategy_version=str(payload["strategy_version"]),
+                    )
+                    risk_lease_to_bind = incoming_authorization
+                    risk_lease_order_id = incoming_entry["order_id"]
+                    risk_lease_submitted_at = incoming_entry["submitted_at"]
+                else:
+                    if incoming_entry["order_id"] != prior_entry["order_id"]:
+                        raise ValueError("entry_order_id is immutable")
+                    if incoming_entry["submitted_at"] != prior_entry["submitted_at"]:
+                        raise ValueError("entry_order_submitted_at is immutable")
+                    if abs(
+                        incoming_entry["order_quantity"]
+                        - prior_entry["order_quantity"]
+                    ) > 1e-9:
+                        raise ValueError("entry_order_quantity is immutable")
+                    if incoming_authorization != prior_entry["authorization"]:
+                        raise ValueError(
+                            "entry order must preserve its original risk authorization"
+                        )
+                    if existing and abs(
+                        quantities["initial_quantity"]
+                        - float(existing["initial_quantity"])
+                    ) > 1e-9:
+                        raise ValueError(
+                            "initial_quantity is immutable after entry submission"
+                        )
+                    if (
+                        incoming_entry["cumulative_filled"] + 1e-9
+                        < prior_entry["cumulative_filled"]
+                    ):
+                        raise ValueError(
+                            "entry cumulative fill may not move backward"
+                        )
+                    fill_increment = (
+                        incoming_entry["cumulative_filled"]
+                        - prior_entry["cumulative_filled"]
+                    )
+                    if (
+                        prior_status in {"SUBMITTED", "PARTIAL"}
+                        and status in {"PARTIAL", "FILLED", "PROTECTED"}
+                    ):
+                        current_increment = (
+                            quantities["current_quantity"]
+                            - float(existing["current_quantity"])
+                        )
+                        if abs(fill_increment - current_increment) > 1e-9:
+                            raise ValueError(
+                                "entry cumulative fill increment does not match "
+                                "position quantity increment"
+                            )
+                    durable_entry_lease = self.conn.execute(
+                        """SELECT status,campaign_id,broker_order_id,evidence_json
+                           FROM risk_authorizations WHERE authorization_id=?""",
+                        (str(incoming_authorization.get("authorization_id") or ""),),
+                    ).fetchone()
+                    if (
+                        not durable_entry_lease
+                        or str(durable_entry_lease["status"])
+                        not in {"CONSUMED", "RECONCILED"}
+                        or str(durable_entry_lease["campaign_id"])
+                        != str(existing["campaign_id"])
+                        or str(durable_entry_lease["broker_order_id"])
+                        != incoming_entry["order_id"]
+                        or json.loads(str(durable_entry_lease["evidence_json"]))
+                        != incoming_authorization
+                    ):
+                        raise ValueError(
+                            "entry order is not bound to its original durable risk lease"
+                        )
+
+                if status == "SUBMITTED" and incoming_entry["cumulative_filled"] != 0:
+                    raise ValueError("SUBMITTED requires entry cumulative fill 0")
+                if status == "PARTIAL" and not (
+                    0
+                    < incoming_entry["cumulative_filled"]
+                    < incoming_entry["order_quantity"]
+                ):
+                    raise ValueError(
+                        "PARTIAL requires a positive incomplete entry cumulative fill"
+                    )
+                if status in {"FILLED", "PROTECTED"} and abs(
+                    incoming_entry["cumulative_filled"]
+                    - incoming_entry["order_quantity"]
+                ) > 1e-9:
+                    raise ValueError(
+                        f"{status} requires entry cumulative fill equal to order quantity"
+                    )
+
+            filled_quantity_increase = bool(
+                existing
+                and prior_status in {"FILLED", "PROTECTED"}
+                and quantities["current_quantity"]
+                > float(existing["current_quantity"]) + 1e-9
+            )
+            add_actions = {
+                "ADD_SUBMITTED", "ADD_PARTIAL", "ADD_FILLED",
+                "ADD_CANCELED", "ADD_REJECTED",
+            }
+            if filled_quantity_increase and last_action not in add_actions:
+                raise ValueError(
+                    "a filled quantity increase requires an explicit ADD transition"
+                )
+            if last_action.startswith("ADD") and last_action not in add_actions:
+                raise ValueError(
+                    "last_action must use an explicit ADD_SUBMITTED, ADD_PARTIAL, "
+                    "ADD_FILLED, ADD_CANCELED, or ADD_REJECTED transition"
+                )
+            if last_action in add_actions:
+                if broker_confirmed_at is None:
+                    raise ValueError("ADD requires broker_confirmed_at")
+                risk_authorization = broker_state.get("risk_gate_authorization")
+                prior_add_state = None
+                add_order_id = str(broker_state.get("add_order_id") or "").strip()
+                order_submitted_at = broker_state.get("add_order_submitted_at")
+                add_order_quantity = _finite_float(
+                    broker_state.get("add_order_quantity"),
+                    "broker_state.add_order_quantity",
+                )
+                add_cumulative_filled = _finite_float(
+                    broker_state.get("add_cumulative_filled_quantity"),
+                    "broker_state.add_cumulative_filled_quantity",
+                )
+                if not add_order_id or not order_submitted_at:
+                    raise ValueError(
+                        "ADD broker evidence requires add_order_id and "
+                        "add_order_submitted_at"
+                    )
+                if add_order_quantity <= 0 or not 0 <= add_cumulative_filled <= add_order_quantity:
+                    raise ValueError(
+                        "ADD cumulative fill must be within the authorized order quantity"
+                    )
+                if existing:
+                    prior_rows = self.conn.execute(
+                        """SELECT payload_json FROM position_campaign_events
+                           WHERE campaign_id=? ORDER BY observed_at DESC""",
+                        (str(existing["campaign_id"]),),
+                    ).fetchall()
+                    for prior_row in prior_rows:
+                        prior_payload = json.loads(str(prior_row["payload_json"]))
+                        prior_broker = prior_payload.get("broker_state") or {}
+                        if str(prior_broker.get("add_order_id") or "") == add_order_id:
+                            prior_add_state = prior_broker
+                            break
+                new_order_authorization = prior_add_state is None
+                if prior_add_state is None:
+                    if last_action != "ADD_SUBMITTED":
+                        raise ValueError(
+                            "ADD fills require a prior ADD_SUBMITTED transition"
+                        )
+                    if add_cumulative_filled != 0 or filled_quantity_increase:
+                        raise ValueError(
+                            "ADD_SUBMITTED must precede fills and cannot increase quantity"
+                        )
+                else:
+                    prior_authorization = prior_add_state.get(
+                        "risk_gate_authorization"
+                    ) or {}
+                    if (
+                        prior_authorization.get("authorization_id")
+                        != (risk_authorization or {}).get("authorization_id")
+                    ):
+                        raise ValueError(
+                            "ADD order must preserve its original risk authorization"
+                        )
+                    if abs(
+                        float(prior_add_state.get("add_order_quantity") or 0)
+                        - add_order_quantity
+                    ) > 1e-9:
+                        raise ValueError("ADD order quantity is immutable")
+                    if _aware_timestamp(
+                        prior_add_state.get("add_order_submitted_at"),
+                        "prior add_order_submitted_at",
+                    ) != _aware_timestamp(
+                        order_submitted_at,
+                        "broker_state.add_order_submitted_at",
+                    ):
+                        raise ValueError(
+                            "ADD order submission timestamp is immutable"
+                        )
+                    prior_cumulative = _finite_float(
+                        prior_add_state.get("add_cumulative_filled_quantity"),
+                        "prior add_cumulative_filled_quantity",
+                    )
+                    if add_cumulative_filled + 1e-9 < prior_cumulative:
+                        raise ValueError("ADD cumulative fill may not move backward")
+                    fill_increment = add_cumulative_filled - prior_cumulative
+                    current_increment = (
+                        quantities["current_quantity"]
+                        - float(existing["current_quantity"])
+                    )
+                    if abs(fill_increment - current_increment) > 1e-9:
+                        raise ValueError(
+                            "ADD cumulative fill increment does not match position quantity"
+                        )
+                    if last_action == "ADD_PARTIAL" and not (
+                        0 < add_cumulative_filled < add_order_quantity
+                    ):
+                        raise ValueError(
+                            "ADD_PARTIAL requires a positive incomplete cumulative fill"
+                        )
+                    if last_action == "ADD_FILLED" and abs(
+                        add_cumulative_filled - add_order_quantity
+                    ) > 1e-9:
+                        raise ValueError(
+                            "ADD_FILLED requires cumulative fill equal to order quantity"
+                        )
+                _validate_risk_gate_authorization(
+                    risk_authorization,
+                    account_key=str(payload["account_key"]),
+                    instrument_key=str(payload["instrument_key"]),
+                    thesis_key=thesis_key,
+                    strategy_version=str(payload["strategy_version"]),
+                    expected_action="ADD",
+                    order_submitted_at=str(order_submitted_at),
+                )
+                assert isinstance(risk_authorization, dict)
+                if new_order_authorization:
+                    _validate_risk_authorization_against_session(
+                        self.conn,
+                        risk_authorization,
+                        account_key=str(payload["account_key"]),
+                        strategy_version=str(payload["strategy_version"]),
+                    )
+                    risk_lease_to_bind = risk_authorization
+                    risk_lease_order_id = add_order_id
+                    risk_lease_submitted_at = str(order_submitted_at)
+                if abs(
+                    float(risk_authorization["quantity"])
+                    - float(add_order_quantity)
+                ) > 1e-9:
+                    raise ValueError(
+                        "ADD risk-gate quantity does not match add_order_quantity"
+                    )
             if existing:
                 ordered_statuses = {
                     "PLANNED": 0,
@@ -1425,6 +2202,13 @@ class Store:
             ):
                 raise ValueError("current_stop may not be widened for an active campaign")
             campaign_id = str(existing["campaign_id"]) if existing else str(uuid.uuid4())
+            if risk_lease_to_bind is not None:
+                self.bind_risk_authorization(
+                    risk_lease_to_bind,
+                    campaign_id=campaign_id,
+                    broker_order_id=str(risk_lease_order_id),
+                    order_submitted_at=str(risk_lease_submitted_at),
+                )
             now = utc_now()
             self.conn.execute(
                 """INSERT INTO position_campaigns(
@@ -1561,6 +2345,265 @@ class Store:
             result.append(item)
         return result
 
+    def reserve_risk_authorization(
+        self,
+        evidence: dict[str, Any],
+        lease_seconds: int = 180,
+    ) -> dict[str, Any]:
+        """Atomically reserve the account's next pending order authorization.
+
+        One short lease per account/session prevents overlapping automation
+        wakes from spending the same notional or loss headroom before the first
+        broker order becomes visible in a reconciled snapshot.
+        """
+        if lease_seconds <= 0 or lease_seconds > 180:
+            raise ValueError("risk-authorization lease must be in 1..180 seconds")
+        checked_at = datetime.fromisoformat(
+            _aware_timestamp(evidence.get("checked_at"), "authorization checked_at")
+        )
+        snapshot_valid_until = datetime.fromisoformat(
+            _aware_timestamp(
+                evidence.get("broker_snapshot_valid_until"),
+                "broker_snapshot_valid_until",
+            )
+        )
+        expires = min(
+            checked_at + timedelta(seconds=lease_seconds),
+            snapshot_valid_until,
+        )
+        now_dt = datetime.now(timezone.utc)
+        if expires <= now_dt + timedelta(seconds=5):
+            raise ValueError(
+                "broker snapshot expires before the minimum submission buffer"
+            )
+        expires_at = expires.isoformat()
+        complete_evidence = {
+            **evidence,
+            "reservation_expires_at": expires_at,
+            "reservation_scope": "one_active_per_account_session",
+        }
+        authorization_id = hashlib.sha256(
+            json.dumps(
+                complete_evidence, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        authorization = {
+            "authorization_id": authorization_id,
+            **complete_evidence,
+        }
+        with self.transaction():
+            transaction_now = datetime.now(timezone.utc)
+            if expires <= transaction_now + timedelta(seconds=5):
+                raise ValueError(
+                    "broker snapshot expired while authorization was being reserved"
+                )
+            now = transaction_now.isoformat()
+            latest = self.conn.execute(
+                """SELECT strategy_version,broker_confirmed_at,loss_lock
+                   FROM risk_sessions
+                   WHERE account_key=? AND session_date=?""",
+                (
+                    str(authorization["account_key"]),
+                    str(authorization["session_date"]),
+                ),
+            ).fetchone()
+            if not latest:
+                raise ValueError(
+                    "risk authorization requires a current durable risk session"
+                )
+            if bool(latest["loss_lock"]):
+                raise ValueError(
+                    "risk authorization cannot reserve after the durable loss lock"
+                )
+            if str(latest["strategy_version"]) != str(
+                authorization["strategy_version"]
+            ):
+                raise ValueError(
+                    "risk authorization strategy does not match the current session"
+                )
+            if _aware_timestamp(
+                latest["broker_confirmed_at"],
+                "current risk-session broker_confirmed_at",
+            ) != _aware_timestamp(
+                authorization["broker_confirmed_at"],
+                "risk authorization broker_confirmed_at",
+            ):
+                raise ValueError(
+                    "risk session changed before authorization could be reserved"
+                )
+            risk_action = str(authorization["risk_action"]).upper()
+            if risk_action not in {"ENTRY", "ADD"}:
+                raise ValueError("risk authorization action must be ENTRY or ADD")
+            _validate_risk_gate_authorization(
+                authorization,
+                account_key=str(authorization["account_key"]),
+                instrument_key=str(authorization["instrument_key"]),
+                thesis_key=str(authorization["thesis_key"]).upper(),
+                strategy_version=str(authorization["strategy_version"]),
+                expected_action=risk_action,
+                order_submitted_at=str(authorization["checked_at"]),
+            )
+            _validate_risk_authorization_against_session(
+                self.conn,
+                authorization,
+                account_key=str(authorization["account_key"]),
+                strategy_version=str(authorization["strategy_version"]),
+            )
+            self.conn.execute(
+                """UPDATE risk_authorizations
+                   SET status='EXPIRED', release_reason='lease_expired'
+                   WHERE status='ACTIVE' AND expires_at<=?""",
+                (now,),
+            )
+            pending = self.conn.execute(
+                """SELECT authorization_id,instrument_key,thesis_key,risk_action,
+                          status,created_at,expires_at,broker_order_id,campaign_id
+                   FROM risk_authorizations
+                   WHERE account_key=? AND session_date=?
+                     AND status IN ('ACTIVE','CONSUMED')
+                   LIMIT 1""",
+                (
+                    str(authorization["account_key"]),
+                    str(authorization["session_date"]),
+                ),
+            ).fetchone()
+            if pending:
+                return {
+                    "reserved": False,
+                    "reason": (
+                        "another pending order authorization is active or awaiting "
+                        "a newer broker reconciliation"
+                    ),
+                    "active_authorization": dict(pending),
+                }
+            self.conn.execute(
+                """INSERT INTO risk_authorizations(
+                       authorization_id,account_key,session_date,strategy_version,
+                       instrument_key,thesis_key,risk_action,status,created_at,
+                       expires_at,evidence_json
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    authorization_id,
+                    str(authorization["account_key"]),
+                    str(authorization["session_date"]),
+                    str(authorization["strategy_version"]),
+                    str(authorization["instrument_key"]),
+                    str(authorization["thesis_key"]),
+                    str(authorization["risk_action"]),
+                    "ACTIVE",
+                    str(authorization["checked_at"]),
+                    expires_at,
+                    json.dumps(authorization, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+        return {"reserved": True, "authorization": authorization}
+
+    def bind_risk_authorization(
+        self,
+        authorization: dict[str, Any],
+        *,
+        campaign_id: str,
+        broker_order_id: str,
+        order_submitted_at: str,
+    ) -> None:
+        """Consume one active lease and bind it to the real broker order."""
+        authorization_id = str(authorization.get("authorization_id") or "")
+        if not authorization_id or not broker_order_id:
+            raise ValueError("risk authorization and broker order ID are required")
+        row = self.conn.execute(
+            "SELECT * FROM risk_authorizations WHERE authorization_id=?",
+            (authorization_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("risk authorization lease is not durable")
+        stored = json.loads(str(row["evidence_json"]))
+        if stored != authorization:
+            raise ValueError("risk authorization does not match durable lease evidence")
+        submitted = datetime.fromisoformat(
+            _aware_timestamp(order_submitted_at, "broker order_submitted_at")
+        )
+        expires = datetime.fromisoformat(str(row["expires_at"]))
+        if submitted > expires:
+            raise ValueError("broker order was submitted after authorization lease expired")
+        if str(row["status"]) == "CONSUMED":
+            if (
+                str(row["campaign_id"]) != campaign_id
+                or str(row["broker_order_id"]) != broker_order_id
+            ):
+                raise ValueError("risk authorization is already bound to another order")
+            return
+        if str(row["status"]) != "ACTIVE":
+            raise ValueError(
+                f"risk authorization lease is not active: {row['status']}"
+            )
+        self.conn.execute(
+            """UPDATE risk_authorizations
+               SET status='CONSUMED',bound_at=?,broker_order_id=?,campaign_id=?
+               WHERE authorization_id=? AND status='ACTIVE'""",
+            (
+                _aware_timestamp(order_submitted_at, "broker order_submitted_at"),
+                broker_order_id,
+                campaign_id,
+                authorization_id,
+            ),
+        )
+
+    def release_risk_authorization(
+        self, authorization_id: str, reason: str
+    ) -> dict[str, Any]:
+        authorization_id = str(authorization_id).strip()
+        reason = str(reason).strip()
+        if not authorization_id or not reason:
+            raise ValueError("authorization_id and release reason are required")
+        now = utc_now()
+        with self.transaction():
+            self.conn.execute(
+                """UPDATE risk_authorizations
+                   SET status='EXPIRED',release_reason='lease_expired'
+                   WHERE status='ACTIVE' AND expires_at<=?""",
+                (now,),
+            )
+            row = self.conn.execute(
+                "SELECT * FROM risk_authorizations WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError("unknown risk authorization")
+            if str(row["status"]) == "ACTIVE":
+                self.conn.execute(
+                    """UPDATE risk_authorizations
+                       SET status='RELEASED',release_reason=?
+                       WHERE authorization_id=? AND status='ACTIVE'""",
+                    (reason, authorization_id),
+                )
+            elif str(row["status"]) != "RELEASED":
+                raise ValueError(
+                    f"cannot release risk authorization in status {row['status']}"
+                )
+            final = self.conn.execute(
+                "SELECT * FROM risk_authorizations WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+        assert final is not None
+        result = dict(final)
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+        result["trade_authority"] = False
+        return result
+
+    def risk_authorizations(self, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """SELECT * FROM risk_authorizations
+               ORDER BY created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["evidence"] = json.loads(item.pop("evidence_json"))
+            item["trade_authority"] = False
+            result.append(item)
+        return result
+
     def upsert_risk_session(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist broker-confirmed account-day risk state with irreversible latches.
 
@@ -1631,6 +2674,23 @@ class Store:
             raise ValueError(
                 "risk-session broker evidence is incomplete: " + ", ".join(missing_checks)
             )
+        required_broker_balances = (
+            "unleveraged_buying_power_dollars",
+            "current_gross_exposure_dollars",
+            "working_entry_notional_dollars",
+        )
+        missing_balances = [
+            field for field in required_broker_balances
+            if broker_state.get(field) is None
+        ]
+        if missing_balances:
+            raise ValueError(
+                "risk-session broker balances are incomplete: "
+                + ", ".join(missing_balances)
+            )
+        for field in required_broker_balances:
+            if _finite_float(broker_state[field], field) < 0:
+                raise ValueError(f"{field} cannot be negative")
         baseline_time = datetime.fromisoformat(baseline_confirmed_at)
         broker_time = datetime.fromisoformat(broker_confirmed_at)
         now_utc = datetime.now(timezone.utc)
@@ -1768,6 +2828,62 @@ class Store:
                     json.dumps(broker_state, separators=(",", ":")),
                 ),
             )
+            snapshot = {
+                "account_key": account_key,
+                "session_date": session_date,
+                "strategy_version": strategy_version,
+                "start_of_day_equity": start_equity,
+                "baseline_confirmed_at": baseline_confirmed_at,
+                "current_equity": current_equity,
+                "realized_net_pnl": realized_net_pnl,
+                "confirmed_cash_flow_adjustment": cash_flow_adjustment,
+                "account_day_pnl": account_day_pnl,
+                "loss_gauge": loss_gauge,
+                "loss_limit_dollars": -100.0,
+                "loss_lock": loss_lock,
+                "profit_objective_reached": objective_reached,
+                "active_profit_floor_dollars": profit_floor,
+                "broker_confirmed_at": broker_confirmed_at,
+                "broker_state": broker_state,
+            }
+            snapshot_json = json.dumps(
+                snapshot, sort_keys=True, separators=(",", ":")
+            )
+            snapshot_hash = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+            self.conn.execute(
+                """INSERT OR IGNORE INTO risk_session_snapshots(
+                       account_key,session_date,broker_confirmed_at,snapshot_hash,
+                       snapshot_json,created_at
+                   ) VALUES(?,?,?,?,?,?)""",
+                (
+                    account_key, session_date, broker_confirmed_at,
+                    snapshot_hash, snapshot_json, now,
+                ),
+            )
+            stored_snapshot = self.conn.execute(
+                """SELECT snapshot_hash FROM risk_session_snapshots
+                   WHERE account_key=? AND session_date=? AND broker_confirmed_at=?""",
+                (account_key, session_date, broker_confirmed_at),
+            ).fetchone()
+            if (
+                not stored_snapshot
+                or str(stored_snapshot["snapshot_hash"]) != snapshot_hash
+            ):
+                raise ValueError(
+                    "conflicting immutable risk snapshots share broker_confirmed_at"
+                )
+            # A consumed reservation remains pending until a strictly newer,
+            # fully reconciled broker snapshot can see the submitted order or
+            # resulting position.  This prevents a second wake from reusing the
+            # same buying power/loss headroom in the submit-to-reconcile gap.
+            self.conn.execute(
+                """UPDATE risk_authorizations
+                   SET status='RECONCILED',reconciled_at=?,
+                       release_reason='newer_broker_snapshot_reconciled'
+                   WHERE account_key=? AND session_date=? AND status='CONSUMED'
+                     AND bound_at IS NOT NULL AND bound_at<?""",
+                (now, account_key, session_date, broker_confirmed_at),
+            )
         row = self.risk_session(account_key, session_date)
         assert row is not None
         return row
@@ -1784,6 +2900,10 @@ class Store:
         item["broker_state"] = json.loads(item.pop("broker_state_json"))
         item["loss_lock"] = bool(item["loss_lock"])
         item["profit_objective_reached"] = bool(item["profit_objective_reached"])
+        item["loss_headroom_to_lock"] = max(
+            0.0,
+            float(item["loss_gauge"]) - float(item["loss_limit_dollars"]),
+        )
         item["post_objective_new_risk_buffer"] = (
             max(0.0, float(item["account_day_pnl"]) - 125.0)
             if item["profit_objective_reached"]
@@ -1791,6 +2911,7 @@ class Store:
         )
         item["new_entries_allowed"] = bool(
             not item["loss_lock"]
+            and float(item["loss_headroom_to_lock"]) > 0
             and (
                 not item["profit_objective_reached"]
                 or float(item["post_objective_new_risk_buffer"] or 0) > 0

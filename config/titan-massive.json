@@ -38,24 +38,20 @@
     "BREAKOUT"
   ],
   "max_spread_to_structural_risk": 0.15,
-  "shadow_policy_version": "sol_ultra_profit_seeking_2026-08-22_v2",
-  "policy_version": "profit_seeking_live_preparation_2026-08-22_v1",
-  "supersedes_policy_version": "sol_ultra_2026-08-21_v1",
+  "shadow_policy_version": "sol_ultra_capital_flexible_2026-08-23_v3",
+  "policy_version": "capital_flexible_live_preparation_2026-08-23_v2",
+  "supersedes_policy_version": "profit_seeking_live_preparation_2026-08-22_v1",
   "sizing_policy": {
-    "version": "profit_seeking_sizing_2026-08-22_v1",
-    "probe_allocation_cap": 437.5,
-    "probe_risk_cap": 15,
-    "regular_allocation_ceiling": 1062.5,
-    "regular_risk_ceiling": 37.5,
-    "under5_allocation_ceiling": 625,
-    "under5_risk_ceiling": 22.5,
-    "reference_risk_unit": 20,
-    "initial_risk": 15,
-    "strengthened_winner_risk_cap": 30,
-    "build_tranches_pct": [
-      40,
-      35,
-      25
-    ]
+    "version": "capital_flexible_sizing_2026-08-23_v2",
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "account_day_loss_limit_dollars": 100,
+    "single_setup_concentration_allowed": true,
+    "leverage_allowed": false,
+    "initial_allocation_pct_range": [
+      0,
+      100
+    ],
+    "full_initial_allocation_allowed": true,
+    "adds_optional": true
   }
 }

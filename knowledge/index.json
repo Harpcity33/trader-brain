@@ -52,6 +52,12 @@
       "path": "knowledge/adaptations/2026-08-22-profitability-automation.json",
       "authorization": "explicit_user_authorization",
       "preserves_newer_live_rules": true
+    },
+    {
+      "date": "2026-08-23",
+      "path": "knowledge/adaptations/2026-08-23-concentrated-capital.json",
+      "authorization": "explicit_user_authorization",
+      "preserves_newer_live_rules": true
     }
   ]
 }

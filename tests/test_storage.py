@@ -3,9 +3,69 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from titan_runtime.storage import Store
+
+
+def risk_authorization(
+    store: Store,
+    *,
+    instrument_key: str,
+    thesis_key: str,
+    checked_at: str = "2026-08-22T14:00:00+00:00",
+    broker_confirmed_at: str = "2026-08-22T13:59:50+00:00",
+    risk_action: str = "ENTRY",
+    quantity: float = 40.0,
+    stress_tail_loss: float | None = None,
+) -> dict:
+    stop_defined_loss = 0.25 * quantity
+    stress_loss = quantity if stress_tail_loss is None else stress_tail_loss
+    proposed_risk = max(stop_defined_loss, stress_loss)
+    evidence = {
+        "account_key": "ending-7153",
+        "session_date": "2026-08-22",
+        "strategy_version": "titan_profitability_live_2026-08-22_v2",
+        "broker_confirmed_at": broker_confirmed_at,
+        "broker_snapshot_valid_until": (
+            datetime.fromisoformat(checked_at) + timedelta(seconds=80)
+        ).isoformat(),
+        "checked_at": checked_at,
+        "current_equity_dollars": 5_000.0,
+        "instrument_key": instrument_key,
+        "thesis_key": thesis_key,
+        "risk_action": risk_action,
+        "reviewed_entry_price": 10.0,
+        "structural_stop_price": 9.75,
+        "quantity": quantity,
+        "contract_multiplier": 1.0,
+        "modeled_execution_loss_dollars": 0.0,
+        "stress_tail_loss_dollars": stress_loss,
+        "reviewed_notional_dollars": 10.0 * quantity,
+        "calculated_stop_defined_loss_dollars": stop_defined_loss,
+        "proposed_new_risk_dollars": proposed_risk,
+        "existing_open_downside_dollars": 0.0,
+        "existing_pending_risk_dollars": 0.0,
+        "execution_reserve_dollars": 5.0,
+        "unleveraged_buying_power_dollars": 5_000.0,
+        "current_gross_exposure_dollars": 0.0,
+        "working_entry_notional_dollars": 0.0,
+        "broker_new_notional_capacity_dollars": 5_000.0,
+        "post_order_gross_exposure_dollars": 10.0 * quantity,
+        "uncredited_open_profit_dollars": 0.0,
+        "open_loss_gauge_degradation_dollars": 0.0,
+        "loss_lock_new_risk_capacity_dollars": 95.0,
+        "profit_floor_new_risk_capacity_dollars": None,
+        "dynamic_new_risk_capacity_dollars": 95.0,
+    }
+    reservation_clock = datetime.fromisoformat(checked_at).astimezone(timezone.utc)
+    with patch("titan_runtime.storage.datetime", wraps=datetime) as clock:
+        clock.now.return_value = reservation_clock
+        reservation = store.reserve_risk_authorization(evidence)
+    if not reservation["reserved"]:
+        raise ValueError(str(reservation["reason"]))
+    return reservation["authorization"]
 
 
 class StorageTests(unittest.TestCase):
@@ -309,6 +369,31 @@ class StorageTests(unittest.TestCase):
     def test_position_campaign_requires_broker_confirmation_and_keeps_original_stop(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "test.sqlite3")
+            risk_snapshot = {
+                "account_key": "ending-7153",
+                "session_date": "2026-08-22",
+                "strategy_version": "titan_profitability_live_2026-08-22_v2",
+                "start_of_day_equity": 5000,
+                "baseline_confirmed_at": "2026-08-22T13:30:00+00:00",
+                "current_equity": 5000,
+                "realized_net_pnl": 0,
+                "confirmed_cash_flow_adjustment": 0,
+                "broker_confirmed_at": "2026-08-22T13:59:50+00:00",
+                "broker_state": {
+                    "account_state_readable": True,
+                    "orders_reconciled": True,
+                    "positions_reconciled": True,
+                    "unleveraged_buying_power_dollars": 5000,
+                    "current_gross_exposure_dollars": 0,
+                    "working_entry_notional_dollars": 0,
+                },
+            }
+            store.upsert_risk_session(risk_snapshot)
+
+            def refresh_risk_snapshot(timestamp: str) -> None:
+                store.upsert_risk_session(
+                    {**risk_snapshot, "broker_confirmed_at": timestamp}
+                )
             planned = {
                 "account_key": "ending-7153", "instrument_key": "equity:TEST",
                 "symbol": "TEST", "thesis_key": "TEST", "direction": "UP",
@@ -333,20 +418,216 @@ class StorageTests(unittest.TestCase):
                 )
             with self.assertRaisesRegex(ValueError, "requires broker_confirmed_at"):
                 store.upsert_position_campaign({**planned, "status": "FILLED"})
-            filled = {
-                **planned, "status": "PROTECTED", "entry_price": 10.0,
+            with self.assertRaisesRegex(ValueError, "entry_risk_gate_authorization"):
+                store.upsert_position_campaign(
+                    {
+                        **planned,
+                        "status": "SUBMITTED",
+                        "broker_confirmed_at": "2026-08-22T14:00:01+00:00",
+                        "broker_state": {
+                            "entry_order_id": "entry-order-1",
+                            "entry_order_submitted_at": "2026-08-22T14:00:01+00:00",
+                            "entry_order_quantity": 40,
+                            "entry_cumulative_filled_quantity": 0,
+                        },
+                    }
+                )
+            entry_authorization = risk_authorization(
+                store,
+                instrument_key="equity:TEST",
+                thesis_key="TEST",
+            )
+            entry_order_state = {
+                "entry_order_id": "entry-order-1",
+                "entry_order_submitted_at": "2026-08-22T14:00:01+00:00",
+                "entry_order_quantity": 40,
+                "entry_cumulative_filled_quantity": 40,
+                "entry_risk_gate_authorization": entry_authorization,
+            }
+            direct_exposure = {
+                **planned,
+                "entry_price": 10.0,
                 "broker_confirmed_at": "2026-08-22T14:00:01+00:00",
                 "current_quantity": 40, "core_quantity": 30, "runner_quantity": 10,
                 "high_water_price": 10.3, "mfe_r": 0.6, "mae_r": -0.2,
                 "continuation_health": "HEALTHY",
-                "broker_state": {"protection_confirmed": True},
+                "broker_state": entry_order_state,
+            }
+            for direct_status in ("FILLED", "PROTECTED"):
+                direct_broker_state = dict(entry_order_state)
+                if direct_status == "PROTECTED":
+                    direct_broker_state["protection_confirmed"] = True
+                with self.assertRaisesRegex(ValueError, "prior durable SUBMITTED"):
+                    store.upsert_position_campaign(
+                        {
+                            **direct_exposure,
+                            "status": direct_status,
+                            "broker_state": direct_broker_state,
+                        }
+                    )
+            self.assertEqual(store.risk_authorizations()[0]["status"], "ACTIVE")
+
+            with self.assertRaisesRegex(ValueError, "must equal entry_order_quantity"):
+                store.upsert_position_campaign(
+                    {
+                        **planned,
+                        "status": "SUBMITTED",
+                        "broker_confirmed_at": "2026-08-22T14:00:01+00:00",
+                        "broker_state": {
+                            **entry_order_state,
+                            "entry_order_quantity": 41,
+                            "entry_cumulative_filled_quantity": 0,
+                        },
+                    }
+                )
+            self.assertEqual(store.risk_authorizations()[0]["status"], "ACTIVE")
+            submitted = {
+                **planned,
+                "status": "SUBMITTED",
+                "broker_confirmed_at": "2026-08-22T14:00:01+00:00",
+                "broker_state": {
+                    **entry_order_state,
+                    "entry_cumulative_filled_quantity": 0,
+                },
+            }
+            self.assertEqual(store.upsert_position_campaign(submitted), campaign_id)
+            entry_lease = store.risk_authorizations()[0]
+            self.assertEqual(entry_lease["status"], "CONSUMED")
+            self.assertEqual(entry_lease["campaign_id"], campaign_id)
+            self.assertEqual(entry_lease["broker_order_id"], "entry-order-1")
+
+            partial = {
+                **submitted,
+                "status": "PARTIAL",
+                "entry_price": 10.0,
+                "broker_confirmed_at": "2026-08-22T14:00:02+00:00",
+                "current_quantity": 5,
+                "core_quantity": 5,
+                "runner_quantity": 0,
+                "broker_state": {
+                    **submitted["broker_state"],
+                    "entry_cumulative_filled_quantity": 5,
+                },
+            }
+            with self.assertRaisesRegex(
+                ValueError,
+                "PROTECTED requires entry cumulative fill equal to order quantity",
+            ):
+                store.upsert_position_campaign(
+                    {
+                        **partial,
+                        "status": "PROTECTED",
+                        "broker_state": {
+                            **partial["broker_state"],
+                            "protection_confirmed": True,
+                        },
+                    }
+                )
+            missing_entry_auth = dict(partial["broker_state"])
+            missing_entry_auth.pop("entry_risk_gate_authorization")
+            with self.assertRaisesRegex(ValueError, "entry_risk_gate_authorization"):
+                store.upsert_position_campaign(
+                    {**partial, "broker_state": missing_entry_auth}
+                )
+            missing_entry_order = dict(partial["broker_state"])
+            missing_entry_order.pop("entry_order_id")
+            with self.assertRaisesRegex(ValueError, "entry_order_id"):
+                store.upsert_position_campaign(
+                    {**partial, "broker_state": missing_entry_order}
+                )
+            with self.assertRaisesRegex(ValueError, "entry_order_id is immutable"):
+                store.upsert_position_campaign(
+                    {
+                        **partial,
+                        "broker_state": {
+                            **partial["broker_state"],
+                            "entry_order_id": "changed-entry-order",
+                        },
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "authorization"):
+                store.upsert_position_campaign(
+                    {
+                        **partial,
+                        "broker_state": {
+                            **partial["broker_state"],
+                            "entry_risk_gate_authorization": {
+                                **entry_authorization,
+                                "quantity": 39,
+                            },
+                        },
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "initial_quantity"):
+                store.upsert_position_campaign(
+                    {**partial, "initial_quantity": 41}
+                )
+            self.assertEqual(store.upsert_position_campaign(partial), campaign_id)
+            with self.assertRaisesRegex(ValueError, "may not move backward"):
+                store.upsert_position_campaign(
+                    {
+                        **partial,
+                        "broker_confirmed_at": "2026-08-22T14:00:03+00:00",
+                        "current_quantity": 4,
+                        "core_quantity": 4,
+                        "broker_state": {
+                            **partial["broker_state"],
+                            "entry_cumulative_filled_quantity": 4,
+                        },
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "within entry_order_quantity"):
+                store.upsert_position_campaign(
+                    {
+                        **partial,
+                        "status": "FILLED",
+                        "broker_confirmed_at": "2026-08-22T14:00:03+00:00",
+                        "current_quantity": 50,
+                        "core_quantity": 40,
+                        "runner_quantity": 10,
+                        "broker_state": {
+                            **partial["broker_state"],
+                            "entry_cumulative_filled_quantity": 50,
+                        },
+                    }
+                )
+            after_rejected_overfill = store.position_campaigns()[0]
+            self.assertEqual(after_rejected_overfill["status"], "PARTIAL")
+            self.assertEqual(after_rejected_overfill["current_quantity"], 5)
+            self.assertEqual(
+                after_rejected_overfill["broker_state"][
+                    "entry_cumulative_filled_quantity"
+                ],
+                5,
+            )
+            entry_filled = {
+                **partial,
+                "status": "FILLED",
+                "broker_confirmed_at": "2026-08-22T14:00:03+00:00",
+                "current_quantity": 40,
+                "core_quantity": 30,
+                "runner_quantity": 10,
+                "broker_state": {
+                    **partial["broker_state"],
+                    "entry_cumulative_filled_quantity": 40,
+                },
+            }
+            self.assertEqual(store.upsert_position_campaign(entry_filled), campaign_id)
+            filled = {
+                **entry_filled,
+                "status": "PROTECTED",
+                "broker_confirmed_at": "2026-08-22T14:00:04+00:00",
+                "broker_state": {
+                    **entry_filled["broker_state"],
+                    "protection_confirmed": True,
+                },
             }
             self.assertEqual(store.upsert_position_campaign(filled), campaign_id)
             row = store.position_campaigns()[0]
             self.assertEqual(row["original_stop"], 9.75)
             self.assertFalse(row["trade_authority"])
             self.assertTrue(row["broker_state"]["protection_confirmed"])
-            with self.assertRaisesRegex(ValueError, "immutable"):
+            with self.assertRaisesRegex(ValueError, "immutable|does not match original_stop"):
                 store.upsert_position_campaign({**filled, "original_stop": 9.5})
             with self.assertRaisesRegex(ValueError, "may not widen"):
                 store.upsert_position_campaign({**filled, "current_stop": 9.70})
@@ -362,11 +643,95 @@ class StorageTests(unittest.TestCase):
                 )
             with self.assertRaisesRegex(ValueError, "symbol is immutable"):
                 store.upsert_position_campaign({**filled, "symbol": "OTHER"})
+            with self.assertRaisesRegex(ValueError, "explicit ADD transition"):
+                store.upsert_position_campaign(
+                    {
+                        **filled,
+                        "broker_confirmed_at": "2026-08-22T14:00:06+00:00",
+                        "current_quantity": 45,
+                        "core_quantity": 35,
+                        "runner_quantity": 10,
+                        "broker_state": filled["broker_state"],
+                    }
+                )
+            with self.assertRaisesRegex(ValueError, "awaiting a newer broker reconciliation"):
+                risk_authorization(
+                    store,
+                    instrument_key="equity:TEST",
+                    thesis_key="TEST",
+                    checked_at="2026-08-22T14:00:05+00:00",
+                    risk_action="ADD",
+                    quantity=5,
+                    stress_tail_loss=5,
+                )
+            refresh_risk_snapshot("2026-08-22T14:00:05+00:00")
+            self.assertEqual(store.risk_authorizations()[0]["status"], "RECONCILED")
+            add_authorization = risk_authorization(
+                store,
+                instrument_key="equity:TEST",
+                thesis_key="TEST",
+                checked_at="2026-08-22T14:00:05+00:00",
+                broker_confirmed_at="2026-08-22T14:00:05+00:00",
+                risk_action="ADD",
+                quantity=5,
+                stress_tail_loss=5,
+            )
+            add_submitted = {
+                **filled,
+                "broker_confirmed_at": "2026-08-22T14:00:06+00:00",
+                "last_action": "ADD_SUBMITTED",
+                "broker_state": {
+                    **filled["broker_state"],
+                    "add_order_id": "add-order-1",
+                    "add_order_submitted_at": "2026-08-22T14:00:06+00:00",
+                    "add_order_quantity": 5,
+                    "add_cumulative_filled_quantity": 0,
+                    "risk_gate_authorization": add_authorization,
+                },
+            }
+            self.assertEqual(store.upsert_position_campaign(add_submitted), campaign_id)
+            add_partial = {
+                **add_submitted,
+                "broker_confirmed_at": "2026-08-22T14:00:07+00:00",
+                "last_action": "ADD_PARTIAL",
+                "current_quantity": 42,
+                "core_quantity": 32,
+                "runner_quantity": 10,
+                "broker_state": {
+                    **add_submitted["broker_state"],
+                    "add_cumulative_filled_quantity": 2,
+                },
+            }
+            with self.assertRaisesRegex(ValueError, "submission timestamp is immutable"):
+                store.upsert_position_campaign(
+                    {
+                        **add_partial,
+                        "broker_state": {
+                            **add_partial["broker_state"],
+                            "add_order_submitted_at": "2026-08-22T14:00:07+00:00",
+                        },
+                    }
+                )
+            self.assertEqual(store.upsert_position_campaign(add_partial), campaign_id)
+            add_filled = {
+                **add_partial,
+                "broker_confirmed_at": "2026-08-22T14:00:08+00:00",
+                "last_action": "ADD_FILLED",
+                "current_quantity": 45,
+                "core_quantity": 35,
+                "runner_quantity": 10,
+                "broker_state": {
+                    **add_submitted["broker_state"],
+                    "add_cumulative_filled_quantity": 5,
+                },
+            }
+            self.assertEqual(store.upsert_position_campaign(add_filled), campaign_id)
 
             closed_id = store.upsert_position_campaign(
                 {
                     **filled,
                     "status": "CLOSED",
+                    "broker_confirmed_at": "2026-08-22T14:00:09+00:00",
                     "current_quantity": 0,
                     "core_quantity": 0,
                     "runner_quantity": 0,
@@ -384,7 +749,7 @@ class StorageTests(unittest.TestCase):
             all_campaigns = store.position_campaigns(include_terminal=True)
             self.assertEqual(len(all_campaigns), 2)
             self.assertEqual({row["original_stop"] for row in all_campaigns}, {9.5, 9.75})
-            self.assertEqual(len(store.position_campaign_events()), 4)
+            self.assertEqual(len(store.position_campaign_events()), 10)
             self.assertTrue(
                 all(not row["trade_authority"] for row in store.position_campaign_events())
             )
@@ -400,7 +765,16 @@ class StorageTests(unittest.TestCase):
                 "current_stop": None,
             }
             store.upsert_position_campaign(unprotected_plan)
-            with self.assertRaisesRegex(ValueError, "may not widen below original_stop"):
+            refresh_risk_snapshot("2026-08-22T14:00:10+00:00")
+            self.assertEqual(store.risk_authorizations()[0]["status"], "RECONCILED")
+            unprotected_authorization = risk_authorization(
+                store,
+                instrument_key="equity:NOSTOP",
+                thesis_key="NOSTOP",
+                checked_at="2026-08-22T14:00:10+00:00",
+                broker_confirmed_at="2026-08-22T14:00:10+00:00",
+            )
+            with self.assertRaisesRegex(ValueError, "prior durable SUBMITTED"):
                 store.upsert_position_campaign(
                     {
                         **unprotected_plan,
@@ -411,9 +785,120 @@ class StorageTests(unittest.TestCase):
                         "current_quantity": 40,
                         "core_quantity": 30,
                         "runner_quantity": 10,
-                        "broker_confirmed_at": "2026-08-22T14:00:01+00:00",
-                        "broker_state": {"protection_confirmed": True},
+                        "broker_confirmed_at": "2026-08-22T14:00:11+00:00",
+                        "broker_state": {
+                            "protection_confirmed": True,
+                            "entry_order_id": "entry-order-2",
+                            "entry_order_submitted_at": "2026-08-22T14:00:11+00:00",
+                            "entry_order_quantity": 40,
+                            "entry_cumulative_filled_quantity": 40,
+                            "entry_risk_gate_authorization": unprotected_authorization,
+                        },
                     }
+                )
+            store.close()
+
+    def test_risk_authorization_lease_binding_is_durable_and_single_use(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "test.sqlite3")
+            store.upsert_risk_session(
+                {
+                    "account_key": "ending-7153",
+                    "session_date": "2026-08-22",
+                    "strategy_version": "titan_profitability_live_2026-08-22_v2",
+                    "start_of_day_equity": 5000,
+                    "baseline_confirmed_at": "2026-08-22T13:30:00+00:00",
+                    "current_equity": 5000,
+                    "realized_net_pnl": 0,
+                    "confirmed_cash_flow_adjustment": 0,
+                    "broker_confirmed_at": "2026-08-22T13:59:50+00:00",
+                    "broker_state": {
+                        "account_state_readable": True,
+                        "orders_reconciled": True,
+                        "positions_reconciled": True,
+                        "unleveraged_buying_power_dollars": 5000,
+                        "current_gross_exposure_dollars": 0,
+                        "working_entry_notional_dollars": 0,
+                    },
+                }
+            )
+            with self.assertRaisesRegex(ValueError, "not durable"):
+                store.bind_risk_authorization(
+                    {"authorization_id": "fabricated"},
+                    campaign_id="campaign-fake",
+                    broker_order_id="order-fake",
+                    order_submitted_at="2026-08-22T14:00:01+00:00",
+                )
+
+            released = risk_authorization(
+                store,
+                instrument_key="equity:RELEASED",
+                thesis_key="RELEASED",
+            )
+            with patch("titan_runtime.storage.datetime", wraps=datetime) as clock:
+                clock.now.return_value = datetime.fromisoformat(
+                    "2026-08-22T14:00:00+00:00"
+                )
+                store.release_risk_authorization(
+                    released["authorization_id"], "review_abandoned"
+                )
+            with self.assertRaisesRegex(ValueError, "not active: RELEASED"):
+                store.bind_risk_authorization(
+                    released,
+                    campaign_id="campaign-released",
+                    broker_order_id="order-released",
+                    order_submitted_at="2026-08-22T14:00:01+00:00",
+                )
+
+            expired = risk_authorization(
+                store,
+                instrument_key="equity:EXPIRED",
+                thesis_key="EXPIRED",
+                checked_at="2026-08-22T14:00:01+00:00",
+            )
+            store.conn.execute(
+                "UPDATE risk_authorizations SET status='EXPIRED' WHERE authorization_id=?",
+                (expired["authorization_id"],),
+            )
+            with self.assertRaisesRegex(ValueError, "not active: EXPIRED"):
+                store.bind_risk_authorization(
+                    expired,
+                    campaign_id="campaign-expired",
+                    broker_order_id="order-expired",
+                    order_submitted_at="2026-08-22T14:00:02+00:00",
+                )
+
+            active = risk_authorization(
+                store,
+                instrument_key="equity:BOUND",
+                thesis_key="BOUND",
+                checked_at="2026-08-22T14:00:02+00:00",
+            )
+            store.bind_risk_authorization(
+                active,
+                campaign_id="campaign-bound",
+                broker_order_id="order-bound",
+                order_submitted_at="2026-08-22T14:00:03+00:00",
+            )
+            store.bind_risk_authorization(
+                active,
+                campaign_id="campaign-bound",
+                broker_order_id="order-bound",
+                order_submitted_at="2026-08-22T14:00:03+00:00",
+            )
+            with self.assertRaisesRegex(ValueError, "bound to another order"):
+                store.bind_risk_authorization(
+                    active,
+                    campaign_id="campaign-bound",
+                    broker_order_id="order-other",
+                    order_submitted_at="2026-08-22T14:00:03+00:00",
+                )
+            with self.assertRaisesRegex(ValueError, "bound to another order"):
+                store.bind_risk_authorization(
+                    active,
+                    campaign_id="campaign-other",
+                    broker_order_id="order-bound",
+                    order_submitted_at="2026-08-22T14:00:03+00:00",
                 )
             store.close()
 
@@ -427,6 +912,9 @@ class StorageTests(unittest.TestCase):
                     "account_state_readable": True,
                     "orders_reconciled": True,
                     "positions_reconciled": True,
+                    "unleveraged_buying_power_dollars": 5000,
+                    "current_gross_exposure_dollars": 0,
+                    "working_entry_notional_dollars": 0,
                 }
 
             base = {
@@ -444,6 +932,7 @@ class StorageTests(unittest.TestCase):
             opening = store.upsert_risk_session(base)
             self.assertFalse(opening["loss_lock"])
             self.assertTrue(opening["new_entries_allowed"])
+            self.assertEqual(opening["loss_headroom_to_lock"], 100)
 
             locked = store.upsert_risk_session(
                 {
@@ -482,6 +971,7 @@ class StorageTests(unittest.TestCase):
             self.assertTrue(objective["profit_objective_reached"])
             self.assertEqual(objective["active_profit_floor_dollars"], 125)
             self.assertEqual(objective["post_objective_new_risk_buffer"], 35)
+            self.assertEqual(objective["loss_headroom_to_lock"], 260)
             after_pullback = store.upsert_risk_session(
                 {
                     **next_day,
@@ -543,6 +1033,9 @@ class StorageTests(unittest.TestCase):
                     "account_state_readable": True,
                     "orders_reconciled": True,
                     "positions_reconciled": True,
+                    "unleveraged_buying_power_dollars": 5000,
+                    "current_gross_exposure_dollars": 0,
+                    "working_entry_notional_dollars": 0,
                 },
             }
             with self.assertRaisesRegex(

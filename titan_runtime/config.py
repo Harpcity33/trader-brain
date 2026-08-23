@@ -3,109 +3,137 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import time
 import json
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
 
 @dataclass(frozen=True)
 class SizingPolicy:
-    """Versioned planning limits used by non-authoritative prepared plans."""
+    """Versioned capital policy used by non-authoritative prepared plans.
+
+    Position notional and loss at the structural stop are deliberately separate.
+    The Massive watcher has no broker state, so it may describe how a live executor
+    must resolve both limits but may not invent a dollar cap or an order quantity.
+    """
 
     version: str
-    probe_allocation_cap: float
-    probe_risk_cap: float
-    regular_allocation_ceiling: float
-    regular_risk_ceiling: float
-    under5_allocation_ceiling: float
-    under5_risk_ceiling: float
-    reference_risk_unit: float
-    initial_risk: float
-    strengthened_winner_risk_cap: float
-    build_tranches_pct: tuple[int, ...]
+    max_unleveraged_buying_power_fraction: float
+    account_day_loss_limit_dollars: float
+    single_setup_concentration_allowed: bool
+    leverage_allowed: bool
+    initial_allocation_pct_range: tuple[int, int]
+    full_initial_allocation_allowed: bool
+    adds_optional: bool
 
     @classmethod
     def defaults(cls) -> "SizingPolicy":
         return cls(
-            version="profit_seeking_sizing_2026-08-22_v1",
-            probe_allocation_cap=437.50,
-            probe_risk_cap=15.0,
-            regular_allocation_ceiling=1_062.50,
-            regular_risk_ceiling=37.50,
-            under5_allocation_ceiling=625.0,
-            under5_risk_ceiling=22.50,
-            reference_risk_unit=20.0,
-            initial_risk=15.0,
-            strengthened_winner_risk_cap=30.0,
-            build_tranches_pct=(40, 35, 25),
+            version="capital_flexible_sizing_2026-08-23_v2",
+            max_unleveraged_buying_power_fraction=1.0,
+            account_day_loss_limit_dollars=100.0,
+            single_setup_concentration_allowed=True,
+            leverage_allowed=False,
+            initial_allocation_pct_range=(0, 100),
+            full_initial_allocation_allowed=True,
+            adds_optional=True,
         )
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any] | None) -> "SizingPolicy":
         default = cls.defaults()
         values = raw or {}
+        removed_fixed_cap_keys = {
+            "probe_allocation_cap",
+            "probe_risk_cap",
+            "regular_allocation_ceiling",
+            "regular_risk_ceiling",
+            "under5_allocation_ceiling",
+            "under5_risk_ceiling",
+            "reference_risk_unit",
+            "initial_risk",
+            "strengthened_winner_risk_cap",
+        }
+        configured_removed_keys = sorted(removed_fixed_cap_keys.intersection(values))
+        if configured_removed_keys:
+            raise ValueError(
+                "fixed dollar sizing caps were removed; delete obsolete keys: "
+                + ", ".join(configured_removed_keys)
+            )
+        if "build_tranches_pct" in values:
+            raise ValueError(
+                "build_tranches_pct was removed; initial allocation may use the full "
+                "broker-approved position and adds are optional"
+            )
         policy = cls(
             version=str(values.get("version", default.version)),
-            probe_allocation_cap=float(
-                values.get("probe_allocation_cap", default.probe_allocation_cap)
-            ),
-            probe_risk_cap=float(values.get("probe_risk_cap", default.probe_risk_cap)),
-            regular_allocation_ceiling=float(
-                values.get("regular_allocation_ceiling", default.regular_allocation_ceiling)
-            ),
-            regular_risk_ceiling=float(
-                values.get("regular_risk_ceiling", default.regular_risk_ceiling)
-            ),
-            under5_allocation_ceiling=float(
-                values.get("under5_allocation_ceiling", default.under5_allocation_ceiling)
-            ),
-            under5_risk_ceiling=float(
-                values.get("under5_risk_ceiling", default.under5_risk_ceiling)
-            ),
-            reference_risk_unit=float(
-                values.get("reference_risk_unit", default.reference_risk_unit)
-            ),
-            initial_risk=float(values.get("initial_risk", default.initial_risk)),
-            strengthened_winner_risk_cap=float(
+            max_unleveraged_buying_power_fraction=float(
                 values.get(
-                    "strengthened_winner_risk_cap", default.strengthened_winner_risk_cap
+                    "max_unleveraged_buying_power_fraction",
+                    default.max_unleveraged_buying_power_fraction,
                 )
             ),
-            build_tranches_pct=tuple(
-                int(value)
-                for value in values.get("build_tranches_pct", default.build_tranches_pct)
+            account_day_loss_limit_dollars=float(
+                values.get(
+                    "account_day_loss_limit_dollars",
+                    default.account_day_loss_limit_dollars,
+                )
             ),
+            single_setup_concentration_allowed=bool(
+                values.get(
+                    "single_setup_concentration_allowed",
+                    default.single_setup_concentration_allowed,
+                )
+            ),
+            leverage_allowed=bool(values.get("leverage_allowed", default.leverage_allowed)),
+            initial_allocation_pct_range=tuple(
+                int(value)
+                for value in values.get(
+                    "initial_allocation_pct_range",
+                    default.initial_allocation_pct_range,
+                )
+            ),
+            full_initial_allocation_allowed=bool(
+                values.get(
+                    "full_initial_allocation_allowed",
+                    default.full_initial_allocation_allowed,
+                )
+            ),
+            adds_optional=bool(values.get("adds_optional", default.adds_optional)),
         )
         policy.validate()
         return policy
 
     def validate(self) -> None:
-        numeric_limits = (
-            self.probe_allocation_cap,
-            self.probe_risk_cap,
-            self.regular_allocation_ceiling,
-            self.regular_risk_ceiling,
-            self.under5_allocation_ceiling,
-            self.under5_risk_ceiling,
-            self.reference_risk_unit,
-            self.initial_risk,
-            self.strengthened_winner_risk_cap,
-        )
         if not self.version.strip():
             raise ValueError("sizing_policy.version cannot be empty")
-        if any(value <= 0 for value in numeric_limits):
-            raise ValueError("all sizing policy limits must be positive")
-        if self.probe_allocation_cap > self.regular_allocation_ceiling:
-            raise ValueError("probe allocation cannot exceed the regular allocation ceiling")
-        if self.probe_risk_cap > self.regular_risk_ceiling:
-            raise ValueError("probe risk cannot exceed the regular risk ceiling")
-        if self.initial_risk > self.regular_risk_ceiling:
-            raise ValueError("initial risk cannot exceed the regular risk ceiling")
-        if self.strengthened_winner_risk_cap > self.regular_risk_ceiling:
-            raise ValueError("strengthened-winner risk cannot exceed the regular risk ceiling")
-        if len(self.build_tranches_pct) != 3 or sum(self.build_tranches_pct) != 100:
-            raise ValueError("build_tranches_pct must contain three values totaling 100")
-        if any(value <= 0 for value in self.build_tranches_pct):
-            raise ValueError("build tranche percentages must be positive")
+        if (
+            not isfinite(self.max_unleveraged_buying_power_fraction)
+            or not 0 < self.max_unleveraged_buying_power_fraction <= 1
+        ):
+            raise ValueError("max_unleveraged_buying_power_fraction must be in (0, 1]")
+        if (
+            not isfinite(self.account_day_loss_limit_dollars)
+            or self.account_day_loss_limit_dollars != 100.0
+        ):
+            raise ValueError(
+                "account_day_loss_limit_dollars must remain 100 under the durable loss rule"
+            )
+        if self.leverage_allowed:
+            raise ValueError("Titan's shadow sizing policy cannot authorize leverage")
+        if (
+            len(self.initial_allocation_pct_range) != 2
+            or not 0 <= self.initial_allocation_pct_range[0]
+            <= self.initial_allocation_pct_range[1]
+            <= 100
+        ):
+            raise ValueError(
+                "initial_allocation_pct_range must contain an ordered range within 0-100"
+            )
+        if self.full_initial_allocation_allowed and self.initial_allocation_pct_range[1] != 100:
+            raise ValueError(
+                "full_initial_allocation_allowed requires a 100% upper allocation bound"
+            )
 
 
 @dataclass(frozen=True)

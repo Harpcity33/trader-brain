@@ -26,23 +26,44 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.max_spread_to_structural_risk, 0.15)
         self.assertEqual(config.under5_min_dollar_volume, 7_500_000)
         self.assertEqual(config.under5_max_quote_spread_pct, 0.9375)
-        self.assertEqual(config.policy_version, "profit_seeking_live_preparation_2026-08-22_v1")
-        self.assertEqual(config.supersedes_policy_version, "sol_ultra_2026-08-21_v1")
-        self.assertEqual(config.sizing_policy.version, "profit_seeking_sizing_2026-08-22_v1")
-        self.assertEqual(config.sizing_policy.probe_allocation_cap, 437.5)
-        self.assertEqual(config.sizing_policy.probe_risk_cap, 15.0)
-        self.assertEqual(config.sizing_policy.regular_allocation_ceiling, 1062.5)
-        self.assertEqual(config.sizing_policy.regular_risk_ceiling, 37.5)
-        self.assertEqual(config.sizing_policy.under5_allocation_ceiling, 625.0)
-        self.assertEqual(config.sizing_policy.under5_risk_ceiling, 22.5)
-        self.assertEqual(config.sizing_policy.reference_risk_unit, 20.0)
-        self.assertEqual(config.sizing_policy.initial_risk, 15.0)
-        self.assertEqual(config.sizing_policy.strengthened_winner_risk_cap, 30.0)
-        self.assertEqual(config.sizing_policy.build_tranches_pct, (40, 35, 25))
+        self.assertEqual(config.policy_version, "capital_flexible_live_preparation_2026-08-23_v2")
+        self.assertEqual(
+            config.supersedes_policy_version,
+            "profit_seeking_live_preparation_2026-08-22_v1",
+        )
+        self.assertEqual(config.sizing_policy.version, "capital_flexible_sizing_2026-08-23_v2")
+        self.assertEqual(config.sizing_policy.max_unleveraged_buying_power_fraction, 1.0)
+        self.assertEqual(config.sizing_policy.account_day_loss_limit_dollars, 100.0)
+        self.assertTrue(config.sizing_policy.single_setup_concentration_allowed)
+        self.assertFalse(config.sizing_policy.leverage_allowed)
+        self.assertEqual(config.sizing_policy.initial_allocation_pct_range, (0, 100))
+        self.assertTrue(config.sizing_policy.full_initial_allocation_allowed)
+        self.assertTrue(config.sizing_policy.adds_optional)
 
-    def test_sizing_policy_rejects_invalid_tranche_percentages(self) -> None:
-        with self.assertRaisesRegex(ValueError, "totaling 100"):
-            SizingPolicy.from_mapping({"build_tranches_pct": [50, 50, 1]})
+    def test_sizing_policy_rejects_obsolete_tranches_and_invalid_initial_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "build_tranches_pct was removed"):
+            SizingPolicy.from_mapping({"build_tranches_pct": [40, 35, 25]})
+        with self.assertRaisesRegex(ValueError, "ordered range"):
+            SizingPolicy.from_mapping({"initial_allocation_pct_range": [75, 50]})
+        with self.assertRaisesRegex(ValueError, "100% upper"):
+            SizingPolicy.from_mapping(
+                {
+                    "initial_allocation_pct_range": [0, 75],
+                    "full_initial_allocation_allowed": True,
+                }
+            )
+
+    def test_sizing_policy_rejects_leverage_and_more_than_full_buying_power(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot authorize leverage"):
+            SizingPolicy.from_mapping({"leverage_allowed": True})
+        with self.assertRaisesRegex(ValueError, "must be in"):
+            SizingPolicy.from_mapping({"max_unleveraged_buying_power_fraction": 1.01})
+        with self.assertRaisesRegex(ValueError, "durable loss rule"):
+            SizingPolicy.from_mapping({"account_day_loss_limit_dollars": 101})
+
+    def test_sizing_policy_rejects_removed_fixed_dollar_caps(self) -> None:
+        with self.assertRaisesRegex(ValueError, "fixed dollar sizing caps were removed"):
+            SizingPolicy.from_mapping({"probe_allocation_cap": 437.5})
 
     def test_research_config_cannot_mutate_production(self) -> None:
         path = Path(__file__).resolve().parent.parent / "config" / "titan-research.json"

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+from math import isfinite
 import os
 from pathlib import Path
 import sys
@@ -331,11 +332,31 @@ def cmd_risk_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_risk_release(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    row = store.release_risk_authorization(args.authorization_id, args.reason)
+    store.close()
+    output({
+        "status": "risk_authorization_released",
+        "authorization": row,
+        "trade_authority": False,
+    })
+    return 0
+
+
+def cmd_risk_authorizations(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    rows = store.risk_authorizations(args.limit)
+    store.close()
+    output(rows)
+    return 0
+
+
 def cmd_risk_gate(args: argparse.Namespace) -> int:
     store = Store(load(args).database_path)
     row = store.risk_session(args.account_key, args.session_date)
-    store.close()
     if row is None:
+        store.close()
         output({
             "new_entries_allowed": False,
             "reason": "broker-confirmed risk session is missing",
@@ -356,6 +377,8 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
     now_utc = datetime.now(timezone.utc)
     age_seconds = (now_utc - actual).total_seconds()
     reasons = []
+    if args.max_age_seconds <= 5 or args.max_age_seconds > 90:
+        reasons.append("broker snapshot max age must be within 6..90 seconds")
     if actual != expected_utc:
         reasons.append("ledger snapshot does not match the just-confirmed broker timestamp")
     if age_seconds < -15:
@@ -377,9 +400,265 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         and float(row["post_objective_new_risk_buffer"] or 0) <= 0
     ):
         reasons.append("post-objective new-risk buffer is not positive")
+    entry_check = bool(getattr(args, "entry_check", False))
+    raw_dynamic_inputs = {
+        "reviewed_entry_price": getattr(args, "reviewed_entry_price", None),
+        "structural_stop_price": getattr(args, "structural_stop_price", None),
+        "quantity": getattr(args, "quantity", None),
+        "contract_multiplier": getattr(args, "contract_multiplier", None),
+        "modeled_execution_loss_dollars": getattr(
+            args, "modeled_execution_loss_dollars", None
+        ),
+        "stress_tail_loss_dollars": getattr(
+            args, "stress_tail_loss_dollars", None
+        ),
+        "existing_open_downside_dollars": getattr(
+            args, "existing_open_downside_dollars", None
+        ),
+        "existing_pending_risk_dollars": getattr(
+            args, "existing_pending_risk_dollars", None
+        ),
+        "execution_reserve_dollars": getattr(
+            args, "execution_reserve_dollars", None
+        ),
+    }
+    supplied_dynamic_inputs = {
+        field for field, value in raw_dynamic_inputs.items() if value is not None
+    }
+    if entry_check:
+        missing = [
+            field for field, value in raw_dynamic_inputs.items() if value is None
+        ]
+        for field in (
+            "instrument_key", "thesis_key", "risk_action",
+        ):
+            if getattr(args, field, None) in (None, ""):
+                missing.append(field)
+        if missing:
+            raise ValueError(
+                "--entry-check requires explicit values for: " + ", ".join(missing)
+            )
+    elif supplied_dynamic_inputs:
+        raise ValueError(
+            "dynamic risk inputs are valid only with --entry-check"
+        )
+    reviewed_entry_price = float(raw_dynamic_inputs["reviewed_entry_price"] or 0)
+    structural_stop_price = float(raw_dynamic_inputs["structural_stop_price"] or 0)
+    quantity = float(raw_dynamic_inputs["quantity"] or 0)
+    contract_multiplier = float(raw_dynamic_inputs["contract_multiplier"] or 0)
+    modeled_execution_loss = float(
+        raw_dynamic_inputs["modeled_execution_loss_dollars"] or 0
+    )
+    stress_tail_loss = float(raw_dynamic_inputs["stress_tail_loss_dollars"] or 0)
+    existing_open_downside = float(
+        raw_dynamic_inputs["existing_open_downside_dollars"] or 0
+    )
+    existing_pending_risk = float(
+        raw_dynamic_inputs["existing_pending_risk_dollars"] or 0
+    )
+    execution_reserve = float(raw_dynamic_inputs["execution_reserve_dollars"] or 0)
+    raw_numeric_values = {
+        "reviewed_entry_price": reviewed_entry_price,
+        "structural_stop_price": structural_stop_price,
+        "quantity": quantity,
+        "contract_multiplier": contract_multiplier,
+        "modeled_execution_loss_dollars": modeled_execution_loss,
+        "stress_tail_loss_dollars": stress_tail_loss,
+        "existing_open_downside_dollars": existing_open_downside,
+        "existing_pending_risk_dollars": existing_pending_risk,
+        "execution_reserve_dollars": execution_reserve,
+    }
+    for field, value in raw_numeric_values.items():
+        if not isfinite(value) or value < 0:
+            raise ValueError(f"{field} must be a finite nonnegative number")
+    reviewed_notional = 0.0
+    stop_defined_loss = 0.0
+    proposed_new_risk = 0.0
+    if entry_check:
+        if reviewed_entry_price <= 0 or structural_stop_price <= 0:
+            raise ValueError(
+                "entry and structural-stop prices must be positive for --entry-check"
+            )
+        if structural_stop_price >= reviewed_entry_price:
+            raise ValueError(
+                "--structural-stop-price must be below --reviewed-entry-price"
+            )
+        if quantity <= 0:
+            raise ValueError("--quantity must be positive for --entry-check")
+        if contract_multiplier not in {1.0, 100.0}:
+            raise ValueError("--contract-multiplier must be exactly 1 or 100")
+        if execution_reserve < 5:
+            raise ValueError(
+                "--execution-reserve-dollars must be at least 5 for --entry-check"
+            )
+        reviewed_notional = reviewed_entry_price * quantity * contract_multiplier
+        stop_defined_loss = (
+            (reviewed_entry_price - structural_stop_price)
+            * quantity
+            * contract_multiplier
+            + modeled_execution_loss
+        )
+        proposed_new_risk = max(stop_defined_loss, stress_tail_loss)
+        if proposed_new_risk <= 0:
+            raise ValueError("calculated proposed new risk must be positive")
+    dynamic_inputs = {
+        **raw_numeric_values,
+        "reviewed_notional_dollars": reviewed_notional,
+        "calculated_stop_defined_loss_dollars": stop_defined_loss,
+        "proposed_new_risk_dollars": proposed_new_risk,
+    }
+
+    broker_balance_fields = (
+        "unleveraged_buying_power_dollars",
+        "current_gross_exposure_dollars",
+        "working_entry_notional_dollars",
+    )
+    broker_balances = {}
+    for field in broker_balance_fields:
+        raw_value = broker_state.get(field)
+        if entry_check and raw_value is None:
+            raise ValueError(f"broker risk snapshot is missing {field}")
+        value = float(raw_value or 0)
+        if not isfinite(value) or value < 0:
+            raise ValueError(f"broker {field} must be a finite nonnegative number")
+        broker_balances[field] = value
+    equity_notional_capacity = max(
+        0.0,
+        float(row["current_equity"])
+        - broker_balances["current_gross_exposure_dollars"]
+        - broker_balances["working_entry_notional_dollars"],
+    )
+    broker_new_notional_capacity = min(
+        broker_balances["unleveraged_buying_power_dollars"],
+        equity_notional_capacity,
+    )
+    post_order_gross_exposure = (
+        broker_balances["current_gross_exposure_dollars"]
+        + broker_balances["working_entry_notional_dollars"]
+        + reviewed_notional
+    )
+    if entry_check and reviewed_notional > broker_new_notional_capacity + 0.005:
+        reasons.append(
+            "reviewed notional exceeds fresh unleveraged buying power or the "
+            "no-leverage account-equity gross-exposure ceiling"
+        )
+
+    # LOSS_GAUGE intentionally does not credit unrealized gains.  Subtract only
+    # the portion of current-mark-to-stop downside that can worsen LOSS_GAUGE;
+    # otherwise the same unrealized gain would be withheld twice.  Pending and
+    # proposed orders have no mark embedded in current equity, so their full
+    # conservative risk is reserved.
+    uncredited_open_profit = max(
+        0.0, float(row["account_day_pnl"]) - float(row["loss_gauge"])
+    )
+    open_loss_gauge_degradation = max(
+        0.0, existing_open_downside - uncredited_open_profit
+    )
+    loss_lock_capacity = max(
+        0.0,
+        float(row["loss_headroom_to_lock"])
+        - open_loss_gauge_degradation
+        - existing_pending_risk
+        - execution_reserve,
+    )
+    floor_capacity = None
+    controlling_headroom = float(row["loss_headroom_to_lock"])
+    if row["profit_objective_reached"]:
+        floor_capacity = max(
+            0.0,
+            float(row["post_objective_new_risk_buffer"] or 0)
+            - existing_open_downside
+            - existing_pending_risk
+            - execution_reserve,
+        )
+        controlling_headroom = min(
+            controlling_headroom,
+            float(row["post_objective_new_risk_buffer"] or 0),
+        )
+    dynamic_new_risk_capacity = (
+        min(loss_lock_capacity, floor_capacity)
+        if floor_capacity is not None
+        else loss_lock_capacity
+    )
+    if proposed_new_risk > dynamic_new_risk_capacity + 0.005:
+        reasons.append(
+            "proposed new risk exceeds broker-snapshot loss/floor headroom after "
+            "open, pending, and execution reserves"
+        )
     row["broker_snapshot_age_seconds"] = round(age_seconds, 3)
+    row.update(dynamic_inputs)
+    row.update(broker_balances)
+    row["broker_new_notional_capacity_dollars"] = round(
+        broker_new_notional_capacity, 4
+    )
+    row["post_order_gross_exposure_dollars"] = round(
+        post_order_gross_exposure, 4
+    )
+    row["controlling_new_risk_headroom_dollars"] = round(
+        controlling_headroom, 4
+    )
+    row["uncredited_open_profit_dollars"] = round(uncredited_open_profit, 4)
+    row["open_loss_gauge_degradation_dollars"] = round(
+        open_loss_gauge_degradation, 4
+    )
+    row["loss_lock_new_risk_capacity_dollars"] = round(loss_lock_capacity, 4)
+    row["profit_floor_new_risk_capacity_dollars"] = (
+        round(floor_capacity, 4) if floor_capacity is not None else None
+    )
+    row["dynamic_new_risk_capacity_dollars"] = round(
+        dynamic_new_risk_capacity, 4
+    )
+    row["risk_gate_mode"] = "entry_authorization" if entry_check else "session_only"
+    if entry_check and not reasons:
+        checked_at = datetime.now(timezone.utc).isoformat()
+        evidence = {
+            "account_key": str(args.account_key),
+            "session_date": str(args.session_date),
+            "strategy_version": str(row["strategy_version"]),
+            "broker_confirmed_at": str(row["broker_confirmed_at"]),
+            "broker_snapshot_valid_until": (
+                actual + timedelta(seconds=args.max_age_seconds)
+            ).isoformat(),
+            "checked_at": checked_at,
+            "current_equity_dollars": round(float(row["current_equity"]), 4),
+            "instrument_key": str(args.instrument_key),
+            "thesis_key": str(args.thesis_key).upper(),
+            "risk_action": str(args.risk_action).upper(),
+            **{key: round(value, 4) for key, value in dynamic_inputs.items()},
+            **{key: round(value, 4) for key, value in broker_balances.items()},
+            "broker_new_notional_capacity_dollars": round(
+                broker_new_notional_capacity, 4
+            ),
+            "post_order_gross_exposure_dollars": round(
+                post_order_gross_exposure, 4
+            ),
+            "uncredited_open_profit_dollars": round(uncredited_open_profit, 4),
+            "open_loss_gauge_degradation_dollars": round(
+                open_loss_gauge_degradation, 4
+            ),
+            "loss_lock_new_risk_capacity_dollars": round(loss_lock_capacity, 4),
+            "profit_floor_new_risk_capacity_dollars": (
+                round(floor_capacity, 4) if floor_capacity is not None else None
+            ),
+            "dynamic_new_risk_capacity_dollars": round(
+                dynamic_new_risk_capacity, 4
+            ),
+        }
+        try:
+            reservation = store.reserve_risk_authorization(evidence)
+        except ValueError as error:
+            reasons.append(str(error))
+        else:
+            if reservation["reserved"]:
+                row["risk_gate_authorization"] = reservation["authorization"]
+            else:
+                reasons.append(str(reservation["reason"]))
+                row["active_risk_authorization"] = reservation.get(
+                    "active_authorization"
+                )
     row["risk_gate_reasons"] = reasons
     row["new_entries_allowed"] = not reasons
+    store.close()
     output(row)
     return 0 if row["new_entries_allowed"] else 2
 
@@ -496,6 +775,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     risk_list.add_argument("--limit", type=int, default=20)
     risk_list.set_defaults(func=cmd_risk_list)
+    risk_authorizations = risk_commands.add_parser(
+        "authorizations", help="List durable pending-order risk authorizations"
+    )
+    risk_authorizations.add_argument("--limit", type=int, default=20)
+    risk_authorizations.set_defaults(func=cmd_risk_authorizations)
+    risk_release = risk_commands.add_parser(
+        "release", help="Release an unsubmitted active risk authorization"
+    )
+    risk_release.add_argument("--authorization-id", required=True)
+    risk_release.add_argument("--reason", required=True)
+    risk_release.set_defaults(func=cmd_risk_release)
     risk_gate = risk_commands.add_parser(
         "gate", help="Fail closed when the session is missing or loss-locked"
     )
@@ -503,6 +793,24 @@ def build_parser() -> argparse.ArgumentParser:
     risk_gate.add_argument("--session-date", required=True)
     risk_gate.add_argument("--expected-broker-confirmed-at", required=True)
     risk_gate.add_argument("--max-age-seconds", type=int, default=90)
+    risk_gate.add_argument(
+        "--entry-check", action="store_true",
+        help="Require and audit exact risk inputs immediately before an entry or add",
+    )
+    risk_gate.add_argument("--instrument-key")
+    risk_gate.add_argument("--thesis-key")
+    risk_gate.add_argument("--risk-action", choices=("ENTRY", "ADD"))
+    risk_gate.add_argument("--reviewed-entry-price", type=float)
+    risk_gate.add_argument("--structural-stop-price", type=float)
+    risk_gate.add_argument("--quantity", type=float)
+    risk_gate.add_argument("--contract-multiplier", type=float)
+    risk_gate.add_argument("--modeled-execution-loss-dollars", type=float)
+    risk_gate.add_argument("--stress-tail-loss-dollars", type=float)
+    risk_gate.add_argument(
+        "--existing-open-downside-dollars", type=float
+    )
+    risk_gate.add_argument("--existing-pending-risk-dollars", type=float)
+    risk_gate.add_argument("--execution-reserve-dollars", type=float)
     risk_gate.set_defaults(func=cmd_risk_gate)
     return parser
 
