@@ -63,5 +63,14 @@
     "replay_candidate_count": 39,
     "replay_trade_authority_count": 0,
     "orders_created_during_build": 0
+  },
+  "deployment": {
+    "installed_date_et": "2026-08-23",
+    "watcher_mode": "shadow",
+    "watcher_trade_authority": false,
+    "launch_agent_state": "enabled_not_running",
+    "next_scheduled_start_et": "2026-08-24T04:00:00-04:00",
+    "schema_change": "additive",
+    "live_broker_orders_created": 0
   }
 }
