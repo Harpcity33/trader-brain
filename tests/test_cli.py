@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
@@ -12,21 +12,80 @@ from unittest.mock import patch
 
 from titan_runtime.cli import (
     build_parser,
+    cmd_entry_stop_engage,
+    cmd_entry_stop_status,
     cmd_performance_grade,
     cmd_performance_list,
     cmd_performance_show,
     cmd_risk_gate,
 )
-from titan_runtime.storage import Store
+from titan_runtime.storage import (
+    Store,
+    TITAN_LIVE_DECISION_CONTRACT_HASH,
+    TITAN_LIVE_DECISION_CONTRACT_VERSION,
+    TITAN_LIVE_PILOT_ID,
+)
+
+
+LIVE_ATTRIBUTION = {
+    "pilot_id": TITAN_LIVE_PILOT_ID,
+    "book_mode": "LIVE",
+    "decision_contract_version": TITAN_LIVE_DECISION_CONTRACT_VERSION,
+    "decision_contract_hash": TITAN_LIVE_DECISION_CONTRACT_HASH,
+}
 
 
 class CliTests(unittest.TestCase):
+    def test_entry_stop_cli_is_durable_and_has_no_release_command(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "test.sqlite3"
+            config = SimpleNamespace(database_path=database)
+            buffer = StringIO()
+            with patch("titan_runtime.cli.load", return_value=config), redirect_stdout(buffer):
+                self.assertEqual(cmd_entry_stop_status(SimpleNamespace(limit=5)), 0)
+            initial = json.loads(buffer.getvalue())
+            self.assertFalse(initial["engaged"])
+
+            buffer = StringIO()
+            with patch("titan_runtime.cli.load", return_value=config), redirect_stdout(buffer):
+                self.assertEqual(cmd_entry_stop_engage(SimpleNamespace(
+                    reason="operator emergency test", changed_by="operator:test",
+                )), 0)
+            engaged = json.loads(buffer.getvalue())
+            self.assertTrue(engaged["entry_stop"]["engaged"])
+            self.assertFalse(engaged["broker_state_mutated"])
+
+            parser = build_parser()
+            self.assertEqual(
+                parser.parse_args([
+                    "entry-stop", "engage", "--reason", "halt", "--changed-by",
+                    "operator:test",
+                ]).func,
+                cmd_entry_stop_engage,
+            )
+            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                parser.parse_args([
+                    "entry-stop", "release", "--reason", "forged",
+                    "--operator", "test",
+                ])
+            unknown = parser.parse_args([
+                "risk", "submission-unknown", "--authorization-id", "auth-1",
+                "--attempted-at", "2026-08-23T14:00:00+00:00", "--reason",
+                "connector timeout",
+            ])
+            self.assertEqual(unknown.authorization_id, "auth-1")
+            board = parser.parse_args([
+                "pilots", "leaderboard", "--book-mode", "SHADOW"
+            ])
+            self.assertEqual(board.book_mode, "SHADOW")
+
     def test_performance_cli_grade_show_and_list(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "test.sqlite3"
             grade_file = Path(directory) / "grade.json"
             store = Store(database)
             store.upsert_risk_session({
+                **LIVE_ATTRIBUTION,
                 "account_key": "ending-7153",
                 "session_date": "2026-08-22",
                 "strategy_version": "grade-cli-v1",
@@ -51,6 +110,7 @@ class CliTests(unittest.TestCase):
             })
             store.close()
             payload = {
+                **LIVE_ATTRIBUTION,
                 "account_key": "ending-7153",
                 "session_date": "2026-08-22",
                 "strategy_version": "grade-cli-v1",
@@ -238,6 +298,7 @@ class CliTests(unittest.TestCase):
                 }
 
             base = {
+                **LIVE_ATTRIBUTION,
                 "account_key": "ending-7153",
                 "session_date": now.date().isoformat(),
                 "strategy_version": "titan_live_canonical_2026-08-22_v1",
@@ -263,12 +324,28 @@ class CliTests(unittest.TestCase):
                 structural_stop_price: float = 9,
                 quantity: float | None = None,
                 contract_multiplier: float = 1,
+                asset_class: str = "EQUITY",
                 modeled_execution_loss: float = 0,
                 stress_tail_loss: float | None = None,
                 existing_open_downside: float | None = None,
                 existing_pending_risk: float | None = None,
                 execution_reserve: float | None = None,
             ) -> int:
+                preview_store = Store(database)
+                preview_session = preview_store.risk_session(
+                    "ending-7153", now.date().isoformat()
+                )
+                preview_store.close()
+                assert preview_session is not None
+                effective_quantity = (
+                    quantity if quantity is not None
+                    else (proposed_new_risk if entry_check else None)
+                )
+                projected_cost = (
+                    reviewed_entry_price
+                    * float(effective_quantity or 0)
+                    * contract_multiplier
+                )
                 args = SimpleNamespace(
                     account_key="ending-7153",
                     session_date=now.date().isoformat(),
@@ -276,17 +353,28 @@ class CliTests(unittest.TestCase):
                     max_age_seconds=max_age_seconds,
                     entry_check=entry_check,
                     instrument_key="equity:TEST" if entry_check else None,
+                    symbol="TEST" if entry_check else None,
+                    direction="UP" if entry_check else None,
+                    asset_class=asset_class if entry_check else None,
                     thesis_key="TEST" if entry_check else None,
                     risk_action="ENTRY" if entry_check else None,
+                    pilot_id=(TITAN_LIVE_PILOT_ID if entry_check else None),
+                    book_mode=("LIVE" if entry_check else None),
+                    decision_contract_version=(
+                        TITAN_LIVE_DECISION_CONTRACT_VERSION if entry_check else None
+                    ),
+                    decision_contract_hash=(
+                        TITAN_LIVE_DECISION_CONTRACT_HASH if entry_check else None
+                    ),
                     reviewed_entry_price=(reviewed_entry_price if entry_check else None),
                     structural_stop_price=(structural_stop_price if entry_check else None),
-                    quantity=(
-                        quantity if quantity is not None
-                        else (proposed_new_risk if entry_check else None)
-                    ),
+                    quantity=effective_quantity,
                     contract_multiplier=(contract_multiplier if entry_check else None),
                     modeled_execution_loss_dollars=(
                         modeled_execution_loss if entry_check else None
+                    ),
+                    maximum_acceptable_slippage_dollars=(
+                        modeled_execution_loss + 1 if entry_check else None
                     ),
                     stress_tail_loss_dollars=(
                         stress_tail_loss
@@ -296,6 +384,44 @@ class CliTests(unittest.TestCase):
                     existing_open_downside_dollars=existing_open_downside,
                     existing_pending_risk_dollars=existing_pending_risk,
                     execution_reserve_dollars=execution_reserve,
+                    expected_unleveraged_buying_power_dollars=(
+                        5000 if entry_check else None
+                    ),
+                    preview_id="preview-test" if entry_check else None,
+                    preview_confirmed_at=(
+                        datetime.now(timezone.utc).isoformat()
+                        if entry_check else None
+                    ),
+                    preview_account_key=(
+                        "ending-7153" if entry_check else None
+                    ),
+                    preview_instrument_key=(
+                        "equity:TEST" if entry_check else None
+                    ),
+                    preview_side="BUY" if entry_check else None,
+                    preview_order_quantity=(
+                        effective_quantity if entry_check else None
+                    ),
+                    preview_limit_price=(
+                        reviewed_entry_price if entry_check else None
+                    ),
+                    preview_equity_dollars=(
+                        preview_session["current_equity"] if entry_check else None
+                    ),
+                    preview_current_gross_exposure_dollars=(
+                        preview_session["broker_state"][
+                            "current_gross_exposure_dollars"
+                        ] if entry_check else None
+                    ),
+                    preview_working_entry_notional_dollars=(
+                        preview_session["broker_state"][
+                            "working_entry_notional_dollars"
+                        ] if entry_check else None
+                    ),
+                    preview_projected_cost_dollars=(
+                        projected_cost if entry_check else None
+                    ),
+                    broker_ack_timeout_seconds=10,
                 )
                 buffer = StringIO()
                 with patch(
@@ -319,9 +445,13 @@ class CliTests(unittest.TestCase):
                     execution_reserve=10,
                 ),
                 0,
+                gate.last_output,
             )
             self.assertIn("risk_gate_authorization", gate.last_output)
             self.assertIn('"reviewed_notional_dollars": 800.0', gate.last_output)
+            self.assertIn(
+                '"maximum_contractual_loss_dollars": null', gate.last_output
+            )
             first_authorization = json.loads(gate.last_output)[
                 "risk_gate_authorization"
             ]["authorization_id"]
@@ -339,6 +469,36 @@ class CliTests(unittest.TestCase):
             self.assertIn("another pending order authorization is active", gate.last_output)
             store = Store(database)
             store.release_risk_authorization(first_authorization, "unit_test_abort")
+            store.close()
+            self.assertEqual(
+                gate(
+                    now.isoformat(),
+                    entry_check=True,
+                    proposed_new_risk=90,
+                    reviewed_entry_price=10,
+                    structural_stop_price=9.1,
+                    quantity=1,
+                    contract_multiplier=100,
+                    asset_class="OPTION",
+                    stress_tail_loss=90,
+                    existing_open_downside=0,
+                    existing_pending_risk=0,
+                    execution_reserve=5,
+                ),
+                0,
+                gate.last_output,
+            )
+            option_authorization = json.loads(gate.last_output)[
+                "risk_gate_authorization"
+            ]
+            self.assertEqual(
+                option_authorization["maximum_contractual_loss_dollars"],
+                1000.0,
+            )
+            store = Store(database)
+            store.release_risk_authorization(
+                option_authorization["authorization_id"], "unit_test_abort"
+            )
             store.close()
             self.assertEqual(
                 gate(

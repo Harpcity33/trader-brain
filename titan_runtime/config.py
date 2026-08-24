@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import time
+import hashlib
 import json
 from math import isfinite
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -172,6 +174,19 @@ class RuntimeConfig:
     policy_version: str
     supersedes_policy_version: str | None
     sizing_policy: SizingPolicy
+    pilot_architecture_version: str
+    pilot_registry_path: Path
+    pilot_registry_hash: str
+    decision_contract_path: Path
+    pilot_id: str
+    book_mode: str
+    decision_contract_version: str
+    decision_contract_hash: str
+    pilot_trade_authority: bool
+    pilot_broker_authority: bool
+    pilot_risk_authorization_authority: bool
+    pilot_buying_power_reservation_authority: bool
+    pilot_capital_allocation_authority: bool
 
     @classmethod
     def load(cls, path: str | Path) -> "RuntimeConfig":
@@ -183,10 +198,16 @@ class RuntimeConfig:
             candidate = Path(value).expanduser()
             return candidate if candidate.is_absolute() else (root / candidate).resolve()
 
+        def config_relative_path(value: str) -> Path:
+            candidate = Path(value).expanduser()
+            return candidate if candidate.is_absolute() else (source.parent / candidate).resolve()
+
         def clock(value: str) -> time:
             hour, minute = (int(part) for part in value.split(":"))
             return time(hour=hour, minute=minute)
 
+        pilot_architecture = raw.get("pilot_architecture") or {}
+        watcher_identity = pilot_architecture.get("current_watcher_identity") or {}
         cfg = cls(
             project_root=root,
             database_path=project_path(raw["database_path"]),
@@ -232,6 +253,39 @@ class RuntimeConfig:
                 else None
             ),
             sizing_policy=SizingPolicy.from_mapping(raw.get("sizing_policy")),
+            pilot_architecture_version=str(
+                pilot_architecture.get("version", "unversioned")
+            ),
+            pilot_registry_path=config_relative_path(
+                str(pilot_architecture.get("registry_path", ""))
+            ),
+            pilot_registry_hash=str(pilot_architecture.get("registry_hash", "")),
+            decision_contract_path=config_relative_path(
+                str(watcher_identity.get("decision_contract_path", ""))
+            ),
+            pilot_id=str(watcher_identity.get("pilot_id", "")),
+            book_mode=str(watcher_identity.get("book_mode", "")),
+            decision_contract_version=str(
+                watcher_identity.get("decision_contract_version", "")
+            ),
+            decision_contract_hash=str(
+                watcher_identity.get("decision_contract_hash", "")
+            ),
+            pilot_trade_authority=bool(
+                watcher_identity.get("trade_authority", False)
+            ),
+            pilot_broker_authority=bool(
+                watcher_identity.get("broker_authority", False)
+            ),
+            pilot_risk_authorization_authority=bool(
+                watcher_identity.get("risk_authorization_authority", False)
+            ),
+            pilot_buying_power_reservation_authority=bool(
+                watcher_identity.get("buying_power_reservation_authority", False)
+            ),
+            pilot_capital_allocation_authority=bool(
+                watcher_identity.get("capital_allocation_authority", False)
+            ),
         )
         cfg.validate()
         return cfg
@@ -259,4 +313,71 @@ class RuntimeConfig:
             raise ValueError("max_spread_to_structural_risk must be in (0, 1]")
         if not self.policy_version.strip():
             raise ValueError("policy_version cannot be empty")
+        if self.pilot_architecture_version != "titan_pilot_registry_2026-08-23_v1":
+            raise ValueError("unexpected or missing pilot architecture version")
+        if not self.pilot_registry_path.is_file():
+            raise ValueError("pilot registry file is missing")
+        if not self.decision_contract_path.is_file():
+            raise ValueError("decision contract file is missing")
+        registry_bytes = self.pilot_registry_path.read_bytes()
+        contract_bytes = self.decision_contract_path.read_bytes()
+        actual_registry_hash = hashlib.sha256(registry_bytes).hexdigest()
+        actual_contract_hash = hashlib.sha256(contract_bytes).hexdigest()
+        if re.fullmatch(r"[a-f0-9]{64}", self.pilot_registry_hash) is None:
+            raise ValueError("pilot_registry_hash must be lowercase 64-hex SHA-256")
+        if actual_registry_hash != self.pilot_registry_hash:
+            raise ValueError("pilot registry file hash differs from configuration")
+        if self.pilot_id != "titan_momentum_equity":
+            raise ValueError("Massive watcher pilot_id must be titan_momentum_equity")
+        if self.book_mode != "SHADOW":
+            raise ValueError("Massive watcher book_mode must remain SHADOW")
+        if self.decision_contract_version != "titan_momentum_equity_2026-08-23_v1":
+            raise ValueError("unexpected or missing decision contract version")
+        if re.fullmatch(r"[a-f0-9]{64}", self.decision_contract_hash) is None:
+            raise ValueError("decision_contract_hash must be lowercase 64-hex SHA-256")
+        if actual_contract_hash != self.decision_contract_hash:
+            raise ValueError("decision_contract_hash differs from exact contract file bytes")
+        try:
+            contract = json.loads(contract_bytes)
+            registry = json.loads(registry_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Pilot registry and contract must be valid UTF-8 JSON") from exc
+        if contract.get("pilot_id") != self.pilot_id:
+            raise ValueError("decision contract pilot_id differs from configuration")
+        if contract.get("decision_contract_version") != self.decision_contract_version:
+            raise ValueError("decision contract version differs from configuration")
+        if contract.get("strategy_version") != "titan_live_canonical_2026-08-23_v3":
+            raise ValueError("decision contract strategy version is not canonical live v3")
+        if contract.get("provenance", {}).get("canonical_path") != (
+            "config/pilots/titan-momentum-equity.json"
+        ):
+            raise ValueError("decision contract canonical path is invalid")
+        if registry.get("registry_version") != self.pilot_architecture_version:
+            raise ValueError("pilot registry version differs from configuration")
+        if registry.get("sole_live_pilot_id") != self.pilot_id:
+            raise ValueError("pilot registry sole live Pilot differs from configuration")
+        registry_contracts = {
+            str(item.get("pilot_id")): item
+            for item in registry.get("contracts", [])
+            if isinstance(item, dict)
+        }
+        registered = registry_contracts.get(self.pilot_id)
+        if not registered:
+            raise ValueError("current Pilot is missing from the registry")
+        if registered.get("decision_contract_version") != self.decision_contract_version:
+            raise ValueError("registry decision contract version differs from configuration")
+        if registered.get("decision_contract_hash") != self.decision_contract_hash:
+            raise ValueError("registry decision contract hash differs from configuration")
+        if registered.get("path") != contract.get("provenance", {}).get("canonical_path"):
+            raise ValueError("registry decision contract path differs from contract provenance")
+        if any(
+            (
+                self.pilot_trade_authority,
+                self.pilot_broker_authority,
+                self.pilot_risk_authorization_authority,
+                self.pilot_buying_power_reservation_authority,
+                self.pilot_capital_allocation_authority,
+            )
+        ):
+            raise ValueError("Massive watcher Pilot identity must have zero authority")
         self.sizing_policy.validate()

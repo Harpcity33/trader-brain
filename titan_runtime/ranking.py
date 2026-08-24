@@ -152,10 +152,41 @@ def _resolve_sizing_policy(config: Any | None) -> tuple[SizingPolicy, str, str |
     )
 
 
+def _resolve_pilot_identity(config: Any | None) -> dict[str, Any]:
+    required = (
+        "pilot_id",
+        "book_mode",
+        "decision_contract_version",
+        "decision_contract_hash",
+    )
+    if config is None or any(not getattr(config, field, None) for field in required):
+        raise ValueError("explicit RuntimeConfig Pilot identity is required")
+    if str(config.book_mode) != "SHADOW":
+        raise ValueError("preliminary plan builder is restricted to SHADOW book mode")
+    if any(
+        bool(getattr(config, field, False))
+        for field in (
+            "pilot_trade_authority",
+            "pilot_broker_authority",
+            "pilot_risk_authorization_authority",
+            "pilot_buying_power_reservation_authority",
+            "pilot_capital_allocation_authority",
+        )
+    ):
+        raise ValueError("preliminary plan Pilot identity must have zero authority")
+    return {
+        "pilot_id": str(config.pilot_id),
+        "book_mode": str(config.book_mode),
+        "decision_contract_version": str(config.decision_contract_version),
+        "decision_contract_hash": str(config.decision_contract_hash),
+    }
+
+
 def build_preliminary_trade_plan(
     signal: dict[str, Any], config: Any | None = None
 ) -> dict[str, Any]:
     sizing, policy_version, supersedes_policy_version = _resolve_sizing_policy(config)
+    pilot_identity = _resolve_pilot_identity(config)
     symbol = str(signal["symbol"])
     direction = str(signal.get("direction") or "UP")
     lane = str(signal.get("lane") or "regular_equity")
@@ -214,6 +245,7 @@ def build_preliminary_trade_plan(
         status = "UNDERLYING_WATCH_ONLY"
     return {
         "schema_version": 2,
+        **pilot_identity,
         "policy_version": policy_version,
         "supersedes_policy_version": supersedes_policy_version,
         "sizing_policy_version": sizing.version,
@@ -348,6 +380,10 @@ def build_preliminary_trade_plan(
             "eligibility, broker, or risk check fails",
         ],
         "trade_authority": False,
+        "broker_authority": False,
+        "risk_authorization_authority": False,
+        "buying_power_reservation_authority": False,
+        "capital_allocation_authority": False,
         "broker_review_complete": False,
         "protection_confirmed": False,
     }

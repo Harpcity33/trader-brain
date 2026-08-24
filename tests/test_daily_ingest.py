@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -18,6 +19,13 @@ class DailyIngestTests(unittest.TestCase):
             report = source_directory / "trader_brain_codex_2026-08-20.md"
             report.write_text("# Trader Brain\nFirst revision.\n", encoding="utf-8")
             (root / "config").mkdir()
+            pilot_source = Path(__file__).resolve().parent.parent / "config/pilots"
+            pilot_target = root / "config/pilots"
+            pilot_target.mkdir()
+            contract_bytes = (pilot_source / "titan-momentum-equity.json").read_bytes()
+            registry_bytes = (pilot_source / "registry-2026-08-23-v1.json").read_bytes()
+            (pilot_target / "titan-momentum-equity.json").write_bytes(contract_bytes)
+            (pilot_target / "registry-2026-08-23-v1.json").write_bytes(registry_bytes)
             production_db = root / "production/runtime.sqlite3"
             config = {
                 "mode": "shadow",
@@ -44,6 +52,23 @@ class DailyIngestTests(unittest.TestCase):
                 "max_quote_spread_pct": 0.75,
                 "under5_max_quote_spread_pct": 0.75,
                 "retention_days": 15,
+                "pilot_architecture": {
+                    "version": "titan_pilot_registry_2026-08-23_v1",
+                    "registry_path": "pilots/registry-2026-08-23-v1.json",
+                    "registry_hash": hashlib.sha256(registry_bytes).hexdigest(),
+                    "current_watcher_identity": {
+                        "pilot_id": "titan_momentum_equity",
+                        "book_mode": "SHADOW",
+                        "decision_contract_version": "titan_momentum_equity_2026-08-23_v1",
+                        "decision_contract_hash": hashlib.sha256(contract_bytes).hexdigest(),
+                        "decision_contract_path": "pilots/titan-momentum-equity.json",
+                        "trade_authority": False,
+                        "broker_authority": False,
+                        "risk_authorization_authority": False,
+                        "buying_power_reservation_authority": False,
+                        "capital_allocation_authority": False,
+                    },
+                },
             }
             config_path = root / "config/titan-massive.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")

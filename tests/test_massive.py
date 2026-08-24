@@ -14,6 +14,15 @@ class MassiveWatcherTests(unittest.TestCase):
     @staticmethod
     def _candidate() -> dict:
         return {
+            "pilot_id": "titan_momentum_equity",
+            "book_mode": "SHADOW",
+            "decision_contract_version": "titan_momentum_equity_2026-08-23_v1",
+            "decision_contract_hash": "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21",
+            "trade_authority": False,
+            "broker_authority": False,
+            "risk_authorization_authority": False,
+            "buying_power_reservation_authority": False,
+            "capital_allocation_authority": False,
             "symbol": "TEST",
             "observed_at": "2026-08-24T14:00:00+00:00",
             "state": "BREAKOUT",
@@ -70,6 +79,30 @@ class MassiveWatcherTests(unittest.TestCase):
             )
             self.assertNotIn("TRIGGER_CROSS", emitted)
             store.close()
+
+    def test_payload_attribution_is_explicit_zero_authority_and_fail_closed(self) -> None:
+        watcher = TitanWatcher.__new__(TitanWatcher)
+        watcher.config = SimpleNamespace(
+            pilot_id="titan_momentum_equity",
+            book_mode="SHADOW",
+            decision_contract_version="titan_momentum_equity_2026-08-23_v1",
+            decision_contract_hash=(
+                "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21"
+            ),
+        )
+        attributed = watcher._attribute_payload({"symbol": "TEST"})
+        self.assertEqual(attributed["pilot_id"], "titan_momentum_equity")
+        self.assertEqual(attributed["book_mode"], "SHADOW")
+        for field in (
+            "trade_authority",
+            "broker_authority",
+            "risk_authorization_authority",
+            "buying_power_reservation_authority",
+            "capital_allocation_authority",
+        ):
+            self.assertFalse(attributed[field])
+        with self.assertRaisesRegex(ValueError, "contradictory trade_authority"):
+            watcher._attribute_payload({"trade_authority": True})
 
 
 if __name__ == "__main__":

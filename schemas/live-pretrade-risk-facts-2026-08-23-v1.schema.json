@@ -1,0 +1,416 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trader-brain.local/schemas/live-pretrade-risk-facts-2026-08-23-v1.schema.json",
+  "title": "Titan Momentum Equity Canonical Live Pretrade Risk Facts",
+  "description": "The entry risk gate returns this single flat canonical object as both risk_gate_authorization and pretrade_risk_facts. Submission intent and its 10-second acknowledgment deadline are initially null and become immutable when submission intent is marked immediately before the broker call.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authorization_id",
+    "pilot_id",
+    "book_mode",
+    "decision_contract_version",
+    "decision_contract_hash",
+    "strategy_version",
+    "account_key",
+    "session_date",
+    "broker_confirmed_at",
+    "broker_snapshot_valid_until",
+    "broker_snapshot_hash",
+    "checked_at",
+    "reservation_expires_at",
+    "reservation_scope",
+    "current_equity_dollars",
+    "instrument_key",
+    "symbol",
+    "thesis_key",
+    "direction",
+    "asset_class",
+    "risk_action",
+    "preview_id",
+    "preview_confirmed_at",
+    "preview_account_key",
+    "preview_instrument_key",
+    "preview_side",
+    "preview_order_quantity",
+    "preview_limit_price",
+    "preview_equity_dollars",
+    "preview_current_gross_exposure_dollars",
+    "preview_working_entry_notional_dollars",
+    "preview_projected_cost_dollars",
+    "reviewed_entry_price",
+    "structural_stop_price",
+    "quantity",
+    "contract_multiplier",
+    "modeled_execution_loss_dollars",
+    "maximum_acceptable_slippage_dollars",
+    "stress_tail_loss_dollars",
+    "reviewed_notional_dollars",
+    "estimated_slippage_dollars",
+    "maximum_contractual_loss_dollars",
+    "notional_pct_of_current_equity",
+    "calculated_stop_defined_loss_dollars",
+    "proposed_new_risk_dollars",
+    "existing_open_downside_dollars",
+    "existing_pending_risk_dollars",
+    "execution_reserve_dollars",
+    "unleveraged_buying_power_dollars",
+    "expected_unleveraged_buying_power_dollars",
+    "buying_power_mismatch_dollars",
+    "buying_power_mismatch_tolerance_dollars",
+    "buying_power_mismatch_detected",
+    "emergency_entry_stop_generation",
+    "emergency_entry_stop_state_hash",
+    "broker_ack_timeout_seconds",
+    "current_gross_exposure_dollars",
+    "working_entry_notional_dollars",
+    "broker_new_notional_capacity_dollars",
+    "post_order_gross_exposure_dollars",
+    "projected_remaining_buying_power_dollars",
+    "uncredited_open_profit_dollars",
+    "open_loss_gauge_degradation_dollars",
+    "loss_lock_new_risk_capacity_dollars",
+    "profit_floor_new_risk_capacity_dollars",
+    "dynamic_new_risk_capacity_dollars",
+    "account_day_loss_headroom_dollars",
+    "submission_intent_at",
+    "broker_ack_deadline_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "titan_live_pretrade_risk_facts_2026-08-23_v1"
+    },
+    "authorization_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "pilot_id": {
+      "const": "titan_momentum_equity"
+    },
+    "book_mode": {
+      "const": "LIVE"
+    },
+    "decision_contract_version": {
+      "const": "titan_momentum_equity_2026-08-23_v1"
+    },
+    "decision_contract_hash": {
+      "const": "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21"
+    },
+    "strategy_version": {
+      "const": "titan_live_canonical_2026-08-23_v3"
+    },
+    "session_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "broker_confirmed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "broker_snapshot_valid_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "broker_snapshot_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reservation_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reservation_scope": {
+      "const": "one_active_per_account_session"
+    },
+    "contract_multiplier": {
+      "enum": [
+        1,
+        100
+      ]
+    },
+    "direction": {
+      "enum": [
+        "UP",
+        "DOWN"
+      ]
+    },
+    "asset_class": {
+      "enum": [
+        "EQUITY",
+        "OPTION"
+      ]
+    },
+    "risk_action": {
+      "enum": [
+        "ENTRY",
+        "ADD"
+      ]
+    },
+    "preview_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preview_confirmed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "preview_account_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preview_instrument_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preview_side": {
+      "const": "BUY"
+    },
+    "preview_order_quantity": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "preview_limit_price": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "preview_equity_dollars": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "preview_current_gross_exposure_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "preview_working_entry_notional_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "preview_projected_cost_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "buying_power_mismatch_detected": {
+      "type": "boolean"
+    },
+    "emergency_entry_stop_generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "emergency_entry_stop_state_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "broker_ack_timeout_seconds": {
+      "const": 10
+    },
+    "profit_floor_new_risk_capacity_dollars": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "submission_intent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "broker_ack_deadline_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "account_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instrument_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thesis_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_equity_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reviewed_entry_price": {
+      "type": "number",
+      "minimum": 0
+    },
+    "structural_stop_price": {
+      "type": "number",
+      "minimum": 0
+    },
+    "quantity": {
+      "type": "number",
+      "minimum": 0
+    },
+    "modeled_execution_loss_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "maximum_acceptable_slippage_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "stress_tail_loss_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reviewed_notional_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "estimated_slippage_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "maximum_contractual_loss_dollars": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "notional_pct_of_current_equity": {
+      "type": "number",
+      "minimum": 0
+    },
+    "calculated_stop_defined_loss_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "proposed_new_risk_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "existing_open_downside_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "existing_pending_risk_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "execution_reserve_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "unleveraged_buying_power_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "expected_unleveraged_buying_power_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "buying_power_mismatch_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "buying_power_mismatch_tolerance_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "current_gross_exposure_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "working_entry_notional_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "broker_new_notional_capacity_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "post_order_gross_exposure_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "projected_remaining_buying_power_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "uncredited_open_profit_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "open_loss_gauge_degradation_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "loss_lock_new_risk_capacity_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "dynamic_new_risk_capacity_dollars": {
+      "type": "number",
+      "minimum": 0
+    },
+    "account_day_loss_headroom_dollars": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "asset_class": {
+            "const": "EQUITY"
+          }
+        },
+        "required": [
+          "asset_class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "maximum_contractual_loss_dollars": {
+            "const": null
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "asset_class": {
+            "const": "OPTION"
+          }
+        },
+        "required": [
+          "asset_class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "maximum_contractual_loss_dollars": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trader-brain.local/schemas/pilot-leaderboard-2026-08-23-v1.schema.json",
+  "title": "Trader Brain Reporting-Only Per-Book Pilot Leaderboard",
+  "description": "Runtime output for one LIVE, PAPER, or SHADOW book. Ranked and insufficient-evidence Pilots remain separate, and the report grants no trading or capital-reallocation authority.",
+  "x-trader-brain-authority": {
+    "reporting_only": true,
+    "trade_authority": false,
+    "capital_reallocation_authority": false
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "book_mode",
+    "ranked_pilots",
+    "unranked_pilots",
+    "ranking_basis",
+    "raw_pnl_or_win_rate_used",
+    "books_combined",
+    "reporting_only",
+    "trade_authority",
+    "capital_reallocation_authority"
+  ],
+  "properties": {
+    "book_mode": {
+      "enum": ["LIVE", "PAPER", "SHADOW"]
+    },
+    "ranked_pilots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rankedEntry"
+      }
+    },
+    "unranked_pilots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unrankedEntry"
+      }
+    },
+    "ranking_basis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_pnl_or_win_rate_used": {
+      "const": false
+    },
+    "books_combined": {
+      "const": false
+    },
+    "reporting_only": {
+      "const": true
+    },
+    "trade_authority": {
+      "const": false
+    },
+    "capital_reallocation_authority": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "baseEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rank",
+        "pilot_id",
+        "pilot_name",
+        "book_mode",
+        "fact_sheet_id",
+        "fact_sheet_version",
+        "measured_through",
+        "metrics",
+        "ranking_status",
+        "reporting_only",
+        "trade_authority",
+        "capital_reallocation_authority"
+      ],
+      "properties": {
+        "rank": {
+          "type": ["integer", "null"]
+        },
+        "pilot_id": {
+          "type": "string",
+          "pattern": "^titan_[a-z0-9_]+$"
+        },
+        "pilot_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "book_mode": {
+          "enum": ["LIVE", "PAPER", "SHADOW"]
+        },
+        "fact_sheet_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fact_sheet_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "measured_through": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        },
+        "ranking_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reporting_only": {
+          "const": true
+        },
+        "trade_authority": {
+          "const": false
+        },
+        "capital_reallocation_authority": {
+          "const": false
+        }
+      }
+    },
+    "rankedEntry": {
+      "allOf": [
+        {"$ref": "#/$defs/baseEntry"},
+        {
+          "type": "object",
+          "properties": {
+            "rank": {"type": "integer", "minimum": 1},
+            "ranking_status": {"const": "RANKED"}
+          }
+        }
+      ]
+    },
+    "unrankedEntry": {
+      "allOf": [
+        {"$ref": "#/$defs/baseEntry"},
+        {
+          "type": "object",
+          "properties": {
+            "rank": {"const": null},
+            "ranking_status": {"const": "UNRANKED_INSUFFICIENT_EVIDENCE"}
+          }
+        }
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "percentage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "net_expectancy_r_after_costs",
+        "clustered_95pct_lower_bound_expectancy_r",
+        "clustered_95pct_upper_bound_expectancy_r",
+        "expected_shortfall_95_r",
+        "expected_shortfall_99_r",
+        "max_drawdown_r",
+        "profit_factor",
+        "win_rate_pct",
+        "execution_shortfall_bps",
+        "entry_slippage_bps",
+        "exit_slippage_bps",
+        "top_day_profit_concentration_pct",
+        "largest_winner_profit_concentration_pct",
+        "effective_independent_sample_size",
+        "evidence_coverage_pct",
+        "quote_coverage_pct",
+        "fill_rate_pct",
+        "no_fill_rate_pct",
+        "stale_data_rate_pct",
+        "order_reject_rate_pct",
+        "position_episode_count",
+        "distinct_ticker_session_count",
+        "session_count",
+        "underlying_count",
+        "control_breach_count"
+      ],
+      "properties": {
+        "net_expectancy_r_after_costs": {"$ref": "#/$defs/nullableNumber"},
+        "clustered_95pct_lower_bound_expectancy_r": {"$ref": "#/$defs/nullableNumber"},
+        "clustered_95pct_upper_bound_expectancy_r": {"$ref": "#/$defs/nullableNumber"},
+        "expected_shortfall_95_r": {"$ref": "#/$defs/nullableNumber"},
+        "expected_shortfall_99_r": {"$ref": "#/$defs/nullableNumber"},
+        "max_drawdown_r": {"$ref": "#/$defs/nullableNumber"},
+        "profit_factor": {"$ref": "#/$defs/nullableNumber"},
+        "win_rate_pct": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "execution_shortfall_bps": {"$ref": "#/$defs/nullableNumber"},
+        "entry_slippage_bps": {"$ref": "#/$defs/nullableNumber"},
+        "exit_slippage_bps": {"$ref": "#/$defs/nullableNumber"},
+        "top_day_profit_concentration_pct": {"$ref": "#/$defs/nullableNumber"},
+        "largest_winner_profit_concentration_pct": {"$ref": "#/$defs/nullableNumber"},
+        "effective_independent_sample_size": {"type": "number", "minimum": 0},
+        "evidence_coverage_pct": {"$ref": "#/$defs/percentage"},
+        "quote_coverage_pct": {"$ref": "#/$defs/percentage"},
+        "fill_rate_pct": {"$ref": "#/$defs/percentage"},
+        "no_fill_rate_pct": {"$ref": "#/$defs/percentage"},
+        "stale_data_rate_pct": {"$ref": "#/$defs/percentage"},
+        "order_reject_rate_pct": {"$ref": "#/$defs/percentage"},
+        "position_episode_count": {"type": "integer", "minimum": 0},
+        "distinct_ticker_session_count": {"type": "integer", "minimum": 0},
+        "session_count": {"type": "integer", "minimum": 0},
+        "underlying_count": {"type": "integer", "minimum": 0},
+        "control_breach_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

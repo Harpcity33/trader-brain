@@ -102,7 +102,11 @@ CREATE TABLE IF NOT EXISTS quotes (
 );
 
 CREATE TABLE IF NOT EXISTS candidates (
-    symbol TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'SHADOW' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     observed_at TEXT NOT NULL,
     state TEXT NOT NULL,
     lane TEXT NOT NULL,
@@ -123,7 +127,8 @@ CREATE TABLE IF NOT EXISTS candidates (
     quote_fresh INTEGER NOT NULL DEFAULT 0,
     preliminary_liquidity_pass INTEGER NOT NULL DEFAULT 0,
     catalyst_required INTEGER NOT NULL DEFAULT 1,
-    payload_json TEXT NOT NULL
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY(pilot_id,book_mode,symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_rank
     ON candidates(signal_strength DESC, dollar_volume DESC);
@@ -142,6 +147,10 @@ CREATE TABLE IF NOT EXISTS prepared_trade_plans (
     structural_stop REAL,
     t1 REAL,
     t2 REAL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'SHADOW' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -184,6 +193,10 @@ CREATE TABLE IF NOT EXISTS event_decisions (
     decided_at TEXT NOT NULL,
     decision TEXT NOT NULL,
     reason TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'SHADOW' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     details_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_event_decisions_time
@@ -256,6 +269,10 @@ CREATE TABLE IF NOT EXISTS research_entry_plans (
     structural_stop REAL NOT NULL,
     quantity REAL NOT NULL,
     capital REAL NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'SHADOW' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     context_json TEXT NOT NULL,
     outcome_locked INTEGER NOT NULL DEFAULT 0
 );
@@ -264,6 +281,10 @@ CREATE INDEX IF NOT EXISTS idx_entry_plans_date
 
 CREATE TABLE IF NOT EXISTS research_entry_outcomes (
     plan_id TEXT PRIMARY KEY REFERENCES research_entry_plans(plan_id),
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'SHADOW' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     completed_at TEXT NOT NULL,
     observation_end TEXT NOT NULL,
     session_high REAL,
@@ -295,6 +316,24 @@ CREATE TABLE IF NOT EXISTS position_campaigns (
         'CLOSING','CLOSED','CANCELED','REJECTED','FAILED'
     )),
     strategy_version TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'LIVE' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+    entry_submission_intent_id TEXT,
+    entry_order_resolution_key TEXT,
+    entry_order_acknowledged_at TEXT,
+    entry_order_ack_deadline_at TEXT,
+    entry_order_ack_state TEXT CHECK(entry_order_ack_state IS NULL OR entry_order_ack_state IN (
+        'ON_TIME','LATE_CONFIRMED','UNKNOWN_RESOLVED'
+    )),
+    add_submission_intent_id TEXT,
+    add_order_resolution_key TEXT,
+    add_order_acknowledged_at TEXT,
+    add_order_ack_deadline_at TEXT,
+    add_order_ack_state TEXT CHECK(add_order_ack_state IS NULL OR add_order_ack_state IN (
+        'ON_TIME','LATE_CONFIRMED','UNKNOWN_RESOLVED'
+    )),
     opened_at TEXT,
     updated_at TEXT NOT NULL,
     broker_confirmed_at TEXT,
@@ -345,6 +384,10 @@ CREATE TABLE IF NOT EXISTS risk_sessions (
     account_key TEXT NOT NULL,
     session_date TEXT NOT NULL,
     strategy_version TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'LIVE' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     start_of_day_equity REAL NOT NULL,
     baseline_confirmed_at TEXT NOT NULL,
     current_equity REAL NOT NULL,
@@ -385,11 +428,16 @@ CREATE TABLE IF NOT EXISTS risk_authorizations (
     account_key TEXT NOT NULL,
     session_date TEXT NOT NULL,
     strategy_version TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'LIVE' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     instrument_key TEXT NOT NULL,
     thesis_key TEXT NOT NULL,
     risk_action TEXT NOT NULL CHECK(risk_action IN ('ENTRY','ADD')),
     status TEXT NOT NULL CHECK(status IN (
-        'ACTIVE','CONSUMED','RECONCILED','RELEASED','EXPIRED'
+        'ACTIVE','SUBMISSION_UNKNOWN','CONSUMED','RECONCILED',
+        'RECONCILED_NO_ORDER','RELEASED','EXPIRED'
     )),
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
@@ -407,13 +455,65 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_active
     WHERE status='ACTIVE';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_risk_authorizations_one_pending
     ON risk_authorizations(account_key, session_date)
-    WHERE status IN ('ACTIVE','CONSUMED');
+    WHERE status IN ('ACTIVE','SUBMISSION_UNKNOWN','CONSUMED');
+
+CREATE TABLE IF NOT EXISTS risk_submission_intents (
+    intent_id TEXT PRIMARY KEY,
+    authorization_id TEXT NOT NULL UNIQUE,
+    attempted_at TEXT NOT NULL,
+    broker_ack_deadline_at TEXT NOT NULL,
+    intent_hash TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS risk_submission_intents_no_update
+BEFORE UPDATE ON risk_submission_intents
+BEGIN
+    SELECT RAISE(ABORT, 'risk submission intents are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS risk_submission_intents_no_delete
+BEFORE DELETE ON risk_submission_intents
+BEGIN
+    SELECT RAISE(ABORT, 'risk submission intents are append-only');
+END;
+
+CREATE TABLE IF NOT EXISTS risk_unknown_resolutions (
+    resolution_key TEXT PRIMARY KEY,
+    intent_id TEXT NOT NULL REFERENCES risk_submission_intents(intent_id),
+    authorization_id TEXT NOT NULL UNIQUE,
+    resolution_state TEXT NOT NULL CHECK(resolution_state IN (
+        'ORDER_FOUND','NO_ORDER_CONFIRMED'
+    )),
+    broker_confirmed_at TEXT NOT NULL,
+    broker_order_id TEXT,
+    evidence_json TEXT NOT NULL,
+    resolution_hash TEXT NOT NULL UNIQUE,
+    recorded_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS risk_unknown_resolutions_no_update
+BEFORE UPDATE ON risk_unknown_resolutions
+BEGIN
+    SELECT RAISE(ABORT, 'risk unknown resolutions are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS risk_unknown_resolutions_no_delete
+BEFORE DELETE ON risk_unknown_resolutions
+BEGIN
+    SELECT RAISE(ABORT, 'risk unknown resolutions are append-only');
+END;
 
 CREATE TABLE IF NOT EXISTS daily_performance_grades (
     grade_id TEXT PRIMARY KEY,
     account_key TEXT NOT NULL,
     session_date TEXT NOT NULL,
     strategy_version TEXT NOT NULL,
+    pilot_id TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    book_mode TEXT NOT NULL DEFAULT 'LIVE' CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    decision_contract_version TEXT NOT NULL DEFAULT 'legacy_unattributed',
+    decision_contract_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     revision INTEGER NOT NULL CHECK(revision >= 1),
     corrects_grade_id TEXT REFERENCES daily_performance_grades(grade_id),
     rubric_version TEXT NOT NULL,
@@ -459,6 +559,67 @@ BEFORE DELETE ON daily_performance_grades
 BEGIN
     SELECT RAISE(ABORT, 'daily performance grades are append-only');
 END;
+
+CREATE TABLE IF NOT EXISTS pilot_fact_sheets (
+    fact_sheet_id TEXT PRIMARY KEY,
+    pilot_id TEXT NOT NULL,
+    pilot_name TEXT NOT NULL,
+    book_mode TEXT NOT NULL CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+    fact_sheet_version TEXT NOT NULL,
+    decision_contract_version TEXT NOT NULL,
+    decision_contract_hash TEXT NOT NULL,
+    measured_through TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    payload_hash TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    UNIQUE(pilot_id, book_mode, fact_sheet_version)
+);
+CREATE INDEX IF NOT EXISTS idx_pilot_fact_sheets_latest
+    ON pilot_fact_sheets(book_mode, pilot_id, measured_through DESC, recorded_at DESC);
+
+CREATE TRIGGER IF NOT EXISTS pilot_fact_sheets_no_update
+BEFORE UPDATE ON pilot_fact_sheets
+BEGIN
+    SELECT RAISE(ABORT, 'pilot fact sheets are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS pilot_fact_sheets_no_delete
+BEFORE DELETE ON pilot_fact_sheets
+BEGIN
+    SELECT RAISE(ABORT, 'pilot fact sheets are append-only');
+END;
+
+CREATE TABLE IF NOT EXISTS operator_entry_stop (
+    latch_key TEXT PRIMARY KEY CHECK(latch_key='GLOBAL'),
+    engaged INTEGER NOT NULL CHECK(engaged IN (0,1)),
+    generation INTEGER NOT NULL CHECK(generation >= 1),
+    reason TEXT NOT NULL,
+    changed_by TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operator_entry_stop_events (
+    event_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL UNIQUE,
+    action TEXT NOT NULL CHECK(action IN ('INITIALIZED','ENGAGED','RELEASED')),
+    reason TEXT NOT NULL,
+    changed_by TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    previous_event_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+    event_hash TEXT NOT NULL UNIQUE
+);
+
+CREATE TRIGGER IF NOT EXISTS operator_entry_stop_events_no_update
+BEFORE UPDATE ON operator_entry_stop_events
+BEGIN
+    SELECT RAISE(ABORT, 'operator entry-stop events are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS operator_entry_stop_events_no_delete
+BEFORE DELETE ON operator_entry_stop_events
+BEGIN
+    SELECT RAISE(ABORT, 'operator entry-stop events are append-only');
+END;
 """
 
 
@@ -496,6 +657,78 @@ PERFORMANCE_HARD_FAILURE_CEILINGS = {
     "loss_lock_violation": Decimal("0"),
     "fabricated_or_future_data": Decimal("0"),
 }
+
+BOOK_MODES = frozenset({"LIVE", "PAPER", "SHADOW"})
+TITAN_LIVE_PILOT_ID = "titan_momentum_equity"
+TITAN_LIVE_DECISION_CONTRACT_VERSION = "titan_momentum_equity_2026-08-23_v1"
+TITAN_LIVE_DECISION_CONTRACT_HASH = (
+    "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21"
+)
+PRETRADE_RISK_FACTS_SCHEMA_VERSION = (
+    "titan_live_pretrade_risk_facts_2026-08-23_v1"
+)
+LEGACY_PILOT_ID = "legacy_unattributed"
+LEGACY_DECISION_CONTRACT_VERSION = "legacy_unattributed"
+ZERO_SHA256 = "0" * 64
+PILOT_CONTRACT_VERSIONS = {
+    "titan_momentum_equity": "titan_momentum_equity_2026-08-23_v1",
+    "titan_catalyst_swing": "titan_catalyst_swing_2026-08-23_v1",
+    "titan_defined_risk_options": "titan_defined_risk_options_2026-08-23_v1",
+    "titan_crypto_momentum": "titan_crypto_momentum_2026-08-23_v1",
+    "titan_equity_setup_challengers": (
+        "titan_equity_setup_challengers_2026-08-23_v1"
+    ),
+}
+PILOT_CONTRACT_HASHES = {
+    "titan_momentum_equity": (
+        "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21"
+    ),
+    "titan_catalyst_swing": (
+        "1b1c1f1500d215639430251810a78cdcce60ecea72cf07848af5162d1e540d56"
+    ),
+    "titan_defined_risk_options": (
+        "7734f8775f3c513c17120834f6954b5292c59b87b2fdb7a4a3298c2f40a49bbb"
+    ),
+    "titan_crypto_momentum": (
+        "c359dd1d39f7a59e2046ee63d238c451d138335bee809ac1801ed56dca4fce0c"
+    ),
+    "titan_equity_setup_challengers": (
+        "b099823f49b3b13d55e8063c98662b01c6ce4293313687aae5bde683dd060f88"
+    ),
+}
+PILOT_ALLOWED_BOOK_MODES = {
+    "titan_momentum_equity": frozenset({"LIVE", "PAPER", "SHADOW"}),
+    "titan_catalyst_swing": frozenset({"SHADOW"}),
+    "titan_defined_risk_options": frozenset({"SHADOW"}),
+    "titan_crypto_momentum": frozenset({"SHADOW"}),
+    "titan_equity_setup_challengers": frozenset({"SHADOW"}),
+}
+
+
+def _risk_authorization_hash_evidence(
+    authorization: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the immutable reserve-time facts covered by authorization_id.
+
+    Submission timing is written later to the append-only submission-intent
+    ledger.  Excluding those two enrichment fields keeps the reserve identity
+    stable while the intent independently commits their exact values.
+    """
+    return {
+        key: value
+        for key, value in authorization.items()
+        if key not in {
+            "authorization_id",
+            "submission_intent_at",
+            "broker_ack_deadline_at",
+        }
+    }
+
+
+def _canonical_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def utc_now() -> str:
@@ -548,13 +781,110 @@ def _quantized_score(value: Decimal) -> float:
     return float(value.quantize(PERFORMANCE_SCORE_QUANTUM, rounding=ROUND_HALF_UP))
 
 
+def _sha256_hex(value: Any, field: str, *, allow_zero: bool = False) -> str:
+    digest = str(value or "").strip()
+    if (
+        len(digest) != 64
+        or digest != digest.lower()
+        or any(character not in "0123456789abcdef" for character in digest)
+        or (not allow_zero and digest == ZERO_SHA256)
+    ):
+        qualifier = "nonzero " if not allow_zero else ""
+        raise ValueError(f"{field} must be a {qualifier}64-lowercase-hex SHA-256")
+    return digest
+
+
+def _normalize_pilot_attribution(
+    payload: dict[str, Any],
+    *,
+    allow_legacy: bool = False,
+) -> dict[str, str]:
+    """Validate immutable strategy identity without manufacturing a live hash.
+
+    Legacy defaults are reserved for rows that predate this schema.  Callers
+    creating current decision, risk, campaign, grade, or fact-sheet evidence
+    must carry the exact hash of the version-controlled decision contract.
+    """
+    fields = (
+        "pilot_id", "book_mode", "decision_contract_version",
+        "decision_contract_hash",
+    )
+    if allow_legacy and all(payload.get(field) is None for field in fields):
+        return {
+            "pilot_id": LEGACY_PILOT_ID,
+            "book_mode": "SHADOW",
+            "decision_contract_version": LEGACY_DECISION_CONTRACT_VERSION,
+            "decision_contract_hash": ZERO_SHA256,
+        }
+    missing = [field for field in fields if payload.get(field) in (None, "")]
+    if missing:
+        raise ValueError("missing pilot attribution fields: " + ", ".join(missing))
+    pilot_id = str(payload["pilot_id"]).strip().lower()
+    book_mode = str(payload["book_mode"]).strip().upper()
+    contract_version = str(payload["decision_contract_version"]).strip()
+    if not pilot_id or pilot_id == LEGACY_PILOT_ID:
+        raise ValueError("new records require a non-legacy pilot_id")
+    if pilot_id not in PILOT_CONTRACT_VERSIONS:
+        raise ValueError("pilot_id is not registered")
+    if book_mode not in BOOK_MODES:
+        raise ValueError("book_mode must be LIVE, PAPER, or SHADOW")
+    if book_mode == "LIVE" and pilot_id != TITAN_LIVE_PILOT_ID:
+        raise ValueError("Titan Momentum Equity is the sole LIVE pilot")
+    if book_mode not in PILOT_ALLOWED_BOOK_MODES[pilot_id]:
+        raise ValueError(f"pilot {pilot_id} is not registered for {book_mode} mode")
+    expected_contract_version = PILOT_CONTRACT_VERSIONS[pilot_id]
+    if contract_version != expected_contract_version:
+        raise ValueError(
+            f"pilot {pilot_id} requires decision_contract_version "
+            f"{expected_contract_version}"
+        )
+    contract_hash = _sha256_hex(
+        payload["decision_contract_hash"], "decision_contract_hash"
+    )
+    if contract_hash != PILOT_CONTRACT_HASHES[pilot_id]:
+        raise ValueError(
+            f"pilot {pilot_id} requires the exact canonical decision_contract_hash"
+        )
+    return {
+        "pilot_id": pilot_id,
+        "book_mode": book_mode,
+        "decision_contract_version": contract_version,
+        "decision_contract_hash": contract_hash,
+    }
+
+
+def _row_pilot_attribution(row: sqlite3.Row | dict[str, Any]) -> dict[str, str]:
+    keys = set(row.keys())
+    return {
+        "pilot_id": str(row["pilot_id"]) if "pilot_id" in keys else LEGACY_PILOT_ID,
+        "book_mode": str(row["book_mode"]) if "book_mode" in keys else "SHADOW",
+        "decision_contract_version": (
+            str(row["decision_contract_version"])
+            if "decision_contract_version" in keys
+            else LEGACY_DECISION_CONTRACT_VERSION
+        ),
+        "decision_contract_hash": (
+            str(row["decision_contract_hash"])
+            if "decision_contract_hash" in keys
+            else ZERO_SHA256
+        ),
+    }
+
+
 def _validate_risk_gate_authorization(
     authorization: Any,
     *,
     account_key: str,
     instrument_key: str,
+    symbol: str,
+    direction: str,
+    asset_class: str,
     thesis_key: str,
     strategy_version: str,
+    pilot_id: str,
+    book_mode: str,
+    decision_contract_version: str,
+    decision_contract_hash: str,
     expected_action: str,
     order_submitted_at: str,
 ) -> None:
@@ -569,52 +899,99 @@ def _validate_risk_gate_authorization(
             "broker_state.risk_gate_authorization must be an object"
         )
     required = (
-        "authorization_id", "account_key", "session_date", "strategy_version",
-        "broker_confirmed_at", "broker_snapshot_valid_until", "checked_at",
+        "authorization_id", "schema_version", "account_key", "session_date",
+        "strategy_version",
+        "pilot_id", "book_mode", "decision_contract_version",
+        "decision_contract_hash",
+        "broker_confirmed_at", "broker_snapshot_hash",
+        "broker_snapshot_valid_until", "checked_at",
         "reservation_expires_at",
         "reservation_scope", "current_equity_dollars",
-        "instrument_key", "thesis_key", "risk_action",
+        "instrument_key", "symbol", "direction", "asset_class",
+        "thesis_key", "risk_action",
+        "preview_id", "preview_confirmed_at", "preview_account_key",
+        "preview_instrument_key", "preview_side", "preview_order_quantity",
+        "preview_limit_price", "preview_equity_dollars",
+        "preview_current_gross_exposure_dollars",
+        "preview_working_entry_notional_dollars",
+        "preview_projected_cost_dollars",
         "reviewed_entry_price", "structural_stop_price", "quantity",
         "contract_multiplier", "modeled_execution_loss_dollars",
         "stress_tail_loss_dollars", "reviewed_notional_dollars",
+        "estimated_slippage_dollars",
+        "maximum_acceptable_slippage_dollars",
+        "maximum_contractual_loss_dollars",
+        "notional_pct_of_current_equity",
         "calculated_stop_defined_loss_dollars", "proposed_new_risk_dollars",
         "existing_open_downside_dollars", "existing_pending_risk_dollars",
         "execution_reserve_dollars",
         "unleveraged_buying_power_dollars",
+        "expected_unleveraged_buying_power_dollars",
+        "buying_power_mismatch_dollars",
+        "buying_power_mismatch_tolerance_dollars",
+        "buying_power_mismatch_detected",
+        "emergency_entry_stop_generation",
+        "emergency_entry_stop_state_hash",
+        "broker_ack_timeout_seconds",
         "current_gross_exposure_dollars",
         "working_entry_notional_dollars",
         "broker_new_notional_capacity_dollars",
         "post_order_gross_exposure_dollars",
+        "projected_remaining_buying_power_dollars",
+        "account_day_loss_headroom_dollars",
         "uncredited_open_profit_dollars",
         "open_loss_gauge_degradation_dollars",
         "loss_lock_new_risk_capacity_dollars",
         "profit_floor_new_risk_capacity_dollars",
         "dynamic_new_risk_capacity_dollars",
+        "submission_intent_at", "broker_ack_deadline_at",
     )
     missing = [field for field in required if field not in authorization]
     if missing:
         raise ValueError(
             "risk-gate authorization is missing: " + ", ".join(missing)
         )
-    evidence = {
-        key: value for key, value in authorization.items()
-        if key != "authorization_id"
-    }
-    expected_id = hashlib.sha256(
-        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    expected_id = _canonical_hash(_risk_authorization_hash_evidence(authorization))
     if str(authorization["authorization_id"]) != expected_id:
         raise ValueError("risk-gate authorization hash does not match its evidence")
+    attribution = _normalize_pilot_attribution(authorization)
+    if attribution["book_mode"] != "LIVE":
+        raise ValueError("PAPER/SHADOW pilots cannot receive broker risk authorization")
+    if authorization["schema_version"] != PRETRADE_RISK_FACTS_SCHEMA_VERSION:
+        raise ValueError("risk-gate authorization schema_version is invalid")
+    _sha256_hex(
+        authorization["broker_snapshot_hash"],
+        "risk authorization broker_snapshot_hash",
+    )
+    symbol = str(authorization["symbol"]).strip().upper()
+    direction = str(authorization["direction"]).strip().upper()
+    asset_class = str(authorization["asset_class"]).strip().upper()
+    if not symbol:
+        raise ValueError("risk-gate authorization symbol cannot be empty")
+    if direction not in {"UP", "DOWN"}:
+        raise ValueError("risk-gate authorization direction must be UP or DOWN")
+    if asset_class not in {"EQUITY", "OPTION"}:
+        raise ValueError("risk-gate authorization asset_class must be EQUITY or OPTION")
     exact_identity = {
         "account_key": account_key,
         "instrument_key": instrument_key,
+        "symbol": symbol,
+        "direction": direction,
+        "asset_class": asset_class,
         "thesis_key": thesis_key,
         "strategy_version": strategy_version,
+        "pilot_id": pilot_id,
+        "book_mode": book_mode,
+        "decision_contract_version": decision_contract_version,
+        "decision_contract_hash": decision_contract_hash,
         "risk_action": expected_action,
     }
     for field, expected in exact_identity.items():
         actual = str(authorization[field])
-        if field in {"thesis_key", "risk_action"}:
+        if field in {
+            "symbol", "direction", "asset_class", "thesis_key",
+            "risk_action", "book_mode",
+        }:
             actual = actual.upper()
         if actual != expected:
             raise ValueError(
@@ -641,6 +1018,24 @@ def _validate_risk_gate_authorization(
             "risk authorization broker_confirmed_at",
         )
     )
+    preview_confirmed_at = datetime.fromisoformat(
+        _aware_timestamp(
+            authorization["preview_confirmed_at"],
+            "risk authorization preview_confirmed_at",
+        )
+    )
+    if not str(authorization["preview_id"]).strip():
+        raise ValueError("risk-gate authorization preview_id cannot be empty")
+    if str(authorization["preview_account_key"]) != account_key:
+        raise ValueError("risk-gate preview account does not match authorization")
+    if str(authorization["preview_instrument_key"]) != instrument_key:
+        raise ValueError("risk-gate preview instrument does not match authorization")
+    if str(authorization["preview_side"]).strip().upper() != "BUY":
+        raise ValueError("risk-gate preview side must be BUY")
+    if preview_confirmed_at < broker_confirmed_at:
+        raise ValueError("risk-gate preview predates the broker risk snapshot")
+    if preview_confirmed_at > checked_at + timedelta(seconds=15):
+        raise ValueError("risk-gate preview timestamp is in the future")
     if str(authorization["reservation_scope"]) != "one_active_per_account_session":
         raise ValueError("risk-gate authorization has an invalid reservation scope")
     if broker_confirmed_at > checked_at:
@@ -654,6 +1049,25 @@ def _validate_risk_gate_authorization(
     submitted_at = datetime.fromisoformat(
         _aware_timestamp(order_submitted_at, "broker order_submitted_at")
     )
+    submission_intent_at = authorization["submission_intent_at"]
+    broker_ack_deadline_at = authorization["broker_ack_deadline_at"]
+    if (submission_intent_at is None) != (broker_ack_deadline_at is None):
+        raise ValueError(
+            "submission_intent_at and broker_ack_deadline_at must both be null or set"
+        )
+    if submission_intent_at is not None:
+        intent_time = datetime.fromisoformat(
+            _aware_timestamp(submission_intent_at, "submission_intent_at")
+        )
+        deadline_time = datetime.fromisoformat(
+            _aware_timestamp(broker_ack_deadline_at, "broker_ack_deadline_at")
+        )
+        if intent_time != submitted_at:
+            raise ValueError("submission intent timestamp must equal broker submission time")
+        if deadline_time != intent_time + timedelta(
+            seconds=int(authorization["broker_ack_timeout_seconds"])
+        ):
+            raise ValueError("broker ack deadline does not match immutable intent")
     if checked_at > submitted_at + timedelta(seconds=15):
         raise ValueError("risk-gate authorization cannot postdate broker submission")
     if submitted_at - checked_at > timedelta(seconds=180):
@@ -691,6 +1105,32 @@ def _validate_risk_gate_authorization(
         authorization["reviewed_notional_dollars"],
         "risk authorization reviewed_notional_dollars",
     )
+    estimated_slippage = _finite_float(
+        authorization["estimated_slippage_dollars"],
+        "risk authorization estimated_slippage_dollars",
+    )
+    maximum_acceptable_slippage = _finite_float(
+        authorization["maximum_acceptable_slippage_dollars"],
+        "risk authorization maximum_acceptable_slippage_dollars",
+    )
+    raw_maximum_contractual_loss = authorization[
+        "maximum_contractual_loss_dollars"
+    ]
+    if asset_class == "EQUITY":
+        if raw_maximum_contractual_loss is not None:
+            raise ValueError(
+                "EQUITY maximum_contractual_loss_dollars must be null"
+            )
+        maximum_contractual_loss: float | None = None
+    else:
+        maximum_contractual_loss = _finite_float(
+            raw_maximum_contractual_loss,
+            "risk authorization maximum_contractual_loss_dollars",
+        )
+    notional_pct_equity = _finite_float(
+        authorization["notional_pct_of_current_equity"],
+        "risk authorization notional_pct_of_current_equity",
+    )
     stop_defined_loss = _finite_float(
         authorization["calculated_stop_defined_loss_dollars"],
         "risk authorization calculated_stop_defined_loss_dollars",
@@ -706,6 +1146,42 @@ def _validate_risk_gate_authorization(
     capacity = _finite_float(
         authorization["dynamic_new_risk_capacity_dollars"],
         "risk authorization dynamic_new_risk_capacity_dollars",
+    )
+    expected_buying_power = _finite_float(
+        authorization["expected_unleveraged_buying_power_dollars"],
+        "risk authorization expected_unleveraged_buying_power_dollars",
+    )
+    projected_remaining_buying_power = _finite_float(
+        authorization["projected_remaining_buying_power_dollars"],
+        "risk authorization projected_remaining_buying_power_dollars",
+    )
+    account_day_loss_headroom = _finite_float(
+        authorization["account_day_loss_headroom_dollars"],
+        "risk authorization account_day_loss_headroom_dollars",
+    )
+    buying_power_mismatch = _finite_float(
+        authorization["buying_power_mismatch_dollars"],
+        "risk authorization buying_power_mismatch_dollars",
+    )
+    buying_power_tolerance = _finite_float(
+        authorization["buying_power_mismatch_tolerance_dollars"],
+        "risk authorization buying_power_mismatch_tolerance_dollars",
+    )
+    ack_timeout = _finite_decimal(
+        authorization["broker_ack_timeout_seconds"],
+        "risk authorization broker_ack_timeout_seconds",
+    )
+    if ack_timeout != ack_timeout.to_integral_value() or not 1 <= ack_timeout <= 30:
+        raise ValueError("risk authorization broker_ack_timeout_seconds must be 1..30")
+    stop_generation = _finite_decimal(
+        authorization["emergency_entry_stop_generation"],
+        "risk authorization emergency_entry_stop_generation",
+    )
+    if stop_generation < 1 or stop_generation != stop_generation.to_integral_value():
+        raise ValueError("risk authorization emergency entry-stop generation is invalid")
+    _sha256_hex(
+        authorization["emergency_entry_stop_state_hash"],
+        "risk authorization emergency_entry_stop_state_hash",
     )
     for field in (
         "existing_open_downside_dollars", "existing_pending_risk_dollars",
@@ -736,13 +1212,89 @@ def _validate_risk_gate_authorization(
         raise ValueError("risk-gate authorization multiplier must be 1 or 100")
     if modeled_execution_loss < 0 or stress_tail_loss < 0:
         raise ValueError("risk-gate execution and stress losses cannot be negative")
+    if maximum_acceptable_slippage < modeled_execution_loss:
+        raise ValueError(
+            "modeled execution loss exceeds maximum acceptable slippage"
+        )
     expected_notional = entry_price * quantity * multiplier
     expected_stop_loss = (
         (entry_price - stop_price) * quantity * multiplier
         + modeled_execution_loss
     )
     expected_proposed_risk = max(expected_stop_loss, stress_tail_loss)
+    expected_contractual_loss = expected_notional + modeled_execution_loss
+    expected_notional_pct = expected_notional / current_equity * 100
     buying_power = float(authorization["unleveraged_buying_power_dollars"])
+    expected_mismatch = abs(buying_power - expected_buying_power)
+    preview_numeric_pairs = (
+        (
+            _finite_float(
+                authorization["preview_order_quantity"],
+                "risk authorization preview_order_quantity",
+            ),
+            quantity,
+            "preview quantity",
+        ),
+        (
+            _finite_float(
+                authorization["preview_limit_price"],
+                "risk authorization preview_limit_price",
+            ),
+            entry_price,
+            "preview limit price",
+        ),
+        (
+            _finite_float(
+                authorization["preview_equity_dollars"],
+                "risk authorization preview_equity_dollars",
+            ),
+            current_equity,
+            "preview equity",
+        ),
+        (
+            _finite_float(
+                authorization["preview_current_gross_exposure_dollars"],
+                "risk authorization preview_current_gross_exposure_dollars",
+            ),
+            float(authorization["current_gross_exposure_dollars"]),
+            "preview gross exposure",
+        ),
+        (
+            _finite_float(
+                authorization["preview_working_entry_notional_dollars"],
+                "risk authorization preview_working_entry_notional_dollars",
+            ),
+            float(authorization["working_entry_notional_dollars"]),
+            "preview working notional",
+        ),
+        (
+            _finite_float(
+                authorization["preview_projected_cost_dollars"],
+                "risk authorization preview_projected_cost_dollars",
+            ),
+            reviewed_notional,
+            "preview projected cost",
+        ),
+    )
+    for actual_preview, expected_preview, label in preview_numeric_pairs:
+        if abs(actual_preview - expected_preview) > 0.005:
+            raise ValueError(f"risk-gate authorization {label} is inconsistent")
+    mismatch_detected = authorization["buying_power_mismatch_detected"]
+    if not isinstance(mismatch_detected, bool):
+        raise ValueError("risk authorization buying_power_mismatch_detected must be boolean")
+    if buying_power_tolerance < 0:
+        raise ValueError("risk authorization buying-power tolerance cannot be negative")
+    expected_buying_power_tolerance = max(5.0, 0.01 * current_equity)
+    if abs(buying_power_tolerance - expected_buying_power_tolerance) > 0.005:
+        raise ValueError(
+            "risk authorization buying-power tolerance must equal max($5, 1% equity)"
+        )
+    if abs(buying_power_mismatch - expected_mismatch) > 0.005:
+        raise ValueError("risk authorization buying-power mismatch is inconsistent")
+    if mismatch_detected != (expected_mismatch > buying_power_tolerance + 0.005):
+        raise ValueError("risk authorization buying-power mismatch flag is inconsistent")
+    if mismatch_detected:
+        raise ValueError("risk authorization cannot proceed with buying-power mismatch")
     gross_exposure = float(authorization["current_gross_exposure_dollars"])
     working_notional = float(authorization["working_entry_notional_dollars"])
     expected_notional_capacity = min(
@@ -750,8 +1302,11 @@ def _validate_risk_gate_authorization(
         max(0.0, current_equity - gross_exposure - working_notional),
     )
     expected_post_order_gross = gross_exposure + working_notional + expected_notional
+    expected_remaining_buying_power = expected_buying_power - expected_notional
     calculated_pairs = (
         (reviewed_notional, expected_notional, "reviewed notional"),
+        (estimated_slippage, modeled_execution_loss, "estimated slippage"),
+        (notional_pct_equity, expected_notional_pct, "notional percent of equity"),
         (stop_defined_loss, expected_stop_loss, "stop-defined loss"),
         (proposed_risk, expected_proposed_risk, "proposed risk"),
         (
@@ -764,7 +1319,18 @@ def _validate_risk_gate_authorization(
             expected_post_order_gross,
             "post-order gross exposure",
         ),
+        (
+            projected_remaining_buying_power,
+            expected_remaining_buying_power,
+            "projected remaining buying power",
+        ),
     )
+    if asset_class == "OPTION":
+        assert maximum_contractual_loss is not None
+        if abs(maximum_contractual_loss - expected_contractual_loss) > 0.005:
+            raise ValueError(
+                "risk-gate authorization maximum contractual loss is inconsistent"
+            )
     for actual, expected, label in calculated_pairs:
         if abs(actual - expected) > 0.005:
             raise ValueError(f"risk-gate authorization {label} is inconsistent")
@@ -772,6 +1338,12 @@ def _validate_risk_gate_authorization(
         raise ValueError("risk-gate authorization requires positive notional and risk")
     if reviewed_notional > expected_notional_capacity + 0.005:
         raise ValueError("risk-gate authorization exceeds broker notional capacity")
+    if reviewed_notional > expected_buying_power + 0.005:
+        raise ValueError("risk-gate authorization exceeds preview buying power")
+    if projected_remaining_buying_power < -0.005:
+        raise ValueError("risk-gate authorization projects negative buying power")
+    if account_day_loss_headroom < 0:
+        raise ValueError("risk-gate account-day loss headroom cannot be negative")
     if reserve < 5:
         raise ValueError("risk-gate authorization requires at least a $5 reserve")
     if capacity < 0 or proposed_risk > capacity + 0.005:
@@ -787,7 +1359,7 @@ def _validate_risk_authorization_against_session(
 ) -> None:
     """Bind a new order authorization to the exact durable broker snapshot."""
     snapshot_row = connection.execute(
-        """SELECT snapshot_json FROM risk_session_snapshots
+        """SELECT snapshot_hash,snapshot_json FROM risk_session_snapshots
            WHERE account_key=? AND session_date=? AND broker_confirmed_at=?""",
         (
             account_key,
@@ -803,10 +1375,22 @@ def _validate_risk_authorization_against_session(
             "risk-gate authorization has no matching immutable risk snapshot"
         )
     risk_row = json.loads(str(snapshot_row["snapshot_json"]))
+    if str(authorization["broker_snapshot_hash"]) != str(
+        snapshot_row["snapshot_hash"]
+    ):
+        raise ValueError(
+            "risk-gate authorization broker_snapshot_hash does not match risk session"
+        )
     if str(risk_row["strategy_version"]) != strategy_version:
         raise ValueError(
             "risk-gate authorization strategy does not match risk session"
         )
+    attribution = _normalize_pilot_attribution(authorization)
+    for field, expected in attribution.items():
+        if str(risk_row.get(field)) != expected:
+            raise ValueError(
+                f"risk-gate authorization {field} does not match risk session"
+            )
     latest_row = connection.execute(
         """SELECT loss_lock FROM risk_sessions
            WHERE account_key=? AND session_date=?""",
@@ -854,6 +1438,13 @@ def _validate_risk_authorization_against_session(
         float(risk_row["loss_gauge"])
         - float(risk_row["loss_limit_dollars"]),
     )
+    if abs(
+        float(authorization["account_day_loss_headroom_dollars"])
+        - loss_headroom
+    ) > 0.005:
+        raise ValueError(
+            "risk-gate authorization account-day loss headroom does not match session"
+        )
     loss_capacity = max(
         0.0,
         loss_headroom
@@ -921,6 +1512,224 @@ class Store:
         self.conn = sqlite3.connect(self.path, timeout=15, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate_phase_one_schema()
+
+    def _migrate_phase_one_schema(self) -> None:
+        """Add pilot attribution to existing databases without rewriting history."""
+        legacy_live_columns = {
+            "pilot_id": "TEXT NOT NULL DEFAULT 'legacy_unattributed'",
+            "book_mode": "TEXT NOT NULL DEFAULT 'LIVE'",
+            "decision_contract_version": (
+                "TEXT NOT NULL DEFAULT 'legacy_unattributed'"
+            ),
+            "decision_contract_hash": (
+                "TEXT NOT NULL DEFAULT "
+                "'0000000000000000000000000000000000000000000000000000000000000000'"
+            ),
+        }
+        legacy_shadow_columns = {
+            **legacy_live_columns,
+            "book_mode": "TEXT NOT NULL DEFAULT 'SHADOW'",
+        }
+        migrations = {
+            "candidates": legacy_shadow_columns,
+            "prepared_trade_plans": legacy_shadow_columns,
+            "event_decisions": legacy_shadow_columns,
+            "research_entry_plans": legacy_shadow_columns,
+            "research_entry_outcomes": legacy_shadow_columns,
+            "position_campaigns": legacy_live_columns,
+            "risk_sessions": legacy_live_columns,
+            "risk_authorizations": legacy_live_columns,
+            "daily_performance_grades": legacy_live_columns,
+        }
+        with self.transaction():
+            for table, definitions in migrations.items():
+                existing = {
+                    str(row["name"])
+                    for row in self.conn.execute(f"PRAGMA table_info({table})")
+                }
+                for column, definition in definitions.items():
+                    if column not in existing:
+                        self.conn.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                        )
+            campaign_columns = {
+                "entry_submission_intent_id": "TEXT",
+                "entry_order_resolution_key": "TEXT",
+                "entry_order_acknowledged_at": "TEXT",
+                "entry_order_ack_deadline_at": "TEXT",
+                "entry_order_ack_state": "TEXT",
+                "add_submission_intent_id": "TEXT",
+                "add_order_resolution_key": "TEXT",
+                "add_order_acknowledged_at": "TEXT",
+                "add_order_ack_deadline_at": "TEXT",
+                "add_order_ack_state": "TEXT",
+            }
+            existing_campaign_columns = {
+                str(row["name"])
+                for row in self.conn.execute(
+                    "PRAGMA table_info(position_campaigns)"
+                )
+            }
+            for column, definition in campaign_columns.items():
+                if column not in existing_campaign_columns:
+                    self.conn.execute(
+                        f"ALTER TABLE position_campaigns ADD COLUMN {column} {definition}"
+                    )
+            stop_event_columns = {
+                str(row["name"])
+                for row in self.conn.execute(
+                    "PRAGMA table_info(operator_entry_stop_events)"
+                )
+            }
+            if "previous_event_hash" not in stop_event_columns:
+                self.conn.execute(
+                    """ALTER TABLE operator_entry_stop_events
+                       ADD COLUMN previous_event_hash TEXT NOT NULL DEFAULT
+                       '0000000000000000000000000000000000000000000000000000000000000000'"""
+                )
+            candidate_sql_row = self.conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='candidates'"
+            ).fetchone()
+            candidate_sql = str(candidate_sql_row["sql"] or "").replace(" ", "")
+            if "PRIMARYKEY(pilot_id,book_mode,symbol)" not in candidate_sql:
+                self.conn.execute("ALTER TABLE candidates RENAME TO candidates_legacy")
+                self.conn.execute(
+                    """CREATE TABLE candidates (
+                           symbol TEXT NOT NULL,pilot_id TEXT NOT NULL,
+                           book_mode TEXT NOT NULL CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+                           decision_contract_version TEXT NOT NULL,
+                           decision_contract_hash TEXT NOT NULL,observed_at TEXT NOT NULL,
+                           state TEXT NOT NULL,lane TEXT NOT NULL,
+                           signal_strength REAL NOT NULL,price REAL NOT NULL,gap_pct REAL,
+                           dollar_volume REAL,volume_acceleration REAL,price_acceleration REAL,
+                           relative_volume REAL,spread_pct REAL,short_atr REAL,base_high REAL,
+                           support REAL,invalidation REAL,limit_ceiling REAL,extension_atr REAL,
+                           quote_fresh INTEGER NOT NULL DEFAULT 0,
+                           preliminary_liquidity_pass INTEGER NOT NULL DEFAULT 0,
+                           catalyst_required INTEGER NOT NULL DEFAULT 1,
+                           payload_json TEXT NOT NULL,
+                           PRIMARY KEY(pilot_id,book_mode,symbol)
+                       )"""
+                )
+                self.conn.execute(
+                    """INSERT INTO candidates SELECT
+                           symbol,pilot_id,book_mode,decision_contract_version,
+                           decision_contract_hash,observed_at,state,lane,signal_strength,
+                           price,gap_pct,dollar_volume,volume_acceleration,price_acceleration,
+                           relative_volume,spread_pct,short_atr,base_high,support,invalidation,
+                           limit_ceiling,extension_atr,quote_fresh,
+                           preliminary_liquidity_pass,catalyst_required,payload_json
+                       FROM candidates_legacy"""
+                )
+                self.conn.execute("DROP TABLE candidates_legacy")
+            self.conn.execute("DROP INDEX IF EXISTS idx_candidates_rank")
+            self.conn.execute(
+                """CREATE INDEX idx_candidates_rank
+                   ON candidates(book_mode,pilot_id,signal_strength DESC,dollar_volume DESC)"""
+            )
+            risk_table_sql_row = self.conn.execute(
+                """SELECT sql FROM sqlite_master
+                   WHERE type='table' AND name='risk_authorizations'"""
+            ).fetchone()
+            risk_table_sql = str(risk_table_sql_row["sql"] or "")
+            if "SUBMISSION_UNKNOWN" not in risk_table_sql:
+                self.conn.execute(
+                    "ALTER TABLE risk_authorizations RENAME TO risk_authorizations_legacy"
+                )
+                self.conn.execute(
+                    """CREATE TABLE risk_authorizations (
+                           authorization_id TEXT PRIMARY KEY,
+                           account_key TEXT NOT NULL,
+                           session_date TEXT NOT NULL,
+                           strategy_version TEXT NOT NULL,
+                           pilot_id TEXT NOT NULL,
+                           book_mode TEXT NOT NULL CHECK(book_mode IN ('LIVE','PAPER','SHADOW')),
+                           decision_contract_version TEXT NOT NULL,
+                           decision_contract_hash TEXT NOT NULL,
+                           instrument_key TEXT NOT NULL,
+                           thesis_key TEXT NOT NULL,
+                           risk_action TEXT NOT NULL CHECK(risk_action IN ('ENTRY','ADD')),
+                           status TEXT NOT NULL CHECK(status IN (
+                               'ACTIVE','SUBMISSION_UNKNOWN','CONSUMED','RECONCILED',
+                               'RECONCILED_NO_ORDER','RELEASED','EXPIRED'
+                           )),
+                           created_at TEXT NOT NULL,
+                           expires_at TEXT NOT NULL,
+                           bound_at TEXT,
+                           reconciled_at TEXT,
+                           broker_order_id TEXT,
+                           campaign_id TEXT,
+                           release_reason TEXT,
+                           evidence_json TEXT NOT NULL
+                       )"""
+                )
+                self.conn.execute(
+                    """INSERT INTO risk_authorizations(
+                           authorization_id,account_key,session_date,strategy_version,
+                           pilot_id,book_mode,decision_contract_version,
+                           decision_contract_hash,instrument_key,thesis_key,risk_action,
+                           status,created_at,expires_at,bound_at,reconciled_at,
+                           broker_order_id,campaign_id,release_reason,evidence_json
+                       ) SELECT authorization_id,account_key,session_date,strategy_version,
+                                pilot_id,book_mode,decision_contract_version,
+                                decision_contract_hash,instrument_key,thesis_key,risk_action,
+                                status,created_at,expires_at,bound_at,reconciled_at,
+                                broker_order_id,campaign_id,release_reason,evidence_json
+                         FROM risk_authorizations_legacy"""
+                )
+                self.conn.execute("DROP TABLE risk_authorizations_legacy")
+            self.conn.execute("DROP INDEX IF EXISTS idx_risk_authorizations_session")
+            self.conn.execute("DROP INDEX IF EXISTS idx_risk_authorizations_one_active")
+            self.conn.execute("DROP INDEX IF EXISTS idx_risk_authorizations_one_pending")
+            self.conn.execute(
+                """CREATE INDEX idx_risk_authorizations_session
+                   ON risk_authorizations(account_key,session_date,status,created_at DESC)"""
+            )
+            self.conn.execute(
+                """CREATE UNIQUE INDEX idx_risk_authorizations_one_active
+                   ON risk_authorizations(account_key,session_date)
+                   WHERE status='ACTIVE'"""
+            )
+            self.conn.execute(
+                """CREATE UNIQUE INDEX idx_risk_authorizations_one_pending
+                   ON risk_authorizations(account_key,session_date)
+                   WHERE status IN ('ACTIVE','SUBMISSION_UNKNOWN','CONSUMED')"""
+            )
+            latch = self.conn.execute(
+                "SELECT generation FROM operator_entry_stop WHERE latch_key='GLOBAL'"
+            ).fetchone()
+            if latch is None:
+                changed_at = utc_now()
+                event = {
+                    "generation": 1,
+                    "action": "INITIALIZED",
+                    "reason": "entry stop initialized released; no broker action taken",
+                    "changed_by": "titan_runtime.storage",
+                    "changed_at": changed_at,
+                    "previous_event_hash": ZERO_SHA256,
+                }
+                event_hash = hashlib.sha256(
+                    json.dumps(
+                        event, sort_keys=True, separators=(",", ":")
+                    ).encode("utf-8")
+                ).hexdigest()
+                self.conn.execute(
+                    """INSERT INTO operator_entry_stop(
+                           latch_key,engaged,generation,reason,changed_by,changed_at
+                       ) VALUES('GLOBAL',0,1,?,?,?)""",
+                    (event["reason"], event["changed_by"], changed_at),
+                )
+                self.conn.execute(
+                    """INSERT INTO operator_entry_stop_events(
+                           event_id,generation,action,reason,changed_by,changed_at,
+                           previous_event_hash,event_hash
+                       ) VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        str(uuid.uuid4()), 1, event["action"], event["reason"],
+                        event["changed_by"], changed_at, ZERO_SHA256, event_hash,
+                    ),
+                )
 
     def close(self) -> None:
         self.conn.close()
@@ -1173,9 +1982,17 @@ class Store:
                 break
         return list(by_session.values())
 
-    def clear_candidates(self) -> None:
-        self.conn.execute("DELETE FROM candidates")
-        self.conn.execute("DELETE FROM quotes")
+    def clear_candidates(
+        self,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> None:
+        """Clear one reporting book without disturbing another Pilot's board."""
+        self.conn.execute(
+            "DELETE FROM candidates WHERE pilot_id=? AND book_mode=?",
+            (str(pilot_id).strip().lower(), str(book_mode).strip().upper()),
+        )
 
     def upsert_quote(self, event: dict[str, Any]) -> None:
         bid = event.get("bp")
@@ -1200,14 +2017,20 @@ class Store:
         return dict(row) if row else None
 
     def upsert_candidate(self, payload: dict[str, Any]) -> None:
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] == "LIVE":
+            raise ValueError("candidate boards are PAPER/SHADOW evidence, not LIVE orders")
         self.conn.execute(
             """INSERT INTO candidates(
-                   symbol,observed_at,state,lane,signal_strength,price,gap_pct,dollar_volume,
+                   symbol,pilot_id,book_mode,decision_contract_version,
+                   decision_contract_hash,observed_at,state,lane,signal_strength,price,gap_pct,dollar_volume,
                    volume_acceleration,price_acceleration,relative_volume,spread_pct,short_atr,
                    base_high,support,invalidation,limit_ceiling,extension_atr,quote_fresh,
                    preliminary_liquidity_pass,catalyst_required,payload_json
-               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(symbol) DO UPDATE SET
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(pilot_id,book_mode,symbol) DO UPDATE SET
+                   decision_contract_version=excluded.decision_contract_version,
+                   decision_contract_hash=excluded.decision_contract_hash,
                    observed_at=excluded.observed_at,state=excluded.state,lane=excluded.lane,
                    signal_strength=excluded.signal_strength,price=excluded.price,
                    gap_pct=excluded.gap_pct,dollar_volume=excluded.dollar_volume,
@@ -1221,7 +2044,10 @@ class Store:
                    preliminary_liquidity_pass=excluded.preliminary_liquidity_pass,
                    catalyst_required=excluded.catalyst_required,payload_json=excluded.payload_json""",
             (
-                payload["symbol"], payload["observed_at"], payload["state"], payload["lane"],
+                payload["symbol"], attribution["pilot_id"], attribution["book_mode"],
+                attribution["decision_contract_version"],
+                attribution["decision_contract_hash"], payload["observed_at"],
+                payload["state"], payload["lane"],
                 payload["signal_strength"], payload["price"], payload.get("gap_pct"),
                 payload.get("dollar_volume"), payload.get("volume_acceleration"),
                 payload.get("price_acceleration"), payload.get("relative_volume"),
@@ -1229,20 +2055,46 @@ class Store:
                 payload.get("support"), payload.get("invalidation"), payload.get("limit_ceiling"),
                 payload.get("extension_atr"), int(payload.get("quote_fresh", False)),
                 int(payload.get("preliminary_liquidity_pass", False)), 1,
-                json.dumps(payload, separators=(",", ":")),
+                json.dumps({**payload, **attribution}, separators=(",", ":")),
             ),
         )
 
-    def get_candidate(self, symbol: str) -> dict[str, Any] | None:
-        row = self.conn.execute("SELECT * FROM candidates WHERE symbol=?", (symbol,)).fetchone()
+    def get_candidate(
+        self,
+        symbol: str,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            """SELECT * FROM candidates
+               WHERE pilot_id=? AND book_mode=? AND symbol=?""",
+            (str(pilot_id).lower(), str(book_mode).upper(), symbol),
+        ).fetchone()
         return dict(row) if row else None
 
-    def delete_candidate(self, symbol: str) -> None:
-        self.conn.execute("DELETE FROM candidates WHERE symbol=?", (symbol,))
+    def delete_candidate(
+        self,
+        symbol: str,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> None:
+        self.conn.execute(
+            "DELETE FROM candidates WHERE pilot_id=? AND book_mode=? AND symbol=?",
+            (str(pilot_id).lower(), str(book_mode).upper(), symbol),
+        )
 
-    def leaderboard(self, limit: int = 20) -> list[dict[str, Any]]:
+    def leaderboard(
+        self,
+        limit: int = 20,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """SELECT * FROM candidates
+               WHERE pilot_id=? AND book_mode=?
                ORDER BY COALESCE(
                    CASE
                        WHEN json_extract(payload_json,'$.weighted_scale_version') =
@@ -1258,13 +2110,19 @@ class Store:
                    0
                ) DESC,
                dollar_volume DESC LIMIT ?""",
-            (limit,),
+            (str(pilot_id).lower(), str(book_mode).upper(), limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def all_candidate_symbols(self) -> list[str]:
+    def all_candidate_symbols(
+        self,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> list[str]:
         rows = self.conn.execute(
             """SELECT symbol FROM candidates
+               WHERE pilot_id=? AND book_mode=?
                ORDER BY COALESCE(
                    CASE
                        WHEN json_extract(payload_json,'$.weighted_scale_version') =
@@ -1279,11 +2137,17 @@ class Store:
                    CAST(json_extract(payload_json,'$.weighted_evidence_coverage_pct') AS REAL),
                    0
                ) DESC,
-               dollar_volume DESC"""
+               dollar_volume DESC""",
+            (str(pilot_id).lower(), str(book_mode).upper()),
         ).fetchall()
         return [str(row["symbol"]) for row in rows]
 
     def save_prepared_trade_plan(self, payload: dict[str, Any]) -> str | None:
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] == "LIVE":
+            raise ValueError(
+                "prepared trade plans are non-authoritative PAPER/SHADOW evidence"
+            )
         fingerprint = {
             key: payload.get(key)
             for key in (
@@ -1297,6 +2161,7 @@ class Store:
                 "blockers",
             )
         }
+        fingerprint.update(attribution)
         digest = hashlib.sha256(
             json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
@@ -1307,15 +2172,21 @@ class Store:
                 """INSERT INTO prepared_trade_plans(
                        plan_id,plan_key,symbol,observed_at,status,direction,lane,
                        weighted_opportunity_score,modeled_move_capacity_pct,trigger,
-                       structural_stop,t1,t2,payload_json,created_at
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       structural_stop,t1,t2,pilot_id,book_mode,
+                       decision_contract_version,decision_contract_hash,
+                       payload_json,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     plan_id, plan_key, payload["symbol"], payload["observed_at"],
                     payload["status"], payload["direction"], payload["lane"],
                     payload.get("weighted_opportunity_score"),
                     payload.get("modeled_move_capacity_pct"), payload.get("trigger"),
                     payload.get("structural_stop"), payload.get("t1"), payload.get("t2"),
-                    json.dumps(payload, separators=(",", ":")), utc_now(),
+                    attribution["pilot_id"], attribution["book_mode"],
+                    attribution["decision_contract_version"],
+                    attribution["decision_contract_hash"],
+                    json.dumps({**payload, **attribution}, separators=(",", ":")),
+                    utc_now(),
                 ),
             )
         except sqlite3.IntegrityError:
@@ -1359,15 +2230,30 @@ class Store:
         item.update(json.loads(item.pop("payload_json")))
         return item
 
-    def latest_prepared_trade_plans(self, limit: int = 100) -> list[dict[str, Any]]:
+    def latest_prepared_trade_plans(
+        self,
+        limit: int = 100,
+        *,
+        pilot_id: str = TITAN_LIVE_PILOT_ID,
+        book_mode: str = "SHADOW",
+    ) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """SELECT p.* FROM prepared_trade_plans p
                JOIN (
-                   SELECT symbol, MAX(created_at) AS latest
-                   FROM prepared_trade_plans GROUP BY symbol
-               ) newest ON newest.symbol=p.symbol AND newest.latest=p.created_at
+                   SELECT pilot_id,book_mode,symbol,MAX(created_at) AS latest
+                   FROM prepared_trade_plans
+                   WHERE pilot_id=? AND book_mode=?
+                   GROUP BY pilot_id,book_mode,symbol
+               ) newest ON newest.pilot_id=p.pilot_id
+                        AND newest.book_mode=p.book_mode
+                        AND newest.symbol=p.symbol
+                        AND newest.latest=p.created_at
                ORDER BY p.weighted_opportunity_score DESC, p.created_at DESC LIMIT ?""",
-            (limit,),
+            (
+                str(pilot_id).strip().lower(),
+                str(book_mode).strip().upper(),
+                limit,
+            ),
         ).fetchall()
         result = []
         for row in rows:
@@ -1457,6 +2343,10 @@ class Store:
     ) -> str:
         if not decision.strip() or not reason.strip():
             raise ValueError("decision and reason are required")
+        normalized_details = details or {}
+        if not isinstance(normalized_details, dict):
+            raise ValueError("decision details must be an object")
+        attribution = _normalize_pilot_attribution(normalized_details)
         event = self.conn.execute(
             "SELECT event_id FROM events WHERE event_id=?", (event_id,)
         ).fetchone()
@@ -1465,11 +2355,15 @@ class Store:
         decision_id = str(uuid.uuid4())
         self.conn.execute(
             """INSERT INTO event_decisions(
-                   decision_id,event_id,decided_at,decision,reason,details_json
-               ) VALUES(?,?,?,?,?,?)""",
+                   decision_id,event_id,decided_at,decision,reason,pilot_id,book_mode,
+                   decision_contract_version,decision_contract_hash,details_json
+               ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
             (
                 decision_id, event_id, utc_now(), decision.strip().upper(), reason.strip(),
-                json.dumps(details or {}, separators=(",", ":")),
+                attribution["pilot_id"], attribution["book_mode"],
+                attribution["decision_contract_version"],
+                attribution["decision_contract_hash"],
+                json.dumps({**normalized_details, **attribution}, separators=(",", ":")),
             ),
         )
         return decision_id
@@ -1719,6 +2613,8 @@ class Store:
             raise ValueError("daily performance grade must be a JSON object")
         allowed_fields = {
             "account_key", "session_date", "strategy_version", "rubric_version",
+            "pilot_id", "book_mode", "decision_contract_version",
+            "decision_contract_hash",
             "graded_at", "broker_confirmed_pnl", "execution_metrics",
             "category_scores", "evidence_coverage_pct", "strengths", "mistakes",
             "improvement_proposals", "hard_failures", "corrects_grade_id",
@@ -1731,6 +2627,8 @@ class Store:
             )
         required = (
             "account_key", "session_date", "strategy_version", "rubric_version",
+            "pilot_id", "book_mode", "decision_contract_version",
+            "decision_contract_hash",
             "graded_at", "broker_confirmed_pnl", "execution_metrics",
             "category_scores", "evidence_coverage_pct", "strengths", "mistakes",
             "improvement_proposals", "hard_failures",
@@ -1743,6 +2641,9 @@ class Store:
 
         account_key = str(payload["account_key"]).strip()
         strategy_version = str(payload["strategy_version"]).strip()
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] != "LIVE":
+            raise ValueError("broker-bound daily performance grades are LIVE-only")
         rubric_version = str(payload["rubric_version"]).strip()
         if not account_key or not strategy_version or not rubric_version:
             raise ValueError(
@@ -2296,6 +3197,7 @@ class Store:
             "account_key": account_key,
             "session_date": session_date,
             "strategy_version": strategy_version,
+            **attribution,
             "rubric_version": rubric_version,
             "graded_at": graded_at,
             "broker_confirmed_pnl": normalized_pnl,
@@ -2449,6 +3351,11 @@ class Store:
                     raise ValueError(
                         "daily grade strategy does not match the broker risk session"
                     )
+                for field, expected_value in attribution.items():
+                    if str(source_snapshot.get(field)) != expected_value:
+                        raise ValueError(
+                            f"daily grade {field} does not match the broker risk session"
+                        )
                 source_pairs = (
                     ("start_of_day_equity", "start_of_day_equity"),
                     ("current_equity", "current_equity"),
@@ -2514,7 +3421,7 @@ class Store:
                 pending_authorization_count = int(self.conn.execute(
                     """SELECT COUNT(*) FROM risk_authorizations
                        WHERE account_key=? AND session_date=?
-                         AND status IN ('ACTIVE','CONSUMED')""",
+                         AND status IN ('ACTIVE','SUBMISSION_UNKNOWN','CONSUMED')""",
                     (account_key, session_date),
                 ).fetchone()[0])
                 if pending_authorization_count:
@@ -2544,15 +3451,19 @@ class Store:
                     )
                 self.conn.execute(
                     """INSERT INTO daily_performance_grades(
-                           grade_id,account_key,session_date,strategy_version,revision,
+                           grade_id,account_key,session_date,strategy_version,pilot_id,
+                           book_mode,decision_contract_version,decision_contract_hash,revision,
                            corrects_grade_id,rubric_version,graded_at,broker_confirmed_at,
                            recorded_at,payload_hash,payload_json,evidence_coverage_pct,
                            process_score,outcome_score,raw_overall_score,overall_score,
                            letter_grade,grade_status,evidence_ceiling,
                            incomplete_reasons_json,hard_fail,hard_ceiling
-                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        grade_id, account_key, session_date, strategy_version, revision,
+                        grade_id, account_key, session_date, strategy_version,
+                        attribution["pilot_id"], attribution["book_mode"],
+                        attribution["decision_contract_version"],
+                        attribution["decision_contract_hash"], revision,
                         corrects_grade_id, rubric_version, graded_at, broker_confirmed_at,
                         utc_now(), payload_hash, canonical_json, float(evidence_coverage),
                         _quantized_score(process_decimal),
@@ -2654,21 +3565,29 @@ class Store:
             raise ValueError("at least one entry alternative price is required")
         if float(payload["quantity"]) <= 0 or float(payload["capital"]) <= 0:
             raise ValueError("quantity and capital must be positive")
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] == "LIVE":
+            raise ValueError("research entry plans must use PAPER or SHADOW book_mode")
         plan_id = str(uuid.uuid4())
         context = payload.get("context") or {}
         context["capture_rule"] = "Entry alternatives recorded before outcome attachment."
+        context.update(attribution)
         self.conn.execute(
             """INSERT INTO research_entry_plans(
                    plan_id,trade_date,symbol,setup,lane,captured_at,earliest_time,earliest_price,
                    conservative_time,conservative_price,selected_time,selected_price,
-                   structural_stop,quantity,capital,context_json
-               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   structural_stop,quantity,capital,pilot_id,book_mode,
+                   decision_contract_version,decision_contract_hash,context_json
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 plan_id, payload["trade_date"], str(payload["symbol"]).upper(), payload["setup"],
                 payload["lane"], utc_now(), payload.get("earliest_time"), payload.get("earliest_price"),
                 payload.get("conservative_time"), payload.get("conservative_price"),
                 payload.get("selected_time"), payload.get("selected_price"),
                 payload["structural_stop"], payload["quantity"], payload["capital"],
+                attribution["pilot_id"], attribution["book_mode"],
+                attribution["decision_contract_version"],
+                attribution["decision_contract_hash"],
                 json.dumps(context, separators=(",", ":")),
             ),
         )
@@ -2687,13 +3606,16 @@ class Store:
         with self.transaction():
             self.conn.execute(
                 """INSERT INTO research_entry_outcomes(
-                       plan_id,completed_at,observation_end,session_high,session_low,
+                       plan_id,pilot_id,book_mode,decision_contract_version,
+                       decision_contract_hash,completed_at,observation_end,session_high,session_low,
                        actual_exit_price,actual_pnl,actual_pnl_r,earliest_pnl,earliest_pnl_r,
                        conservative_pnl,conservative_pnl_r,hesitation_cost,confirmation_savings,
                        mfe,mae,outcome_json
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    plan_id, utc_now(), payload["observation_end"], payload.get("session_high"),
+                    plan_id, plan["pilot_id"], plan["book_mode"],
+                    plan["decision_contract_version"],
+                    plan["decision_contract_hash"], utc_now(), payload["observation_end"], payload.get("session_high"),
                     payload.get("session_low"), payload.get("actual_exit_price"),
                     payload.get("actual_pnl"), payload.get("actual_pnl_r"),
                     payload.get("earliest_pnl"), payload.get("earliest_pnl_r"),
@@ -2736,7 +3658,8 @@ class Store:
         """
         required = (
             "account_key", "instrument_key", "symbol", "thesis_key", "direction",
-            "asset_class", "status", "strategy_version",
+            "asset_class", "status", "strategy_version", "pilot_id", "book_mode",
+            "decision_contract_version", "decision_contract_hash",
         )
         missing = [field for field in required if not payload.get(field)]
         if missing:
@@ -2748,6 +3671,9 @@ class Store:
         }
         if status not in valid_statuses:
             raise ValueError(f"invalid position-campaign status: {status}")
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] != "LIVE":
+            raise ValueError("broker position campaigns are LIVE-only")
         thesis_key = str(payload["thesis_key"]).strip().upper()
         direction = str(payload["direction"]).strip().upper()
         if not thesis_key:
@@ -2835,7 +3761,8 @@ class Store:
                 f"""SELECT campaign_id, original_stop, current_stop, status,
                            initial_quantity,current_quantity,broker_state_json,
                            broker_confirmed_at, symbol, thesis_key, direction,
-                           asset_class, strategy_version
+                           asset_class, strategy_version,pilot_id,book_mode,
+                           decision_contract_version,decision_contract_hash
                     FROM position_campaigns
                     WHERE account_key=? AND instrument_key=?
                       AND status NOT IN ({placeholders})
@@ -2862,12 +3789,19 @@ class Store:
             risk_lease_to_bind = None
             risk_lease_order_id = None
             risk_lease_submitted_at = None
+            risk_lease_intent_id = None
+            risk_lease_resolution_key = None
             prior_broker_state = (
                 json.loads(str(existing["broker_state_json"])) if existing else {}
             )
             entry_order_fields = (
                 "entry_order_id",
                 "entry_order_submitted_at",
+                "entry_submission_intent_id",
+                "entry_order_resolution_key",
+                "entry_order_acknowledged_at",
+                "entry_order_ack_deadline_at",
+                "entry_order_ack_state",
                 "entry_order_quantity",
                 "entry_cumulative_filled_quantity",
                 "entry_risk_gate_authorization",
@@ -2894,6 +3828,30 @@ class Store:
                     state["entry_order_submitted_at"],
                     f"{label}.entry_order_submitted_at",
                 )
+                acknowledged_at = _aware_timestamp(
+                    state["entry_order_acknowledged_at"],
+                    f"{label}.entry_order_acknowledged_at",
+                )
+                ack_deadline_at = _aware_timestamp(
+                    state["entry_order_ack_deadline_at"],
+                    f"{label}.entry_order_ack_deadline_at",
+                )
+                ack_state = str(state["entry_order_ack_state"]).strip().upper()
+                valid_ack_states = {
+                    "ON_TIME", "LATE_CONFIRMED", "UNKNOWN_RESOLVED",
+                }
+                if ack_state not in valid_ack_states:
+                    raise ValueError("entry_order_ack_state is invalid")
+                submission_intent_id = str(
+                    state["entry_submission_intent_id"]
+                ).strip()
+                order_resolution_key = str(
+                    state["entry_order_resolution_key"]
+                ).strip()
+                if not submission_intent_id or not order_resolution_key:
+                    raise ValueError(
+                        "entry submission intent and resolution key cannot be empty"
+                    )
                 order_quantity = _finite_float(
                     state["entry_order_quantity"],
                     f"{label}.entry_order_quantity",
@@ -2913,9 +3871,70 @@ class Store:
                     raise ValueError(
                         "entry cumulative fill must be within entry_order_quantity"
                     )
+                submitted_time = datetime.fromisoformat(submitted_at)
+                acknowledged_time = datetime.fromisoformat(acknowledged_at)
+                deadline_time = datetime.fromisoformat(ack_deadline_at)
+                timeout_seconds = _finite_decimal(
+                    authorization.get("broker_ack_timeout_seconds"),
+                    f"{label}.broker_ack_timeout_seconds",
+                )
+                if timeout_seconds != timeout_seconds.to_integral_value():
+                    raise ValueError("broker ack timeout must be an integer")
+                if acknowledged_time < submitted_time:
+                    raise ValueError("entry broker ack cannot precede submission")
+                if acknowledged_time <= deadline_time and ack_state != "ON_TIME":
+                    raise ValueError("on-time entry ack requires ON_TIME")
+                if acknowledged_time > deadline_time and ack_state not in {
+                    "LATE_CONFIRMED", "UNKNOWN_RESOLVED"
+                }:
+                    raise ValueError(
+                        "late entry ack requires an explicit late/unknown-resolved state"
+                    )
+                authorization_id = str(
+                    authorization.get("authorization_id") or ""
+                )
+                intent_row = self.conn.execute(
+                    """SELECT * FROM risk_submission_intents
+                       WHERE intent_id=? AND authorization_id=?""",
+                    (submission_intent_id, authorization_id),
+                ).fetchone()
+                if intent_row is None:
+                    raise ValueError(
+                        "entry evidence has no matching immutable submission intent"
+                    )
+                if (
+                    str(intent_row["attempted_at"]) != submitted_at
+                    or str(intent_row["broker_ack_deadline_at"])
+                    != ack_deadline_at
+                ):
+                    raise ValueError(
+                        "entry submission/deadline does not match immutable intent"
+                    )
+                resolution_row = self.conn.execute(
+                    """SELECT * FROM risk_unknown_resolutions
+                       WHERE resolution_key=? AND intent_id=?
+                         AND authorization_id=?""",
+                    (
+                        order_resolution_key, submission_intent_id,
+                        authorization_id,
+                    ),
+                ).fetchone()
+                if (
+                    resolution_row is None
+                    or str(resolution_row["resolution_state"]) != "ORDER_FOUND"
+                    or str(resolution_row["broker_order_id"]) != order_id
+                ):
+                    raise ValueError(
+                        "entry evidence requires exact ORDER_FOUND broker resolution"
+                    )
                 return {
                     "order_id": order_id,
+                    "submission_intent_id": submission_intent_id,
+                    "order_resolution_key": order_resolution_key,
                     "submitted_at": submitted_at,
+                    "acknowledged_at": acknowledged_at,
+                    "ack_deadline_at": ack_deadline_at,
+                    "ack_state": ack_state,
                     "order_quantity": order_quantity,
                     "cumulative_filled": cumulative_filled,
                     "authorization": authorization,
@@ -2960,8 +3979,17 @@ class Store:
                     incoming_authorization,
                     account_key=str(payload["account_key"]),
                     instrument_key=str(payload["instrument_key"]),
+                    symbol=str(payload["symbol"]).upper(),
+                    direction=direction,
+                    asset_class=str(payload["asset_class"]).upper(),
                     thesis_key=thesis_key,
                     strategy_version=str(payload["strategy_version"]),
+                    pilot_id=attribution["pilot_id"],
+                    book_mode=attribution["book_mode"],
+                    decision_contract_version=attribution[
+                        "decision_contract_version"
+                    ],
+                    decision_contract_hash=attribution["decision_contract_hash"],
                     expected_action="ENTRY",
                     order_submitted_at=incoming_entry["submitted_at"],
                 )
@@ -2997,11 +4025,33 @@ class Store:
                     risk_lease_to_bind = incoming_authorization
                     risk_lease_order_id = incoming_entry["order_id"]
                     risk_lease_submitted_at = incoming_entry["submitted_at"]
+                    risk_lease_intent_id = incoming_entry[
+                        "submission_intent_id"
+                    ]
+                    risk_lease_resolution_key = incoming_entry[
+                        "order_resolution_key"
+                    ]
                 else:
                     if incoming_entry["order_id"] != prior_entry["order_id"]:
                         raise ValueError("entry_order_id is immutable")
                     if incoming_entry["submitted_at"] != prior_entry["submitted_at"]:
                         raise ValueError("entry_order_submitted_at is immutable")
+                    if incoming_entry["acknowledged_at"] != prior_entry["acknowledged_at"]:
+                        raise ValueError("entry_order_acknowledged_at is immutable")
+                    if incoming_entry["ack_deadline_at"] != prior_entry["ack_deadline_at"]:
+                        raise ValueError("entry_order_ack_deadline_at is immutable")
+                    if incoming_entry["ack_state"] != prior_entry["ack_state"]:
+                        raise ValueError("entry_order_ack_state is immutable")
+                    if (
+                        incoming_entry["submission_intent_id"]
+                        != prior_entry["submission_intent_id"]
+                    ):
+                        raise ValueError("entry_submission_intent_id is immutable")
+                    if (
+                        incoming_entry["order_resolution_key"]
+                        != prior_entry["order_resolution_key"]
+                    ):
+                        raise ValueError("entry_order_resolution_key is immutable")
                     if abs(
                         incoming_entry["order_quantity"]
                         - prior_entry["order_quantity"]
@@ -3055,8 +4105,11 @@ class Store:
                         != str(existing["campaign_id"])
                         or str(durable_entry_lease["broker_order_id"])
                         != incoming_entry["order_id"]
-                        or json.loads(str(durable_entry_lease["evidence_json"]))
-                        != incoming_authorization
+                        or _risk_authorization_hash_evidence(
+                            json.loads(str(durable_entry_lease["evidence_json"]))
+                        ) != _risk_authorization_hash_evidence(
+                            incoming_authorization
+                        )
                     ):
                         raise ValueError(
                             "entry order is not bound to its original durable risk lease"
@@ -3106,6 +4159,21 @@ class Store:
                 prior_add_state = None
                 add_order_id = str(broker_state.get("add_order_id") or "").strip()
                 order_submitted_at = broker_state.get("add_order_submitted_at")
+                add_submission_intent_id = str(
+                    broker_state.get("add_submission_intent_id") or ""
+                ).strip()
+                add_order_resolution_key = str(
+                    broker_state.get("add_order_resolution_key") or ""
+                ).strip()
+                add_acknowledged_at = broker_state.get(
+                    "add_order_acknowledged_at"
+                )
+                add_ack_deadline_at = broker_state.get(
+                    "add_order_ack_deadline_at"
+                )
+                add_ack_state = str(
+                    broker_state.get("add_order_ack_state") or ""
+                ).strip().upper()
                 add_order_quantity = _finite_float(
                     broker_state.get("add_order_quantity"),
                     "broker_state.add_order_quantity",
@@ -3114,14 +4182,82 @@ class Store:
                     broker_state.get("add_cumulative_filled_quantity"),
                     "broker_state.add_cumulative_filled_quantity",
                 )
-                if not add_order_id or not order_submitted_at:
+                if (
+                    not add_order_id or not order_submitted_at
+                    or not add_submission_intent_id
+                    or not add_order_resolution_key
+                    or not add_acknowledged_at or not add_ack_deadline_at
+                    or not add_ack_state
+                ):
                     raise ValueError(
-                        "ADD broker evidence requires add_order_id and "
-                        "add_order_submitted_at"
+                        "ADD broker evidence requires order ID, submission, "
+                        "acknowledgement, and ack deadline"
+                    )
+                submitted_time = datetime.fromisoformat(_aware_timestamp(
+                    order_submitted_at, "broker_state.add_order_submitted_at"
+                ))
+                acknowledged_time = datetime.fromisoformat(_aware_timestamp(
+                    add_acknowledged_at,
+                    "broker_state.add_order_acknowledged_at",
+                ))
+                deadline_time = datetime.fromisoformat(_aware_timestamp(
+                    add_ack_deadline_at, "broker_state.add_order_ack_deadline_at"
+                ))
+                if not isinstance(risk_authorization, dict):
+                    raise ValueError("ADD risk_gate_authorization must be an object")
+                timeout_seconds = _finite_decimal(
+                    risk_authorization.get("broker_ack_timeout_seconds"),
+                    "ADD broker_ack_timeout_seconds",
+                )
+                if acknowledged_time < submitted_time:
+                    raise ValueError("ADD broker ack cannot precede submission")
+                if acknowledged_time <= deadline_time and add_ack_state != "ON_TIME":
+                    raise ValueError("on-time ADD ack requires ON_TIME")
+                if acknowledged_time > deadline_time and add_ack_state not in {
+                    "LATE_CONFIRMED", "UNKNOWN_RESOLVED"
+                }:
+                    raise ValueError(
+                        "late ADD ack requires an explicit late/unknown-resolved state"
                     )
                 if add_order_quantity <= 0 or not 0 <= add_cumulative_filled <= add_order_quantity:
                     raise ValueError(
                         "ADD cumulative fill must be within the authorized order quantity"
+                    )
+                add_authorization_id = str(
+                    risk_authorization.get("authorization_id") or ""
+                )
+                add_intent_row = self.conn.execute(
+                    """SELECT * FROM risk_submission_intents
+                       WHERE intent_id=? AND authorization_id=?""",
+                    (add_submission_intent_id, add_authorization_id),
+                ).fetchone()
+                if (
+                    add_intent_row is None
+                    or str(add_intent_row["attempted_at"])
+                    != submitted_time.isoformat()
+                    or str(add_intent_row["broker_ack_deadline_at"])
+                    != deadline_time.isoformat()
+                ):
+                    raise ValueError(
+                        "ADD submission/deadline does not match immutable intent"
+                    )
+                add_resolution_row = self.conn.execute(
+                    """SELECT * FROM risk_unknown_resolutions
+                       WHERE resolution_key=? AND intent_id=?
+                         AND authorization_id=?""",
+                    (
+                        add_order_resolution_key, add_submission_intent_id,
+                        add_authorization_id,
+                    ),
+                ).fetchone()
+                if (
+                    add_resolution_row is None
+                    or str(add_resolution_row["resolution_state"]) != "ORDER_FOUND"
+                    or str(add_resolution_row["broker_order_id"])
+                    != add_order_id
+                ):
+                    raise ValueError(
+                        "ADD evidence requires exact ORDER_FOUND broker resolution"
                     )
                 if existing:
                     prior_rows = self.conn.execute(
@@ -3171,6 +4307,24 @@ class Store:
                         raise ValueError(
                             "ADD order submission timestamp is immutable"
                         )
+                    for field in (
+                        "add_submission_intent_id", "add_order_resolution_key",
+                    ):
+                        if str(prior_add_state.get(field) or "") != str(
+                            broker_state.get(field) or ""
+                        ):
+                            raise ValueError(f"{field} is immutable")
+                    for field in (
+                        "add_order_acknowledged_at", "add_order_ack_deadline_at",
+                    ):
+                        if _aware_timestamp(
+                            prior_add_state.get(field), f"prior {field}"
+                        ) != _aware_timestamp(broker_state.get(field), field):
+                            raise ValueError(f"{field} is immutable")
+                    if str(prior_add_state.get("add_order_ack_state") or "").upper() != (
+                        add_ack_state
+                    ):
+                        raise ValueError("add_order_ack_state is immutable")
                     prior_cumulative = _finite_float(
                         prior_add_state.get("add_cumulative_filled_quantity"),
                         "prior add_cumulative_filled_quantity",
@@ -3202,8 +4356,17 @@ class Store:
                     risk_authorization,
                     account_key=str(payload["account_key"]),
                     instrument_key=str(payload["instrument_key"]),
+                    symbol=str(payload["symbol"]).upper(),
+                    direction=direction,
+                    asset_class=str(payload["asset_class"]).upper(),
                     thesis_key=thesis_key,
                     strategy_version=str(payload["strategy_version"]),
+                    pilot_id=attribution["pilot_id"],
+                    book_mode=attribution["book_mode"],
+                    decision_contract_version=attribution[
+                        "decision_contract_version"
+                    ],
+                    decision_contract_hash=attribution["decision_contract_hash"],
                     expected_action="ADD",
                     order_submitted_at=str(order_submitted_at),
                 )
@@ -3218,6 +4381,8 @@ class Store:
                     risk_lease_to_bind = risk_authorization
                     risk_lease_order_id = add_order_id
                     risk_lease_submitted_at = str(order_submitted_at)
+                    risk_lease_intent_id = add_submission_intent_id
+                    risk_lease_resolution_key = add_order_resolution_key
                 if abs(
                     float(risk_authorization["quantity"])
                     - float(add_order_quantity)
@@ -3243,6 +4408,7 @@ class Store:
                     "direction": direction,
                     "asset_class": str(payload["asset_class"]).lower(),
                     "strategy_version": str(payload["strategy_version"]),
+                    **attribution,
                 }
                 for field, value in immutable_identity.items():
                     if str(existing[field]) != value:
@@ -3301,18 +4467,21 @@ class Store:
                     campaign_id=campaign_id,
                     broker_order_id=str(risk_lease_order_id),
                     order_submitted_at=str(risk_lease_submitted_at),
+                    submission_intent_id=str(risk_lease_intent_id),
+                    order_resolution_key=str(risk_lease_resolution_key),
                 )
             now = utc_now()
             self.conn.execute(
                 """INSERT INTO position_campaigns(
                        campaign_id,account_key,instrument_key,symbol,thesis_key,direction,
                        asset_class,status,
-                       strategy_version,opened_at,updated_at,broker_confirmed_at,
+                       strategy_version,pilot_id,book_mode,decision_contract_version,
+                       decision_contract_hash,opened_at,updated_at,broker_confirmed_at,
                        entry_price,original_stop,current_stop,initial_quantity,current_quantity,
                        core_quantity,runner_quantity,reference_risk_dollars,high_water_price,
                        mfe_r,mae_r,continuation_health,remaining_opportunity,last_action,
                        next_actions_json,broker_state_json
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(campaign_id) DO UPDATE SET
                        symbol=excluded.symbol,asset_class=excluded.asset_class,status=excluded.status,
                        strategy_version=excluded.strategy_version,
@@ -3336,7 +4505,10 @@ class Store:
                     campaign_id, payload["account_key"], payload["instrument_key"],
                     str(payload["symbol"]).upper(), thesis_key, direction,
                     str(payload["asset_class"]).lower(), status,
-                    payload["strategy_version"], opened_at, now,
+                    payload["strategy_version"], attribution["pilot_id"],
+                    attribution["book_mode"],
+                    attribution["decision_contract_version"],
+                    attribution["decision_contract_hash"], opened_at, now,
                     broker_confirmed_at, entry_price, original_stop,
                     current_stop, quantities["initial_quantity"],
                     quantities["current_quantity"], quantities["core_quantity"],
@@ -3349,6 +4521,64 @@ class Store:
                     json.dumps(broker_state, separators=(",", ":")),
                 ),
             )
+            self.conn.execute(
+                """UPDATE position_campaigns SET
+                       entry_submission_intent_id=COALESCE(
+                           entry_submission_intent_id,?
+                       ),
+                       entry_order_resolution_key=COALESCE(
+                           entry_order_resolution_key,?
+                       ),
+                       entry_order_acknowledged_at=COALESCE(
+                           entry_order_acknowledged_at,?
+                       ),
+                       entry_order_ack_deadline_at=COALESCE(
+                           entry_order_ack_deadline_at,?
+                       ),
+                       entry_order_ack_state=COALESCE(entry_order_ack_state,?),
+                       add_submission_intent_id=COALESCE(
+                           add_submission_intent_id,?
+                       ),
+                       add_order_resolution_key=COALESCE(
+                           add_order_resolution_key,?
+                       ),
+                       add_order_acknowledged_at=COALESCE(
+                           add_order_acknowledged_at,?
+                       ),
+                       add_order_ack_deadline_at=COALESCE(
+                           add_order_ack_deadline_at,?
+                       ),
+                       add_order_ack_state=COALESCE(add_order_ack_state,?)
+                   WHERE campaign_id=?""",
+                (
+                    (
+                        incoming_entry["submission_intent_id"]
+                        if incoming_entry is not None else None
+                    ),
+                    (
+                        incoming_entry["order_resolution_key"]
+                        if incoming_entry is not None else None
+                    ),
+                    (
+                        incoming_entry["acknowledged_at"]
+                        if incoming_entry is not None else None
+                    ),
+                    (
+                        incoming_entry["ack_deadline_at"]
+                        if incoming_entry is not None else None
+                    ),
+                    (
+                        incoming_entry["ack_state"]
+                        if incoming_entry is not None else None
+                    ),
+                    broker_state.get("add_submission_intent_id"),
+                    broker_state.get("add_order_resolution_key"),
+                    broker_state.get("add_order_acknowledged_at"),
+                    broker_state.get("add_order_ack_deadline_at"),
+                    broker_state.get("add_order_ack_state"),
+                    campaign_id,
+                ),
+            )
             event_payload = {
                 "campaign_id": campaign_id,
                 "account_key": str(payload["account_key"]),
@@ -3358,6 +4588,7 @@ class Store:
                 "direction": direction,
                 "asset_class": str(payload["asset_class"]).lower(),
                 "strategy_version": str(payload["strategy_version"]),
+                **attribution,
                 "status": status,
                 "observed_at": now,
                 "broker_confirmed_at": broker_confirmed_at,
@@ -3451,6 +4682,9 @@ class Store:
         """
         if lease_seconds <= 0 or lease_seconds > 180:
             raise ValueError("risk-authorization lease must be in 1..180 seconds")
+        attribution = _normalize_pilot_attribution(evidence)
+        if attribution["book_mode"] != "LIVE":
+            raise ValueError("PAPER/SHADOW pilots cannot reserve broker risk")
         checked_at = datetime.fromisoformat(
             _aware_timestamp(evidence.get("checked_at"), "authorization checked_at")
         )
@@ -3475,11 +4709,9 @@ class Store:
             "reservation_expires_at": expires_at,
             "reservation_scope": "one_active_per_account_session",
         }
-        authorization_id = hashlib.sha256(
-            json.dumps(
-                complete_evidence, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
-        ).hexdigest()
+        authorization_id = _canonical_hash(
+            _risk_authorization_hash_evidence(complete_evidence)
+        )
         authorization = {
             "authorization_id": authorization_id,
             **complete_evidence,
@@ -3491,8 +4723,37 @@ class Store:
                     "broker snapshot expired while authorization was being reserved"
                 )
             now = transaction_now.isoformat()
+            stop_row = self.conn.execute(
+                "SELECT * FROM operator_entry_stop WHERE latch_key='GLOBAL'"
+            ).fetchone()
+            if stop_row is None:
+                raise ValueError("durable operator entry-stop state is missing")
+            stop_chain_valid, stop_chain_error, _ = self._validate_entry_stop_chain(
+                stop_row
+            )
+            if not stop_chain_valid:
+                raise ValueError(
+                    "operator emergency entry-stop chain is invalid: "
+                    + str(stop_chain_error or "unknown chain error")
+                )
+            if bool(stop_row["engaged"]):
+                raise ValueError("operator emergency entry stop is engaged")
+            if int(authorization["emergency_entry_stop_generation"]) != int(
+                stop_row["generation"]
+            ):
+                raise ValueError(
+                    "operator emergency entry-stop generation changed before reservation"
+                )
+            if str(authorization["emergency_entry_stop_state_hash"]) != (
+                self._entry_stop_state_hash(stop_row)
+            ):
+                raise ValueError(
+                    "operator emergency entry-stop state changed before reservation"
+                )
             latest = self.conn.execute(
-                """SELECT strategy_version,broker_confirmed_at,loss_lock
+                """SELECT strategy_version,pilot_id,book_mode,
+                          decision_contract_version,decision_contract_hash,
+                          broker_confirmed_at,loss_lock
                    FROM risk_sessions
                    WHERE account_key=? AND session_date=?""",
                 (
@@ -3514,6 +4775,11 @@ class Store:
                 raise ValueError(
                     "risk authorization strategy does not match the current session"
                 )
+            for field, expected_value in attribution.items():
+                if str(latest[field]) != expected_value:
+                    raise ValueError(
+                        f"risk authorization {field} does not match the current session"
+                    )
             if _aware_timestamp(
                 latest["broker_confirmed_at"],
                 "current risk-session broker_confirmed_at",
@@ -3531,8 +4797,17 @@ class Store:
                 authorization,
                 account_key=str(authorization["account_key"]),
                 instrument_key=str(authorization["instrument_key"]),
+                symbol=str(authorization["symbol"]).upper(),
+                direction=str(authorization["direction"]).upper(),
+                asset_class=str(authorization["asset_class"]).upper(),
                 thesis_key=str(authorization["thesis_key"]).upper(),
                 strategy_version=str(authorization["strategy_version"]),
+                pilot_id=attribution["pilot_id"],
+                book_mode=attribution["book_mode"],
+                decision_contract_version=attribution[
+                    "decision_contract_version"
+                ],
+                decision_contract_hash=attribution["decision_contract_hash"],
                 expected_action=risk_action,
                 order_submitted_at=str(authorization["checked_at"]),
             )
@@ -3553,7 +4828,7 @@ class Store:
                           status,created_at,expires_at,broker_order_id,campaign_id
                    FROM risk_authorizations
                    WHERE account_key=? AND session_date=?
-                     AND status IN ('ACTIVE','CONSUMED')
+                     AND status IN ('ACTIVE','SUBMISSION_UNKNOWN','CONSUMED')
                    LIMIT 1""",
                 (
                     str(authorization["account_key"]),
@@ -3572,14 +4847,19 @@ class Store:
             self.conn.execute(
                 """INSERT INTO risk_authorizations(
                        authorization_id,account_key,session_date,strategy_version,
+                       pilot_id,book_mode,decision_contract_version,
+                       decision_contract_hash,
                        instrument_key,thesis_key,risk_action,status,created_at,
                        expires_at,evidence_json
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     authorization_id,
                     str(authorization["account_key"]),
                     str(authorization["session_date"]),
                     str(authorization["strategy_version"]),
+                    attribution["pilot_id"], attribution["book_mode"],
+                    attribution["decision_contract_version"],
+                    attribution["decision_contract_hash"],
                     str(authorization["instrument_key"]),
                     str(authorization["thesis_key"]),
                     str(authorization["risk_action"]),
@@ -3591,6 +4871,131 @@ class Store:
             )
         return {"reserved": True, "authorization": authorization}
 
+    def mark_risk_submission_unknown(
+        self,
+        authorization_id: str,
+        *,
+        attempted_at: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Freeze the one permitted broker submission intent before the call.
+
+        The executor invokes this immediately before leaving the process for
+        the broker.  The resulting append-only intent fixes both the attempt
+        time and broker-ack deadline; timeout/unknown responses cannot expire
+        back into reusable risk capacity.
+        """
+        authorization_id = str(authorization_id).strip()
+        reason = str(reason).strip()
+        if not authorization_id or not reason:
+            raise ValueError("authorization_id and unknown-submission reason are required")
+        attempted = datetime.fromisoformat(
+            _aware_timestamp(attempted_at, "submission attempted_at")
+        )
+        result_row: sqlite3.Row | None = None
+        intent_row: sqlite3.Row | None = None
+        with self.transaction():
+            row = self.conn.execute(
+                "SELECT * FROM risk_authorizations WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("unknown risk authorization")
+            base_authorization = json.loads(str(row["evidence_json"]))
+            prior_intent = self.conn.execute(
+                "SELECT * FROM risk_submission_intents WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+            if str(row["status"]) == "SUBMISSION_UNKNOWN":
+                if prior_intent is None:
+                    raise ValueError(
+                        "submission-unknown authorization is missing its immutable intent"
+                    )
+                if str(prior_intent["attempted_at"]) != attempted.isoformat():
+                    raise ValueError("submission intent timestamp is immutable")
+                prior_intent_payload = json.loads(
+                    str(prior_intent["payload_json"])
+                )
+                if str(prior_intent_payload.get("reason") or "") != reason:
+                    raise ValueError("submission intent reason is immutable")
+            elif str(row["status"]) != "ACTIVE":
+                raise ValueError(
+                    f"cannot mark submission unknown from status {row['status']}"
+                )
+            else:
+                created = datetime.fromisoformat(str(row["created_at"]))
+                expires = datetime.fromisoformat(str(row["expires_at"]))
+                if attempted < created - timedelta(seconds=1) or attempted > expires:
+                    raise ValueError(
+                        "unknown submission attempt must occur within the authorization lease"
+                    )
+                timeout = _finite_decimal(
+                    base_authorization.get("broker_ack_timeout_seconds"),
+                    "broker_ack_timeout_seconds",
+                )
+                if timeout != 10:
+                    raise ValueError("broker_ack_timeout_seconds must be exactly 10")
+                deadline = attempted + timedelta(seconds=10)
+                effective_authorization = {
+                    **base_authorization,
+                    "submission_intent_at": attempted.isoformat(),
+                    "broker_ack_deadline_at": deadline.isoformat(),
+                }
+                if _canonical_hash(
+                    _risk_authorization_hash_evidence(effective_authorization)
+                ) != authorization_id:
+                    raise ValueError(
+                        "submission intent does not match durable authorization identity"
+                    )
+                intent_payload = {
+                    "schema_version": "titan_risk_submission_intent_2026-08-23_v1",
+                    "authorization_id": authorization_id,
+                    "authorization": effective_authorization,
+                    "attempted_at": attempted.isoformat(),
+                    "broker_ack_deadline_at": deadline.isoformat(),
+                    "broker_ack_timeout_seconds": 10,
+                    "reason": reason,
+                    "duplicate_submission_allowed": False,
+                }
+                intent_hash = _canonical_hash(intent_payload)
+                self.conn.execute(
+                    """INSERT INTO risk_submission_intents(
+                           intent_id,authorization_id,attempted_at,
+                           broker_ack_deadline_at,intent_hash,payload_json,recorded_at
+                       ) VALUES(?,?,?,?,?,?,?)""",
+                    (
+                        intent_hash, authorization_id, attempted.isoformat(),
+                        deadline.isoformat(), intent_hash,
+                        json.dumps(
+                            intent_payload, sort_keys=True, separators=(",", ":")
+                        ),
+                        utc_now(),
+                    ),
+                )
+                self.conn.execute(
+                    """UPDATE risk_authorizations
+                       SET status='SUBMISSION_UNKNOWN',bound_at=?,release_reason=?
+                       WHERE authorization_id=? AND status='ACTIVE'""",
+                    (attempted.isoformat(), reason, authorization_id),
+                )
+            result_row = self.conn.execute(
+                "SELECT * FROM risk_authorizations WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+            intent_row = self.conn.execute(
+                "SELECT * FROM risk_submission_intents WHERE authorization_id=?",
+                (authorization_id,),
+            ).fetchone()
+        assert result_row is not None and intent_row is not None
+        result = dict(result_row)
+        intent = dict(intent_row)
+        intent["payload"] = json.loads(intent.pop("payload_json"))
+        result["evidence"] = intent["payload"]["authorization"]
+        result.pop("evidence_json")
+        result["submission_intent"] = intent
+        result["trade_authority"] = False
+        return result
+
     def bind_risk_authorization(
         self,
         authorization: dict[str, Any],
@@ -3598,8 +5003,10 @@ class Store:
         campaign_id: str,
         broker_order_id: str,
         order_submitted_at: str,
+        submission_intent_id: str,
+        order_resolution_key: str,
     ) -> None:
-        """Consume one active lease and bind it to the real broker order."""
+        """Bind a serialized attempt only after broker-snapshot ORDER_FOUND."""
         authorization_id = str(authorization.get("authorization_id") or "")
         if not authorization_id or not broker_order_id:
             raise ValueError("risk authorization and broker order ID are required")
@@ -3610,14 +5017,20 @@ class Store:
         if not row:
             raise ValueError("risk authorization lease is not durable")
         stored = json.loads(str(row["evidence_json"]))
-        if stored != authorization:
+        if _risk_authorization_hash_evidence(stored) != (
+            _risk_authorization_hash_evidence(authorization)
+        ):
             raise ValueError("risk authorization does not match durable lease evidence")
-        submitted = datetime.fromisoformat(
-            _aware_timestamp(order_submitted_at, "broker order_submitted_at")
-        )
-        expires = datetime.fromisoformat(str(row["expires_at"]))
-        if submitted > expires:
-            raise ValueError("broker order was submitted after authorization lease expired")
+        intent = self.conn.execute(
+            """SELECT * FROM risk_submission_intents
+               WHERE authorization_id=? AND intent_id=?""",
+            (authorization_id, str(submission_intent_id)),
+        ).fetchone()
+        if intent is None:
+            raise ValueError("risk authorization has no matching immutable submission intent")
+        intent_payload = json.loads(str(intent["payload_json"]))
+        if intent_payload.get("authorization") != authorization:
+            raise ValueError("campaign authorization does not match immutable intent facts")
         if str(row["status"]) == "CONSUMED":
             if (
                 str(row["campaign_id"]) != campaign_id
@@ -3625,14 +5038,36 @@ class Store:
             ):
                 raise ValueError("risk authorization is already bound to another order")
             return
-        if str(row["status"]) != "ACTIVE":
+        resolution = self.conn.execute(
+            """SELECT * FROM risk_unknown_resolutions
+               WHERE resolution_key=? AND intent_id=? AND authorization_id=?""",
+            (
+                str(order_resolution_key), str(submission_intent_id),
+                authorization_id,
+            ),
+        ).fetchone()
+        if resolution is None or str(resolution["resolution_state"]) != "ORDER_FOUND":
             raise ValueError(
-                f"risk authorization lease is not active: {row['status']}"
+                "campaign bind requires broker-snapshot-derived ORDER_FOUND resolution"
+            )
+        if str(resolution["broker_order_id"]) != broker_order_id:
+            raise ValueError("ORDER_FOUND broker order does not match campaign")
+        submitted = datetime.fromisoformat(
+            _aware_timestamp(order_submitted_at, "broker order_submitted_at")
+        )
+        if submitted.isoformat() != str(intent["attempted_at"]):
+            raise ValueError("broker submission time does not match immutable intent")
+        expires = datetime.fromisoformat(str(row["expires_at"]))
+        if submitted > expires:
+            raise ValueError("broker order was submitted after authorization lease expired")
+        if str(row["status"]) != "SUBMISSION_UNKNOWN":
+            raise ValueError(
+                f"risk authorization is not awaiting exact campaign bind: {row['status']}"
             )
         self.conn.execute(
             """UPDATE risk_authorizations
                SET status='CONSUMED',bound_at=?,broker_order_id=?,campaign_id=?
-               WHERE authorization_id=? AND status='ACTIVE'""",
+               WHERE authorization_id=? AND status='SUBMISSION_UNKNOWN'""",
             (
                 _aware_timestamp(order_submitted_at, "broker order_submitted_at"),
                 broker_order_id,
@@ -3693,6 +5128,26 @@ class Store:
         for row in rows:
             item = dict(row)
             item["evidence"] = json.loads(item.pop("evidence_json"))
+            intent = self.conn.execute(
+                "SELECT * FROM risk_submission_intents WHERE authorization_id=?",
+                (item["authorization_id"],),
+            ).fetchone()
+            if intent is not None:
+                intent_item = dict(intent)
+                intent_item["payload"] = json.loads(intent_item.pop("payload_json"))
+                item["submission_intent"] = intent_item
+                item["evidence"] = intent_item["payload"]["authorization"]
+            resolution = self.conn.execute(
+                """SELECT * FROM risk_unknown_resolutions
+                   WHERE authorization_id=?""",
+                (item["authorization_id"],),
+            ).fetchone()
+            if resolution is not None:
+                resolution_item = dict(resolution)
+                resolution_item["evidence"] = json.loads(
+                    resolution_item.pop("evidence_json")
+                )
+                item["unknown_resolution"] = resolution_item
             item["trade_authority"] = False
             result.append(item)
         return result
@@ -3708,6 +5163,10 @@ class Store:
             "account_key",
             "session_date",
             "strategy_version",
+            "pilot_id",
+            "book_mode",
+            "decision_contract_version",
+            "decision_contract_hash",
             "start_of_day_equity",
             "baseline_confirmed_at",
             "current_equity",
@@ -3720,6 +5179,9 @@ class Store:
             raise ValueError(f"missing risk-session fields: {', '.join(missing)}")
         account_key = str(payload["account_key"]).strip()
         strategy_version = str(payload["strategy_version"]).strip()
+        attribution = _normalize_pilot_attribution(payload)
+        if attribution["book_mode"] != "LIVE":
+            raise ValueError("broker risk sessions are LIVE-only")
         if not account_key or not strategy_version:
             raise ValueError("account_key and strategy_version cannot be empty")
         session_date = str(payload["session_date"])
@@ -3767,6 +5229,14 @@ class Store:
             raise ValueError(
                 "risk-session broker evidence is incomplete: " + ", ".join(missing_checks)
             )
+        unknown_resolutions = broker_state.get("submission_unknown_resolutions", [])
+        if not isinstance(unknown_resolutions, list):
+            raise ValueError(
+                "broker_state.submission_unknown_resolutions must be a list"
+            )
+        for resolution in unknown_resolutions:
+            if not isinstance(resolution, dict):
+                raise ValueError("each submission unknown resolution must be an object")
         required_broker_balances = (
             "unleveraged_buying_power_dollars",
             "current_gross_exposure_dollars",
@@ -3807,6 +5277,9 @@ class Store:
                     raise ValueError("baseline_confirmed_at is immutable for the session")
                 if str(existing["strategy_version"]) != strategy_version:
                     raise ValueError("strategy_version is immutable for the session")
+                for field, expected_value in attribution.items():
+                    if str(existing[field]) != expected_value:
+                        raise ValueError(f"{field} is immutable for the session")
                 if (
                     abs(
                         float(existing["confirmed_cash_flow_adjustment"])
@@ -3864,14 +5337,15 @@ class Store:
             now = utc_now()
             self.conn.execute(
                 """INSERT INTO risk_sessions(
-                       account_key,session_date,strategy_version,start_of_day_equity,
+                       account_key,session_date,strategy_version,pilot_id,book_mode,
+                       decision_contract_version,decision_contract_hash,start_of_day_equity,
                        baseline_confirmed_at,current_equity,realized_net_pnl,
                        confirmed_cash_flow_adjustment,account_day_pnl,loss_gauge,
                        loss_limit_dollars,loss_lock,loss_lock_triggered_at,
                        profit_objective_dollars,profit_objective_reached,
                        profit_objective_reached_at,active_profit_floor_dollars,
                        updated_at,broker_confirmed_at,broker_state_json
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(account_key,session_date) DO UPDATE SET
                        current_equity=excluded.current_equity,
                        realized_net_pnl=excluded.realized_net_pnl,
@@ -3902,6 +5376,10 @@ class Store:
                     account_key,
                     session_date,
                     strategy_version,
+                    attribution["pilot_id"],
+                    attribution["book_mode"],
+                    attribution["decision_contract_version"],
+                    attribution["decision_contract_hash"],
                     start_equity,
                     baseline_confirmed_at,
                     current_equity,
@@ -3925,6 +5403,7 @@ class Store:
                 "account_key": account_key,
                 "session_date": session_date,
                 "strategy_version": strategy_version,
+                **attribution,
                 "start_of_day_equity": start_equity,
                 "baseline_confirmed_at": baseline_confirmed_at,
                 "current_equity": current_equity,
@@ -3965,6 +5444,177 @@ class Store:
                 raise ValueError(
                     "conflicting immutable risk snapshots share broker_confirmed_at"
                 )
+            for raw_resolution in unknown_resolutions:
+                required_resolution_fields = (
+                    "resolution_key", "authorization_id", "intent_id",
+                    "resolution_state", "broker_confirmed_at", "evidence",
+                )
+                missing_resolution = [
+                    field for field in required_resolution_fields
+                    if raw_resolution.get(field) is None
+                ]
+                if missing_resolution:
+                    raise ValueError(
+                        "submission unknown resolution is missing: "
+                        + ", ".join(missing_resolution)
+                    )
+                resolution_key = str(raw_resolution["resolution_key"]).strip()
+                authorization_id = str(
+                    raw_resolution["authorization_id"]
+                ).strip()
+                intent_id = str(raw_resolution["intent_id"]).strip()
+                resolution_state = str(
+                    raw_resolution["resolution_state"]
+                ).strip().upper()
+                resolution_confirmed_at = _aware_timestamp(
+                    raw_resolution["broker_confirmed_at"],
+                    "submission unknown resolution broker_confirmed_at",
+                )
+                if not resolution_key or not authorization_id or not intent_id:
+                    raise ValueError(
+                        "submission unknown resolution keys cannot be empty"
+                    )
+                if resolution_state not in {
+                    "ORDER_FOUND", "NO_ORDER_CONFIRMED"
+                }:
+                    raise ValueError(
+                        "resolution_state must be ORDER_FOUND or NO_ORDER_CONFIRMED"
+                    )
+                if resolution_confirmed_at != broker_confirmed_at:
+                    raise ValueError(
+                        "unknown resolution must use the exact current broker snapshot"
+                    )
+                resolution_evidence = raw_resolution["evidence"]
+                if not isinstance(resolution_evidence, dict):
+                    raise ValueError("unknown resolution evidence must be an object")
+                for field in ("matching_order_count", "matching_position_count"):
+                    if field not in resolution_evidence:
+                        raise ValueError(
+                            f"unknown resolution evidence requires {field}"
+                        )
+                    value = _finite_decimal(
+                        resolution_evidence[field],
+                        f"unknown resolution evidence {field}",
+                    )
+                    if value < 0 or value != value.to_integral_value():
+                        raise ValueError(
+                            f"unknown resolution evidence {field} must be a nonnegative integer"
+                        )
+                matching_orders = int(resolution_evidence["matching_order_count"])
+                matching_positions = int(
+                    resolution_evidence["matching_position_count"]
+                )
+                broker_order_id = str(
+                    raw_resolution.get("broker_order_id") or ""
+                ).strip()
+                authorization_row = self.conn.execute(
+                    """SELECT * FROM risk_authorizations
+                       WHERE authorization_id=?""",
+                    (authorization_id,),
+                ).fetchone()
+                intent_row = self.conn.execute(
+                    """SELECT * FROM risk_submission_intents
+                       WHERE intent_id=? AND authorization_id=?""",
+                    (intent_id, authorization_id),
+                ).fetchone()
+                if authorization_row is None or intent_row is None:
+                    raise ValueError(
+                        "unknown resolution does not match a durable authorization intent"
+                    )
+                if (
+                    str(authorization_row["account_key"]) != account_key
+                    or str(authorization_row["session_date"]) != session_date
+                ):
+                    raise ValueError(
+                        "unknown resolution authorization is outside this account session"
+                    )
+                if str(authorization_row["status"]) not in {
+                    "SUBMISSION_UNKNOWN", "RECONCILED_NO_ORDER", "CONSUMED",
+                    "RECONCILED",
+                }:
+                    raise ValueError(
+                        "unknown resolution authorization is not a submitted attempt"
+                    )
+                if datetime.fromisoformat(broker_confirmed_at) <= datetime.fromisoformat(
+                    str(intent_row["attempted_at"])
+                ):
+                    raise ValueError(
+                        "unknown resolution requires a strictly newer broker snapshot"
+                    )
+                if resolution_state == "NO_ORDER_CONFIRMED":
+                    if broker_order_id or matching_orders or matching_positions:
+                        raise ValueError(
+                            "NO_ORDER_CONFIRMED requires zero matches and no broker order ID"
+                        )
+                elif not broker_order_id or matching_orders + matching_positions <= 0:
+                    raise ValueError(
+                        "ORDER_FOUND requires a broker order ID and a positive exact match"
+                    )
+                normalized_resolution = {
+                    "resolution_key": resolution_key,
+                    "intent_id": intent_id,
+                    "authorization_id": authorization_id,
+                    "resolution_state": resolution_state,
+                    "broker_confirmed_at": broker_confirmed_at,
+                    "broker_order_id": broker_order_id or None,
+                    "evidence": resolution_evidence,
+                    "risk_snapshot_hash": snapshot_hash,
+                    "orders_reconciled": True,
+                    "positions_reconciled": True,
+                }
+                resolution_hash = _canonical_hash(normalized_resolution)
+                prior_resolution = self.conn.execute(
+                    """SELECT * FROM risk_unknown_resolutions
+                       WHERE authorization_id=? OR resolution_key=?""",
+                    (authorization_id, resolution_key),
+                ).fetchone()
+                if prior_resolution is not None:
+                    if (
+                        str(prior_resolution["resolution_hash"])
+                        != resolution_hash
+                    ):
+                        raise ValueError(
+                            "conflicting immutable unknown-submission resolution"
+                        )
+                else:
+                    self.conn.execute(
+                        """INSERT INTO risk_unknown_resolutions(
+                               resolution_key,intent_id,authorization_id,
+                               resolution_state,broker_confirmed_at,broker_order_id,
+                               evidence_json,resolution_hash,recorded_at
+                           ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                        (
+                            resolution_key, intent_id, authorization_id,
+                            resolution_state, broker_confirmed_at,
+                            broker_order_id or None,
+                            json.dumps(
+                                normalized_resolution,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                            resolution_hash, now,
+                        ),
+                    )
+                if resolution_state == "NO_ORDER_CONFIRMED":
+                    self.conn.execute(
+                        """UPDATE risk_authorizations
+                           SET status='RECONCILED_NO_ORDER',reconciled_at=?,
+                               release_reason='exact_newer_snapshot_confirmed_no_order'
+                           WHERE authorization_id=?
+                             AND status='SUBMISSION_UNKNOWN'""",
+                        (now, authorization_id),
+                    )
+                else:
+                    # ORDER_FOUND remains serialized until the exact campaign
+                    # bind consumes the same authorization, intent, and key.
+                    self.conn.execute(
+                        """UPDATE risk_authorizations
+                           SET broker_order_id=?,reconciled_at=?,
+                               release_reason='exact_newer_snapshot_found_order_pending_bind'
+                           WHERE authorization_id=?
+                             AND status='SUBMISSION_UNKNOWN'""",
+                        (broker_order_id, now, authorization_id),
+                    )
             # A consumed reservation remains pending until a strictly newer,
             # fully reconciled broker snapshot can see the submitted order or
             # resulting position.  This prevents a second wake from reusing the
@@ -3991,6 +5641,14 @@ class Store:
             return None
         item = dict(row)
         item["broker_state"] = json.loads(item.pop("broker_state_json"))
+        snapshot = self.conn.execute(
+            """SELECT snapshot_hash FROM risk_session_snapshots
+               WHERE account_key=? AND session_date=? AND broker_confirmed_at=?""",
+            (account_key, session_date, item["broker_confirmed_at"]),
+        ).fetchone()
+        item["broker_snapshot_hash"] = (
+            str(snapshot["snapshot_hash"]) if snapshot is not None else None
+        )
         item["loss_lock"] = bool(item["loss_lock"])
         item["profit_objective_reached"] = bool(item["profit_objective_reached"])
         item["loss_headroom_to_lock"] = max(
@@ -4029,6 +5687,561 @@ class Store:
             )
             is not None
         ]
+
+    @staticmethod
+    def _entry_stop_state_hash(row: sqlite3.Row | dict[str, Any]) -> str:
+        state = {
+            key: row[key]
+            for key in (
+                "latch_key", "engaged", "generation", "reason", "changed_by",
+                "changed_at",
+            )
+        }
+        state["engaged"] = bool(state["engaged"])
+        return hashlib.sha256(
+            json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def _validate_entry_stop_chain(
+        self, latch: sqlite3.Row | dict[str, Any]
+    ) -> tuple[bool, str | None, str | None]:
+        events = self.conn.execute(
+            """SELECT * FROM operator_entry_stop_events
+               ORDER BY generation ASC"""
+        ).fetchall()
+        if not events:
+            return False, "operator entry-stop event chain is missing", None
+        prior_hash = ZERO_SHA256
+        expected_generation = 1
+        latest: sqlite3.Row | None = None
+        for event in events:
+            generation = int(event["generation"])
+            if generation != expected_generation:
+                return False, "operator entry-stop generations are not contiguous", None
+            base = {
+                "generation": generation,
+                "action": str(event["action"]),
+                "reason": str(event["reason"]),
+                "changed_by": str(event["changed_by"]),
+                "changed_at": str(event["changed_at"]),
+            }
+            recorded_previous = str(event["previous_event_hash"])
+            chained = {**base, "previous_event_hash": prior_hash}
+            chained_hash = _canonical_hash(chained)
+            legacy_hash = _canonical_hash(base)
+            actual_hash = str(event["event_hash"])
+            if recorded_previous == prior_hash and actual_hash == chained_hash:
+                pass
+            elif recorded_previous == ZERO_SHA256 and actual_hash == legacy_hash:
+                # Additive migration compatibility for events written before
+                # the chain column existed.  Every legacy event is still
+                # individually authenticated and generations stay contiguous.
+                pass
+            else:
+                return False, "operator entry-stop event chain hash mismatch", None
+            prior_hash = actual_hash
+            expected_generation += 1
+            latest = event
+        assert latest is not None
+        if int(latch["generation"]) != int(latest["generation"]):
+            return False, "operator entry-stop latch generation mismatches chain", None
+        expected_engaged = str(latest["action"]) == "ENGAGED"
+        if str(latest["action"]) == "INITIALIZED":
+            expected_engaged = False
+        if bool(latch["engaged"]) != expected_engaged:
+            return False, "operator entry-stop latch state mismatches chain", None
+        for field in ("reason", "changed_by", "changed_at"):
+            if str(latch[field]) != str(latest[field]):
+                return False, f"operator entry-stop latch {field} mismatches chain", None
+        return True, None, prior_hash
+
+    def entry_stop_status(self) -> dict[str, Any]:
+        row = self.conn.execute(
+            "SELECT * FROM operator_entry_stop WHERE latch_key='GLOBAL'"
+        ).fetchone()
+        if row is None:
+            # A missing durable latch is a corrupt/mid-migration state.  Never
+            # interpret it as permission to submit a new order.
+            return {
+                "latch_key": "GLOBAL",
+                "engaged": True,
+                "effective_entry_stop": True,
+                "reason": "durable operator entry-stop state is missing",
+                "state_valid": False,
+                "new_entries_allowed": False,
+                "broker_state_mutated": False,
+                "trade_authority": False,
+            }
+        item = dict(row)
+        item["engaged"] = bool(item["engaged"])
+        item["state_hash"] = self._entry_stop_state_hash(row)
+        chain_valid, chain_error, latest_event_hash = (
+            self._validate_entry_stop_chain(row)
+        )
+        item["chain_valid"] = chain_valid
+        item["chain_error"] = chain_error
+        item["latest_event_hash"] = latest_event_hash
+        item["effective_entry_stop"] = bool(item["engaged"] or not chain_valid)
+        item["state_valid"] = chain_valid
+        item["new_entries_allowed"] = not item["effective_entry_stop"]
+        item["broker_state_mutated"] = False
+        item["trade_authority"] = False
+        return item
+
+    def _entry_stop_engaged(self, connection: sqlite3.Connection) -> bool:
+        row = connection.execute(
+            "SELECT engaged FROM operator_entry_stop WHERE latch_key='GLOBAL'"
+        ).fetchone()
+        if row is None:
+            raise ValueError("durable operator entry-stop state is missing")
+        return bool(row["engaged"])
+
+    def set_entry_stop(
+        self,
+        *,
+        engaged: bool,
+        reason: str,
+        changed_by: str,
+    ) -> dict[str, Any]:
+        """Durably engage the entry latch without touching the broker.
+
+        Engaging also releases any still-unsubmitted ACTIVE local reservation.
+        CONSUMED authorizations remain available for reconciliation because
+        their broker submissions already occurred before the latch changed.
+        """
+        reason = str(reason).strip()
+        changed_by = str(changed_by).strip()
+        if not reason or not changed_by:
+            raise ValueError("entry-stop reason and changed_by are required")
+        if not engaged:
+            raise ValueError(
+                "PROTECTED_USER_ONLY release is unavailable through titan runtime"
+            )
+        action = "ENGAGED"
+        with self.transaction():
+            prior = self.conn.execute(
+                "SELECT * FROM operator_entry_stop WHERE latch_key='GLOBAL'"
+            ).fetchone()
+            if prior is None:
+                raise ValueError("durable operator entry-stop state is missing")
+            chain_valid, chain_error, previous_event_hash = (
+                self._validate_entry_stop_chain(prior)
+            )
+            if not chain_valid or previous_event_hash is None:
+                raise ValueError(
+                    "operator entry-stop chain is invalid: "
+                    + str(chain_error or "unknown chain error")
+                )
+            if bool(prior["engaged"]) == bool(engaged):
+                result = self.entry_stop_status()
+                result["idempotent_replay"] = True
+                return result
+            generation = int(prior["generation"]) + 1
+            changed_at = utc_now()
+            event = {
+                "generation": generation,
+                "action": action,
+                "reason": reason,
+                "changed_by": changed_by,
+                "changed_at": changed_at,
+                "previous_event_hash": previous_event_hash,
+            }
+            event_hash = hashlib.sha256(
+                json.dumps(
+                    event, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            self.conn.execute(
+                """UPDATE operator_entry_stop
+                   SET engaged=?,generation=?,reason=?,changed_by=?,changed_at=?
+                   WHERE latch_key='GLOBAL'""",
+                (int(engaged), generation, reason, changed_by, changed_at),
+            )
+            self.conn.execute(
+                """INSERT INTO operator_entry_stop_events(
+                       event_id,generation,action,reason,changed_by,changed_at,
+                       previous_event_hash,event_hash
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    str(uuid.uuid4()), generation, action, reason, changed_by,
+                    changed_at, previous_event_hash, event_hash,
+                ),
+            )
+            released_authorizations = 0
+            if engaged:
+                cursor = self.conn.execute(
+                    """UPDATE risk_authorizations
+                       SET status='RELEASED',release_reason='operator_entry_stop_engaged'
+                       WHERE status='ACTIVE'"""
+                )
+                released_authorizations = cursor.rowcount
+        result = self.entry_stop_status()
+        result["idempotent_replay"] = False
+        result["released_unsubmitted_authorization_count"] = released_authorizations
+        return result
+
+    def entry_stop_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        if limit <= 0:
+            raise ValueError("entry-stop event limit must be positive")
+        rows = self.conn.execute(
+            """SELECT * FROM operator_entry_stop_events
+               ORDER BY generation DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _pilot_fact_sheet_item(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json"))
+        item["reporting_only"] = True
+        item["trade_authority"] = False
+        item["capital_reallocation_authority"] = False
+        return item
+
+    def record_pilot_fact_sheet(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Append one machine-readable, mode-isolated Pilot fact sheet."""
+        if not isinstance(payload, dict):
+            raise ValueError("pilot fact sheet must be a JSON object")
+        required = {
+            "pilot_id", "pilot_name", "book_mode", "fact_sheet_version",
+            "decision_contract_version", "decision_contract_hash", "policy_hash",
+            "measured_through", "evidence_status", "metrics",
+            "known_failure_modes", "evidence",
+        }
+        missing = sorted(field for field in required if field not in payload)
+        if missing:
+            raise ValueError("missing pilot fact-sheet fields: " + ", ".join(missing))
+        attribution = _normalize_pilot_attribution(payload)
+        pilot_name = str(payload["pilot_name"]).strip()
+        fact_sheet_version = str(payload["fact_sheet_version"]).strip()
+        if not pilot_name or not fact_sheet_version:
+            raise ValueError("pilot_name and fact_sheet_version cannot be empty")
+        policy_hash = _sha256_hex(payload["policy_hash"], "policy_hash")
+        measured_through = _aware_timestamp(
+            payload["measured_through"], "measured_through"
+        )
+        evidence_status = str(payload["evidence_status"]).strip().upper()
+        if evidence_status not in {"INSUFFICIENT", "ESTIMABLE"}:
+            raise ValueError("evidence_status must be INSUFFICIENT or ESTIMABLE")
+        metrics = payload["metrics"]
+        if not isinstance(metrics, dict):
+            raise ValueError("pilot fact-sheet metrics must be an object")
+        analytical_metrics = {
+            "net_expectancy_r_after_costs",
+            "clustered_95pct_lower_bound_expectancy_r",
+            "clustered_95pct_upper_bound_expectancy_r",
+            "win_rate_pct",
+            "expected_shortfall_95_r",
+            "expected_shortfall_99_r",
+            "max_drawdown_r",
+            "profit_factor",
+            "execution_shortfall_bps",
+            "entry_slippage_bps",
+            "exit_slippage_bps",
+            "top_day_profit_concentration_pct",
+            "largest_winner_profit_concentration_pct",
+        }
+        evidence_metrics = {
+            "effective_independent_sample_size",
+            "evidence_coverage_pct",
+            "quote_coverage_pct",
+            "fill_rate_pct",
+            "no_fill_rate_pct",
+            "stale_data_rate_pct",
+            "order_reject_rate_pct",
+            "position_episode_count",
+            "session_count",
+            "underlying_count",
+            "distinct_ticker_session_count",
+            "control_breach_count",
+        }
+        required_metrics = analytical_metrics | evidence_metrics
+        missing_metrics = sorted(required_metrics - set(metrics))
+        if missing_metrics:
+            raise ValueError(
+                "missing pilot fact-sheet metrics: " + ", ".join(missing_metrics)
+            )
+        unknown_metrics = sorted(set(metrics) - required_metrics)
+        if unknown_metrics:
+            raise ValueError(
+                "unknown pilot fact-sheet metrics: " + ", ".join(unknown_metrics)
+            )
+        normalized_metrics: dict[str, float | int | None] = {}
+        integer_metrics = {
+            "position_episode_count", "session_count", "underlying_count",
+            "distinct_ticker_session_count", "control_breach_count",
+        }
+        nonnegative_metrics = {
+            "expected_shortfall_95_r", "expected_shortfall_99_r",
+            "max_drawdown_r", "profit_factor", "execution_shortfall_bps",
+            "effective_independent_sample_size", "evidence_coverage_pct",
+            "quote_coverage_pct", "fill_rate_pct", "no_fill_rate_pct",
+            "stale_data_rate_pct", "order_reject_rate_pct",
+            "top_day_profit_concentration_pct",
+            "largest_winner_profit_concentration_pct",
+            *integer_metrics,
+        }
+        for field in required_metrics:
+            if field in analytical_metrics and metrics[field] is None:
+                normalized_metrics[field] = None
+                continue
+            value = _finite_decimal(metrics[field], f"metrics.{field}")
+            if field in nonnegative_metrics and value < 0:
+                raise ValueError(f"metrics.{field} cannot be negative")
+            if field.endswith("_pct") and value > 100:
+                raise ValueError(f"metrics.{field} cannot exceed 100")
+            if field in integer_metrics:
+                if value != value.to_integral_value():
+                    raise ValueError(f"metrics.{field} must be an integer")
+                normalized_metrics[field] = int(value)
+            else:
+                normalized_metrics[field] = float(value)
+        if (
+            int(normalized_metrics["position_episode_count"] or 0) > 0
+            and abs(
+                float(normalized_metrics["fill_rate_pct"] or 0)
+                + float(normalized_metrics["no_fill_rate_pct"] or 0)
+                - 100.0
+            ) > 0.01
+        ):
+            raise ValueError("fill_rate_pct plus no_fill_rate_pct must equal 100")
+        if int(normalized_metrics["distinct_ticker_session_count"] or 0) > int(
+            normalized_metrics["position_episode_count"] or 0
+        ):
+            raise ValueError(
+                "distinct_ticker_session_count cannot exceed position_episode_count"
+            )
+        analytical_values = [normalized_metrics[field] for field in analytical_metrics]
+        if evidence_status == "INSUFFICIENT":
+            if any(value is not None for value in analytical_values):
+                raise ValueError(
+                    "INSUFFICIENT fact sheets must leave analytical metrics null"
+                )
+        else:
+            if any(value is None for value in analytical_values):
+                raise ValueError(
+                    "ESTIMABLE fact sheets require all analytical metrics"
+                )
+            if float(
+                normalized_metrics["clustered_95pct_lower_bound_expectancy_r"]
+            ) > float(
+                normalized_metrics["clustered_95pct_upper_bound_expectancy_r"]
+            ):
+                raise ValueError(
+                    "clustered 95pct expectancy lower bound cannot exceed upper bound"
+                )
+            if float(normalized_metrics["effective_independent_sample_size"] or 0) <= 0:
+                raise ValueError("ESTIMABLE fact sheets require positive effective sample size")
+            if (
+                int(normalized_metrics["position_episode_count"] or 0) < 100
+                or int(normalized_metrics["session_count"] or 0) < 40
+                or int(normalized_metrics["underlying_count"] or 0) < 30
+            ):
+                raise ValueError(
+                    "ESTIMABLE fact sheets require at least 100 episodes, "
+                    "40 sessions, and 30 independent underlyings"
+                )
+        failure_modes = payload["known_failure_modes"]
+        if not isinstance(failure_modes, list) or any(
+            not isinstance(value, str) or not value.strip() for value in failure_modes
+        ):
+            raise ValueError("known_failure_modes must be a list of nonempty strings")
+        evidence = payload["evidence"]
+        if not isinstance(evidence, dict) or not evidence:
+            raise ValueError("pilot fact-sheet evidence must be a nonempty object")
+        normalized_payload = {
+            **attribution,
+            "pilot_name": pilot_name,
+            "fact_sheet_version": fact_sheet_version,
+            "policy_hash": policy_hash,
+            "measured_through": measured_through,
+            "evidence_status": evidence_status,
+            "metrics": normalized_metrics,
+            "known_failure_modes": [value.strip() for value in failure_modes],
+            "evidence": evidence,
+        }
+        canonical_json = json.dumps(
+            normalized_payload, sort_keys=True, separators=(",", ":")
+        )
+        payload_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+        with self.transaction():
+            replay = self.conn.execute(
+                "SELECT * FROM pilot_fact_sheets WHERE payload_hash=?",
+                (payload_hash,),
+            ).fetchone()
+            if replay is not None:
+                result = self._pilot_fact_sheet_item(replay)
+                result["idempotent_replay"] = True
+                return result
+            conflicting = self.conn.execute(
+                """SELECT fact_sheet_id FROM pilot_fact_sheets
+                   WHERE pilot_id=? AND book_mode=? AND fact_sheet_version=?""",
+                (
+                    attribution["pilot_id"], attribution["book_mode"],
+                    fact_sheet_version,
+                ),
+            ).fetchone()
+            if conflicting is not None:
+                raise ValueError(
+                    "a different immutable fact sheet already uses this pilot/mode/version"
+                )
+            fact_sheet_id = payload_hash
+            self.conn.execute(
+                """INSERT INTO pilot_fact_sheets(
+                       fact_sheet_id,pilot_id,pilot_name,book_mode,fact_sheet_version,
+                       decision_contract_version,decision_contract_hash,measured_through,
+                       recorded_at,payload_hash,payload_json
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    fact_sheet_id, attribution["pilot_id"], pilot_name,
+                    attribution["book_mode"], fact_sheet_version,
+                    attribution["decision_contract_version"],
+                    attribution["decision_contract_hash"], measured_through,
+                    utc_now(), payload_hash, canonical_json,
+                ),
+            )
+        row = self.conn.execute(
+            "SELECT * FROM pilot_fact_sheets WHERE fact_sheet_id=?",
+            (payload_hash,),
+        ).fetchone()
+        assert row is not None
+        result = self._pilot_fact_sheet_item(row)
+        result["idempotent_replay"] = False
+        return result
+
+    def pilot_fact_sheet(self, fact_sheet_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM pilot_fact_sheets WHERE fact_sheet_id=?",
+            (str(fact_sheet_id),),
+        ).fetchone()
+        return self._pilot_fact_sheet_item(row) if row else None
+
+    def pilot_fact_sheets(
+        self,
+        limit: int = 20,
+        *,
+        pilot_id: str | None = None,
+        book_mode: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            raise ValueError("pilot fact-sheet limit must be positive")
+        clauses: list[str] = []
+        values: list[object] = []
+        if pilot_id is not None:
+            clauses.append("pilot_id=?")
+            values.append(str(pilot_id).strip().lower())
+        if book_mode is not None:
+            normalized_mode = str(book_mode).strip().upper()
+            if normalized_mode not in BOOK_MODES:
+                raise ValueError("book_mode must be LIVE, PAPER, or SHADOW")
+            clauses.append("book_mode=?")
+            values.append(normalized_mode)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.conn.execute(
+            f"""SELECT * FROM pilot_fact_sheets{where}
+                ORDER BY measured_through DESC,recorded_at DESC LIMIT ?""",
+            (*values, limit),
+        ).fetchall()
+        return [self._pilot_fact_sheet_item(row) for row in rows]
+
+    def pilot_leaderboard(
+        self, *, book_mode: str, limit: int = 20
+    ) -> dict[str, Any]:
+        """Rank only like-for-like books; never create capital authority."""
+        normalized_mode = str(book_mode).strip().upper()
+        if normalized_mode not in BOOK_MODES:
+            raise ValueError("book_mode must be LIVE, PAPER, or SHADOW")
+        if limit <= 0:
+            raise ValueError("pilot leaderboard limit must be positive")
+        rows = self.conn.execute(
+            """SELECT f.* FROM pilot_fact_sheets f
+               WHERE f.book_mode=? AND NOT EXISTS (
+                   SELECT 1 FROM pilot_fact_sheets newer
+                   WHERE newer.pilot_id=f.pilot_id
+                     AND newer.book_mode=f.book_mode
+                     AND (
+                         newer.measured_through>f.measured_through OR
+                         (newer.measured_through=f.measured_through
+                          AND newer.recorded_at>f.recorded_at)
+                     )
+               )""",
+            (normalized_mode,),
+        ).fetchall()
+        items = [self._pilot_fact_sheet_item(row) for row in rows]
+        estimable = [
+            item for item in items
+            if item["payload"]["evidence_status"] == "ESTIMABLE"
+        ]
+        insufficient = [
+            item for item in items
+            if item["payload"]["evidence_status"] == "INSUFFICIENT"
+        ]
+        estimable.sort(
+            key=lambda item: (
+                float(item["payload"]["metrics"][
+                    "clustered_95pct_lower_bound_expectancy_r"
+                ]),
+                float(item["payload"]["metrics"]["net_expectancy_r_after_costs"]),
+                -float(item["payload"]["metrics"]["expected_shortfall_95_r"]),
+                -float(item["payload"]["metrics"]["max_drawdown_r"]),
+                -float(item["payload"]["metrics"]["execution_shortfall_bps"]),
+                -float(item["payload"]["metrics"]["control_breach_count"]),
+                float(item["payload"]["metrics"]["evidence_coverage_pct"]),
+                float(item["payload"]["metrics"][
+                    "effective_independent_sample_size"
+                ]),
+            ),
+            reverse=True,
+        )
+        ranked = []
+        for rank, item in enumerate(estimable[:limit], start=1):
+            ranked.append({
+                "rank": rank,
+                "pilot_id": item["pilot_id"],
+                "pilot_name": item["pilot_name"],
+                "book_mode": item["book_mode"],
+                "fact_sheet_id": item["fact_sheet_id"],
+                "fact_sheet_version": item["fact_sheet_version"],
+                "measured_through": item["measured_through"],
+                "metrics": item["payload"]["metrics"],
+                "ranking_status": "RANKED",
+                "reporting_only": True,
+                "trade_authority": False,
+                "capital_reallocation_authority": False,
+            })
+        unranked = [
+            {
+                "rank": None,
+                "pilot_id": item["pilot_id"],
+                "pilot_name": item["pilot_name"],
+                "book_mode": item["book_mode"],
+                "fact_sheet_id": item["fact_sheet_id"],
+                "fact_sheet_version": item["fact_sheet_version"],
+                "measured_through": item["measured_through"],
+                "metrics": item["payload"]["metrics"],
+                "ranking_status": "UNRANKED_INSUFFICIENT_EVIDENCE",
+                "reporting_only": True,
+                "trade_authority": False,
+                "capital_reallocation_authority": False,
+            }
+            for item in insufficient[:limit]
+        ]
+        return {
+            "book_mode": normalized_mode,
+            "ranked_pilots": ranked,
+            "unranked_pilots": unranked,
+            "ranking_basis": (
+                "ESTIMABLE books only: clustered 95% after-cost expectancy lower "
+                "bound and expectancy, then expected shortfall, drawdown, execution "
+                "shortfall, control breaches, evidence coverage, and effective sample size"
+            ),
+            "raw_pnl_or_win_rate_used": False,
+            "books_combined": False,
+            "reporting_only": True,
+            "trade_authority": False,
+            "capital_reallocation_authority": False,
+        }
 
     def prune(self, retention_days: int) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)

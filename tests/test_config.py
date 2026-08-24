@@ -39,6 +39,23 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sizing_policy.initial_allocation_pct_range, (0, 100))
         self.assertTrue(config.sizing_policy.full_initial_allocation_allowed)
         self.assertTrue(config.sizing_policy.adds_optional)
+        self.assertEqual(config.pilot_id, "titan_momentum_equity")
+        self.assertEqual(config.book_mode, "SHADOW")
+        self.assertEqual(
+            config.decision_contract_version,
+            "titan_momentum_equity_2026-08-23_v1",
+        )
+        self.assertEqual(
+            config.decision_contract_hash,
+            "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21",
+        )
+        self.assertTrue(config.decision_contract_path.is_file())
+        self.assertTrue(config.pilot_registry_path.is_file())
+        self.assertFalse(config.pilot_trade_authority)
+        self.assertFalse(config.pilot_broker_authority)
+        self.assertFalse(config.pilot_risk_authorization_authority)
+        self.assertFalse(config.pilot_buying_power_reservation_authority)
+        self.assertFalse(config.pilot_capital_allocation_authority)
 
     def test_sizing_policy_rejects_obsolete_tranches_and_invalid_initial_range(self) -> None:
         with self.assertRaisesRegex(ValueError, "build_tranches_pct was removed"):

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .config import RuntimeConfig
 from .massive import MassiveREST, ProcessLock, TitanWatcher, load_api_key, within_runtime_window
-from .storage import Store
+from .storage import PRETRADE_RISK_FACTS_SCHEMA_VERSION, Store
 
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "titan-massive.json"
@@ -399,6 +399,24 @@ def cmd_risk_release(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_risk_submission_unknown(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    row = store.mark_risk_submission_unknown(
+        args.authorization_id,
+        attempted_at=args.attempted_at,
+        reason=args.reason,
+    )
+    store.close()
+    output({
+        "status": "submission_unknown_serialized",
+        "authorization": row,
+        "duplicate_submission_allowed": False,
+        "requires_newer_broker_reconciliation": True,
+        "trade_authority": False,
+    })
+    return 0
+
+
 def cmd_risk_authorizations(args: argparse.Namespace) -> int:
     store = Store(load(args).database_path)
     rows = store.risk_authorizations(args.limit)
@@ -409,12 +427,14 @@ def cmd_risk_authorizations(args: argparse.Namespace) -> int:
 
 def cmd_risk_gate(args: argparse.Namespace) -> int:
     store = Store(load(args).database_path)
+    entry_stop = store.entry_stop_status()
     row = store.risk_session(args.account_key, args.session_date)
     if row is None:
         store.close()
         output({
             "new_entries_allowed": False,
             "reason": "broker-confirmed risk session is missing",
+            "emergency_entry_stop": entry_stop,
             "trade_authority": False,
         })
         return 2
@@ -432,6 +452,10 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
     now_utc = datetime.now(timezone.utc)
     age_seconds = (now_utc - actual).total_seconds()
     reasons = []
+    if entry_stop.get("state_valid") is not True:
+        reasons.append("durable operator emergency entry-stop state is invalid")
+    elif entry_stop.get("engaged") is True:
+        reasons.append("operator emergency entry stop is engaged")
     if args.max_age_seconds <= 5 or args.max_age_seconds > 90:
         reasons.append("broker snapshot max age must be within 6..90 seconds")
     if actual != expected_utc:
@@ -476,6 +500,24 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         "execution_reserve_dollars": getattr(
             args, "execution_reserve_dollars", None
         ),
+        "expected_unleveraged_buying_power_dollars": getattr(
+            args, "expected_unleveraged_buying_power_dollars", None
+        ),
+        "maximum_acceptable_slippage_dollars": getattr(
+            args, "maximum_acceptable_slippage_dollars", None
+        ),
+        "preview_order_quantity": getattr(args, "preview_order_quantity", None),
+        "preview_limit_price": getattr(args, "preview_limit_price", None),
+        "preview_equity_dollars": getattr(args, "preview_equity_dollars", None),
+        "preview_current_gross_exposure_dollars": getattr(
+            args, "preview_current_gross_exposure_dollars", None
+        ),
+        "preview_working_entry_notional_dollars": getattr(
+            args, "preview_working_entry_notional_dollars", None
+        ),
+        "preview_projected_cost_dollars": getattr(
+            args, "preview_projected_cost_dollars", None
+        ),
     }
     supplied_dynamic_inputs = {
         field for field, value in raw_dynamic_inputs.items() if value is not None
@@ -485,7 +527,11 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
             field for field, value in raw_dynamic_inputs.items() if value is None
         ]
         for field in (
-            "instrument_key", "thesis_key", "risk_action",
+            "instrument_key", "thesis_key", "risk_action", "pilot_id",
+            "book_mode", "decision_contract_version", "decision_contract_hash",
+            "symbol", "direction", "asset_class", "preview_id",
+            "preview_confirmed_at", "preview_account_key",
+            "preview_instrument_key", "preview_side",
         ):
             if getattr(args, field, None) in (None, ""):
                 missing.append(field)
@@ -512,6 +558,12 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         raw_dynamic_inputs["existing_pending_risk_dollars"] or 0
     )
     execution_reserve = float(raw_dynamic_inputs["execution_reserve_dollars"] or 0)
+    expected_buying_power = float(
+        raw_dynamic_inputs["expected_unleveraged_buying_power_dollars"] or 0
+    )
+    maximum_acceptable_slippage = float(
+        raw_dynamic_inputs["maximum_acceptable_slippage_dollars"] or 0
+    )
     raw_numeric_values = {
         "reviewed_entry_price": reviewed_entry_price,
         "structural_stop_price": structural_stop_price,
@@ -522,6 +574,26 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         "existing_open_downside_dollars": existing_open_downside,
         "existing_pending_risk_dollars": existing_pending_risk,
         "execution_reserve_dollars": execution_reserve,
+        "expected_unleveraged_buying_power_dollars": expected_buying_power,
+        "maximum_acceptable_slippage_dollars": maximum_acceptable_slippage,
+        "preview_order_quantity": float(
+            raw_dynamic_inputs["preview_order_quantity"] or 0
+        ),
+        "preview_limit_price": float(
+            raw_dynamic_inputs["preview_limit_price"] or 0
+        ),
+        "preview_equity_dollars": float(
+            raw_dynamic_inputs["preview_equity_dollars"] or 0
+        ),
+        "preview_current_gross_exposure_dollars": float(
+            raw_dynamic_inputs["preview_current_gross_exposure_dollars"] or 0
+        ),
+        "preview_working_entry_notional_dollars": float(
+            raw_dynamic_inputs["preview_working_entry_notional_dollars"] or 0
+        ),
+        "preview_projected_cost_dollars": float(
+            raw_dynamic_inputs["preview_projected_cost_dollars"] or 0
+        ),
     }
     for field, value in raw_numeric_values.items():
         if not isfinite(value) or value < 0:
@@ -546,6 +618,31 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
             raise ValueError(
                 "--execution-reserve-dollars must be at least 5 for --entry-check"
             )
+        if expected_buying_power < 0:
+            raise ValueError(
+                "--expected-unleveraged-buying-power-dollars cannot be negative"
+            )
+        if str(args.preview_account_key) != str(args.account_key):
+            raise ValueError("--preview-account-key must equal --account-key")
+        if str(args.preview_instrument_key) != str(args.instrument_key):
+            raise ValueError(
+                "--preview-instrument-key must equal --instrument-key"
+            )
+        if str(args.preview_side).upper() != "BUY":
+            raise ValueError("--preview-side must be BUY")
+        preview_confirmed_at = datetime.fromisoformat(
+            str(args.preview_confirmed_at).replace("Z", "+00:00")
+        )
+        if (
+            preview_confirmed_at.tzinfo is None
+            or preview_confirmed_at.utcoffset() is None
+        ):
+            raise ValueError("--preview-confirmed-at must include a UTC offset")
+        preview_confirmed_at = preview_confirmed_at.astimezone(timezone.utc)
+        if preview_confirmed_at < actual:
+            raise ValueError("Robinhood preview predates the broker risk snapshot")
+        if preview_confirmed_at > now_utc + timedelta(seconds=15):
+            raise ValueError("Robinhood preview timestamp is in the future")
         reviewed_notional = reviewed_entry_price * quantity * contract_multiplier
         stop_defined_loss = (
             (reviewed_entry_price - structural_stop_price)
@@ -556,11 +653,51 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         proposed_new_risk = max(stop_defined_loss, stress_tail_loss)
         if proposed_new_risk <= 0:
             raise ValueError("calculated proposed new risk must be positive")
+        preview_pairs = (
+            (float(raw_dynamic_inputs["preview_order_quantity"]), quantity,
+             "--preview-order-quantity", "--quantity"),
+            (float(raw_dynamic_inputs["preview_limit_price"]), reviewed_entry_price,
+             "--preview-limit-price", "--reviewed-entry-price"),
+            (float(raw_dynamic_inputs["preview_equity_dollars"]),
+             float(row["current_equity"]), "--preview-equity-dollars",
+             "broker-confirmed equity"),
+            (float(raw_dynamic_inputs["preview_current_gross_exposure_dollars"]),
+             float(broker_state["current_gross_exposure_dollars"]),
+             "--preview-current-gross-exposure-dollars", "broker gross exposure"),
+            (float(raw_dynamic_inputs["preview_working_entry_notional_dollars"]),
+             float(broker_state["working_entry_notional_dollars"]),
+             "--preview-working-entry-notional-dollars", "broker working notional"),
+            (float(raw_dynamic_inputs["preview_projected_cost_dollars"]),
+             reviewed_notional, "--preview-projected-cost-dollars",
+             "reviewed notional"),
+        )
+        for actual_preview, expected_preview, preview_field, expected_field in preview_pairs:
+            if abs(actual_preview - expected_preview) > 0.005:
+                raise ValueError(
+                    f"{preview_field} must equal {expected_field}"
+                )
+        if maximum_acceptable_slippage < modeled_execution_loss:
+            raise ValueError(
+                "--modeled-execution-loss-dollars exceeds "
+                "--maximum-acceptable-slippage-dollars"
+            )
     dynamic_inputs = {
         **raw_numeric_values,
         "reviewed_notional_dollars": reviewed_notional,
         "calculated_stop_defined_loss_dollars": stop_defined_loss,
         "proposed_new_risk_dollars": proposed_new_risk,
+        "estimated_slippage_dollars": modeled_execution_loss,
+        "maximum_contractual_loss_dollars": (
+            reviewed_notional + modeled_execution_loss
+            if entry_check and str(getattr(args, "asset_class", "")).upper()
+            == "OPTION"
+            else None
+        ),
+        "notional_pct_of_current_equity": (
+            reviewed_notional / float(row["current_equity"]) * 100
+            if float(row["current_equity"]) > 0
+            else 0.0
+        ),
     }
 
     broker_balance_fields = (
@@ -587,16 +724,34 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         broker_balances["unleveraged_buying_power_dollars"],
         equity_notional_capacity,
     )
+    buying_power_mismatch = abs(
+        broker_balances["unleveraged_buying_power_dollars"] - expected_buying_power
+    )
+    buying_power_mismatch_tolerance = max(
+        5.0, 0.01 * float(row["current_equity"])
+    )
+    buying_power_mismatch_detected = bool(
+        entry_check
+        and buying_power_mismatch > buying_power_mismatch_tolerance + 0.005
+    )
+    if buying_power_mismatch_detected:
+        reasons.append(
+            "Robinhood preview buying power materially mismatches the fresh "
+            "broker-confirmed risk snapshot"
+        )
     post_order_gross_exposure = (
         broker_balances["current_gross_exposure_dollars"]
         + broker_balances["working_entry_notional_dollars"]
         + reviewed_notional
     )
+    projected_remaining_buying_power = expected_buying_power - reviewed_notional
     if entry_check and reviewed_notional > broker_new_notional_capacity + 0.005:
         reasons.append(
             "reviewed notional exceeds fresh unleveraged buying power or the "
             "no-leverage account-equity gross-exposure ceiling"
         )
+    if entry_check and reviewed_notional > expected_buying_power + 0.005:
+        reasons.append("reviewed notional exceeds exact Robinhood preview buying power")
 
     # LOSS_GAUGE intentionally does not credit unrealized gains.  Subtract only
     # the portion of current-mark-to-stop downside that can worsen LOSS_GAUGE;
@@ -641,13 +796,28 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
             "open, pending, and execution reserves"
         )
     row["broker_snapshot_age_seconds"] = round(age_seconds, 3)
+    row["emergency_entry_stop"] = entry_stop
     row.update(dynamic_inputs)
     row.update(broker_balances)
+    row["expected_unleveraged_buying_power_dollars"] = round(
+        expected_buying_power, 4
+    )
+    row["buying_power_mismatch_dollars"] = round(buying_power_mismatch, 4)
+    row["buying_power_mismatch_tolerance_dollars"] = round(
+        buying_power_mismatch_tolerance, 4
+    )
+    row["buying_power_mismatch_detected"] = buying_power_mismatch_detected
     row["broker_new_notional_capacity_dollars"] = round(
         broker_new_notional_capacity, 4
     )
     row["post_order_gross_exposure_dollars"] = round(
         post_order_gross_exposure, 4
+    )
+    row["projected_remaining_buying_power_dollars"] = round(
+        projected_remaining_buying_power, 4
+    )
+    row["account_day_loss_headroom_dollars"] = round(
+        float(row["loss_headroom_to_lock"]), 4
     )
     row["controlling_new_risk_headroom_dollars"] = round(
         controlling_headroom, 4
@@ -665,27 +835,64 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
     )
     row["risk_gate_mode"] = "entry_authorization" if entry_check else "session_only"
     if entry_check and not reasons:
+        ack_timeout_seconds = int(getattr(args, "broker_ack_timeout_seconds", 10))
+        if ack_timeout_seconds != 10:
+            raise ValueError("--broker-ack-timeout-seconds must be exactly 10")
         checked_at = datetime.now(timezone.utc).isoformat()
         evidence = {
+            "schema_version": PRETRADE_RISK_FACTS_SCHEMA_VERSION,
             "account_key": str(args.account_key),
             "session_date": str(args.session_date),
             "strategy_version": str(row["strategy_version"]),
+            "pilot_id": str(args.pilot_id).strip().lower(),
+            "book_mode": str(args.book_mode).strip().upper(),
+            "decision_contract_version": str(args.decision_contract_version).strip(),
+            "decision_contract_hash": str(args.decision_contract_hash).strip(),
             "broker_confirmed_at": str(row["broker_confirmed_at"]),
+            "broker_snapshot_hash": str(row["broker_snapshot_hash"]),
             "broker_snapshot_valid_until": (
                 actual + timedelta(seconds=args.max_age_seconds)
             ).isoformat(),
             "checked_at": checked_at,
             "current_equity_dollars": round(float(row["current_equity"]), 4),
             "instrument_key": str(args.instrument_key),
+            "symbol": str(args.symbol).strip().upper(),
+            "direction": str(args.direction).strip().upper(),
+            "asset_class": str(args.asset_class).strip().upper(),
             "thesis_key": str(args.thesis_key).upper(),
             "risk_action": str(args.risk_action).upper(),
-            **{key: round(value, 4) for key, value in dynamic_inputs.items()},
+            "preview_id": str(args.preview_id).strip(),
+            "preview_confirmed_at": preview_confirmed_at.isoformat(),
+            "preview_account_key": str(args.preview_account_key),
+            "preview_instrument_key": str(args.preview_instrument_key),
+            "preview_side": str(args.preview_side).strip().upper(),
+            **{
+                key: (round(value, 4) if value is not None else None)
+                for key, value in dynamic_inputs.items()
+            },
             **{key: round(value, 4) for key, value in broker_balances.items()},
+            "expected_unleveraged_buying_power_dollars": round(
+                expected_buying_power, 4
+            ),
+            "buying_power_mismatch_dollars": round(buying_power_mismatch, 4),
+            "buying_power_mismatch_tolerance_dollars": round(
+                buying_power_mismatch_tolerance, 4
+            ),
+            "buying_power_mismatch_detected": buying_power_mismatch_detected,
+            "emergency_entry_stop_generation": int(entry_stop["generation"]),
+            "emergency_entry_stop_state_hash": str(entry_stop["state_hash"]),
+            "broker_ack_timeout_seconds": ack_timeout_seconds,
             "broker_new_notional_capacity_dollars": round(
                 broker_new_notional_capacity, 4
             ),
             "post_order_gross_exposure_dollars": round(
                 post_order_gross_exposure, 4
+            ),
+            "projected_remaining_buying_power_dollars": round(
+                projected_remaining_buying_power, 4
+            ),
+            "account_day_loss_headroom_dollars": round(
+                float(row["loss_headroom_to_lock"]), 4
             ),
             "uncredited_open_profit_dollars": round(uncredited_open_profit, 4),
             "open_loss_gauge_degradation_dollars": round(
@@ -698,6 +905,8 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
             "dynamic_new_risk_capacity_dollars": round(
                 dynamic_new_risk_capacity, 4
             ),
+            "submission_intent_at": None,
+            "broker_ack_deadline_at": None,
         }
         try:
             reservation = store.reserve_risk_authorization(evidence)
@@ -706,6 +915,7 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
         else:
             if reservation["reserved"]:
                 row["risk_gate_authorization"] = reservation["authorization"]
+                row["pretrade_risk_facts"] = reservation["authorization"]
             else:
                 reasons.append(str(reservation["reason"]))
                 row["active_risk_authorization"] = reservation.get(
@@ -716,6 +926,81 @@ def cmd_risk_gate(args: argparse.Namespace) -> int:
     store.close()
     output(row)
     return 0 if row["new_entries_allowed"] else 2
+
+
+def cmd_entry_stop_status(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    status = store.entry_stop_status()
+    status["events"] = store.entry_stop_events(args.limit)
+    store.close()
+    output(status)
+    return 0 if status.get("state_valid") else 2
+
+
+def cmd_entry_stop_engage(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    status = store.set_entry_stop(
+        engaged=True, reason=args.reason, changed_by=args.changed_by
+    )
+    store.close()
+    output({
+        "status": "operator_emergency_entry_stop_engaged",
+        "entry_stop": status,
+        "blocks": ["ENTRY", "ADD", "REENTRY"],
+        "does_not_block": ["PROTECTION", "EXIT", "RECONCILIATION"],
+        "broker_state_mutated": False,
+        "trade_authority": False,
+    })
+    return 0
+
+
+def cmd_pilots_record(args: argparse.Namespace) -> int:
+    _, payload, _ = read_input_file(args.file)
+    if payload is None:
+        raise ValueError("Pilot fact sheets must be JSON")
+    store = Store(load(args).database_path)
+    sheet = store.record_pilot_fact_sheet(payload)
+    store.close()
+    output({
+        "status": (
+            "idempotent_pilot_fact_sheet_replay"
+            if sheet["idempotent_replay"]
+            else "immutable_pilot_fact_sheet_recorded"
+        ),
+        "fact_sheet": sheet,
+        "reporting_only": True,
+        "trade_authority": False,
+        "capital_reallocation_authority": False,
+    })
+    return 0
+
+
+def cmd_pilots_show(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    sheet = store.pilot_fact_sheet(args.fact_sheet_id)
+    store.close()
+    output(sheet)
+    return 0 if sheet is not None else 1
+
+
+def cmd_pilots_list(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    sheets = store.pilot_fact_sheets(
+        args.limit, pilot_id=args.pilot_id, book_mode=args.book_mode
+    )
+    store.close()
+    output(sheets)
+    return 0
+
+
+def cmd_pilots_leaderboard(args: argparse.Namespace) -> int:
+    store = Store(load(args).database_path)
+    board = store.pilot_leaderboard(
+        book_mode=args.book_mode, limit=args.limit
+    )
+    store.close()
+    output(board)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -870,6 +1155,14 @@ def build_parser() -> argparse.ArgumentParser:
     risk_release.add_argument("--authorization-id", required=True)
     risk_release.add_argument("--reason", required=True)
     risk_release.set_defaults(func=cmd_risk_release)
+    risk_unknown = risk_commands.add_parser(
+        "submission-unknown",
+        help="Serialize an attempted order with no broker response or order ID",
+    )
+    risk_unknown.add_argument("--authorization-id", required=True)
+    risk_unknown.add_argument("--attempted-at", required=True)
+    risk_unknown.add_argument("--reason", required=True)
+    risk_unknown.set_defaults(func=cmd_risk_submission_unknown)
     risk_gate = risk_commands.add_parser(
         "gate", help="Fail closed when the session is missing or loss-locked"
     )
@@ -882,20 +1175,97 @@ def build_parser() -> argparse.ArgumentParser:
         help="Require and audit exact risk inputs immediately before an entry or add",
     )
     risk_gate.add_argument("--instrument-key")
+    risk_gate.add_argument("--symbol")
+    risk_gate.add_argument("--direction", choices=("UP", "DOWN"))
+    risk_gate.add_argument("--asset-class", choices=("EQUITY", "OPTION"))
     risk_gate.add_argument("--thesis-key")
     risk_gate.add_argument("--risk-action", choices=("ENTRY", "ADD"))
+    risk_gate.add_argument("--pilot-id")
+    risk_gate.add_argument("--book-mode", choices=("LIVE", "PAPER", "SHADOW"))
+    risk_gate.add_argument("--decision-contract-version")
+    risk_gate.add_argument("--decision-contract-hash")
     risk_gate.add_argument("--reviewed-entry-price", type=float)
     risk_gate.add_argument("--structural-stop-price", type=float)
     risk_gate.add_argument("--quantity", type=float)
     risk_gate.add_argument("--contract-multiplier", type=float)
     risk_gate.add_argument("--modeled-execution-loss-dollars", type=float)
+    risk_gate.add_argument(
+        "--maximum-acceptable-slippage-dollars", type=float
+    )
     risk_gate.add_argument("--stress-tail-loss-dollars", type=float)
     risk_gate.add_argument(
         "--existing-open-downside-dollars", type=float
     )
     risk_gate.add_argument("--existing-pending-risk-dollars", type=float)
     risk_gate.add_argument("--execution-reserve-dollars", type=float)
+    risk_gate.add_argument(
+        "--expected-unleveraged-buying-power-dollars", type=float,
+        help="Exact Robinhood preview buying power for the reviewed quantity",
+    )
+    risk_gate.add_argument("--preview-id")
+    risk_gate.add_argument("--preview-confirmed-at")
+    risk_gate.add_argument("--preview-account-key")
+    risk_gate.add_argument("--preview-instrument-key")
+    risk_gate.add_argument("--preview-side", choices=("BUY",))
+    risk_gate.add_argument("--preview-order-quantity", type=float)
+    risk_gate.add_argument("--preview-limit-price", type=float)
+    risk_gate.add_argument("--preview-equity-dollars", type=float)
+    risk_gate.add_argument(
+        "--preview-current-gross-exposure-dollars", type=float
+    )
+    risk_gate.add_argument(
+        "--preview-working-entry-notional-dollars", type=float
+    )
+    risk_gate.add_argument("--preview-projected-cost-dollars", type=float)
+    risk_gate.add_argument(
+        "--broker-ack-timeout-seconds", type=int, default=10,
+        help="Fixed submit-to-broker-ack deadline; currently exactly 10 seconds",
+    )
     risk_gate.set_defaults(func=cmd_risk_gate)
+
+    entry_stop = commands.add_parser(
+        "entry-stop",
+        help="Operate the machine-global emergency ENTRY/ADD stop; never flattens",
+    )
+    entry_stop_commands = entry_stop.add_subparsers(
+        dest="entry_stop_command", required=True
+    )
+    entry_stop_status = entry_stop_commands.add_parser(
+        "status", help="Read the durable latch and immutable audit trail"
+    )
+    entry_stop_status.add_argument("--limit", type=int, default=20)
+    entry_stop_status.set_defaults(func=cmd_entry_stop_status)
+    entry_stop_engage = entry_stop_commands.add_parser(
+        "engage", help="Immediately block new ENTRY, ADD, and reentry authorization"
+    )
+    entry_stop_engage.add_argument("--reason", required=True)
+    entry_stop_engage.add_argument("--changed-by", required=True)
+    entry_stop_engage.set_defaults(func=cmd_entry_stop_engage)
+    pilots = commands.add_parser(
+        "pilots", help="Record and compare immutable mode-isolated Pilot fact sheets"
+    )
+    pilot_commands = pilots.add_subparsers(dest="pilot_command", required=True)
+    pilot_record = pilot_commands.add_parser(
+        "record", help="Append one machine-readable Pilot fact sheet"
+    )
+    pilot_record.add_argument("file")
+    pilot_record.set_defaults(func=cmd_pilots_record)
+    pilot_show = pilot_commands.add_parser("show", help="Read a fact sheet by ID")
+    pilot_show.add_argument("--fact-sheet-id", required=True)
+    pilot_show.set_defaults(func=cmd_pilots_show)
+    pilot_list = pilot_commands.add_parser("list", help="List Pilot fact sheets")
+    pilot_list.add_argument("--limit", type=int, default=20)
+    pilot_list.add_argument("--pilot-id")
+    pilot_list.add_argument("--book-mode", choices=("LIVE", "PAPER", "SHADOW"))
+    pilot_list.set_defaults(func=cmd_pilots_list)
+    pilot_board = pilot_commands.add_parser(
+        "leaderboard", help="Reporting-only risk-adjusted per-book ranking"
+    )
+    pilot_board.add_argument(
+        "--book-mode", choices=("LIVE", "PAPER", "SHADOW"), required=True
+    )
+    pilot_board.add_argument("--limit", type=int, default=20)
+    pilot_board.set_defaults(func=cmd_pilots_leaderboard)
     return parser
 
 

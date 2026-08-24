@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "registry_version": "titan_pilot_registry_2026-08-23_v1",
+  "live_strategy_version": "titan_live_canonical_2026-08-23_v3",
+  "sole_live_pilot_id": "titan_momentum_equity",
+  "sole_broker_authority_pilot_id": "titan_momentum_equity",
+  "central_allocator": "CENTRAL_DYNAMIC_RISK_CONTROLLER",
+  "fixed_module_budgets": false,
+  "leaderboard_authority": "REPORTING_ONLY",
+  "book_mode_enum": [
+    "LIVE",
+    "PAPER",
+    "SHADOW"
+  ],
+  "record_identity_fields": [
+    "pilot_id",
+    "book_mode",
+    "decision_contract_version",
+    "decision_contract_hash"
+  ],
+  "truth_book_rules": {
+    "LIVE": "Robinhood-confirmed orders, fills, positions, protection, and P&L only; simulation and counterfactual records are forbidden.",
+    "PAPER": "Causal simulated decisions and fills under an explicit execution-model version; broker order and fill identifiers are forbidden.",
+    "SHADOW": "Causal zero-authority candidates, decisions, and counterfactual outcomes; broker submissions, fills, and capital reservations are forbidden.",
+    "cross_book_aggregation": "PROHIBITED",
+    "cross_book_promotion_by_metric": "PROHIBITED"
+  },
+  "contracts": [
+    {
+      "pilot_id": "titan_momentum_equity",
+      "path": "config/pilots/titan-momentum-equity.json",
+      "decision_contract_version": "titan_momentum_equity_2026-08-23_v1",
+      "decision_contract_hash": "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21",
+      "status": "ACTIVE_LIVE",
+      "book_modes": [
+        "LIVE",
+        "PAPER",
+        "SHADOW"
+      ],
+      "broker_authority": true,
+      "trade_authority": true
+    },
+    {
+      "pilot_id": "titan_catalyst_swing",
+      "path": "config/pilots/titan-catalyst-swing.json",
+      "decision_contract_version": "titan_catalyst_swing_2026-08-23_v1",
+      "decision_contract_hash": "1b1c1f1500d215639430251810a78cdcce60ecea72cf07848af5162d1e540d56",
+      "status": "SHADOW_ONLY",
+      "book_modes": [
+        "SHADOW"
+      ],
+      "broker_authority": false,
+      "trade_authority": false
+    },
+    {
+      "pilot_id": "titan_defined_risk_options",
+      "path": "config/pilots/titan-defined-risk-options.json",
+      "decision_contract_version": "titan_defined_risk_options_2026-08-23_v1",
+      "decision_contract_hash": "7734f8775f3c513c17120834f6954b5292c59b87b2fdb7a4a3298c2f40a49bbb",
+      "status": "SHADOW_ONLY",
+      "book_modes": [
+        "SHADOW"
+      ],
+      "broker_authority": false,
+      "trade_authority": false
+    },
+    {
+      "pilot_id": "titan_crypto_momentum",
+      "path": "config/pilots/titan-crypto-momentum.json",
+      "decision_contract_version": "titan_crypto_momentum_2026-08-23_v1",
+      "decision_contract_hash": "c359dd1d39f7a59e2046ee63d238c451d138335bee809ac1801ed56dca4fce0c",
+      "status": "SHADOW_ONLY",
+      "book_modes": [
+        "SHADOW"
+      ],
+      "broker_authority": false,
+      "trade_authority": false
+    },
+    {
+      "pilot_id": "titan_equity_setup_challengers",
+      "path": "config/pilots/titan-equity-setup-challengers.json",
+      "decision_contract_version": "titan_equity_setup_challengers_2026-08-23_v1",
+      "decision_contract_hash": "b099823f49b3b13d55e8063c98662b01c6ce4293313687aae5bde683dd060f88",
+      "status": "SHADOW_ONLY",
+      "book_modes": [
+        "SHADOW"
+      ],
+      "broker_authority": false,
+      "trade_authority": false
+    }
+  ]
+}

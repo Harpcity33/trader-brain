@@ -323,6 +323,29 @@ class TitanWatcher:
         self.et = ZoneInfo(config.timezone)
         self.universe_ready = False
 
+    def _pilot_attribution(self) -> dict[str, Any]:
+        """Return the explicit zero-authority identity for every watcher record."""
+        return {
+            "pilot_id": self.config.pilot_id,
+            "book_mode": self.config.book_mode,
+            "decision_contract_version": self.config.decision_contract_version,
+            "decision_contract_hash": self.config.decision_contract_hash,
+            "trade_authority": False,
+            "broker_authority": False,
+            "risk_authorization_authority": False,
+            "buying_power_reservation_authority": False,
+            "capital_allocation_authority": False,
+        }
+
+    def _attribute_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        attributed = dict(payload)
+        expected = self._pilot_attribution()
+        for key, value in expected.items():
+            if key in attributed and attributed[key] != value:
+                raise ValueError(f"watcher payload contains contradictory {key}")
+            attributed[key] = value
+        return attributed
+
     def _bootstrap_market_scope(self) -> None:
         """Refresh the full universe and baseline at the 04:00 live-data start."""
         rest = MassiveREST(self.config, self.api_key)
@@ -381,6 +404,7 @@ class TitanWatcher:
         payload: dict[str, Any],
         dedupe_key: str,
     ) -> None:
+        payload = self._attribute_payload(payload)
         event_id = self.store.emit_event(event_type, symbol, priority, payload, dedupe_key)
         if event_id:
             self._export_event(
@@ -534,7 +558,7 @@ class TitanWatcher:
             )
         )
         signal["entry_rejection_reasons"] = rejection_reasons
-        signal["trade_authority"] = False
+        signal.update(self._pilot_attribution())
         signal["watch_rearm_requirement"] = (
             "A fresh controlled base, reclaim, or renewed acceleration must independently satisfy every structural and liquidity gate."
             if not entry_eligible else None

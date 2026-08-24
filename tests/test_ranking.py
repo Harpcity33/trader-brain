@@ -135,7 +135,7 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(plan["add_policy"]["risk_constraint_logic"], "OR")
         self.assertEqual(len(plan["add_policy"]["allowed_when_any"]), 2)
 
-    def test_default_policy_resolution_uses_capital_flexible_version(self) -> None:
+    def test_plan_rejects_missing_explicit_pilot_identity(self) -> None:
         signal = {
             "symbol": "TEST",
             "observed_at": "2026-08-20T14:00:00+00:00",
@@ -149,15 +149,8 @@ class RankingTests(unittest.TestCase):
             "entry_rejection_reasons": [],
             "exhaustion_lock": False,
         }
-        plan = build_preliminary_trade_plan(signal)
-        self.assertEqual(
-            plan["policy_version"],
-            "capital_flexible_live_preparation_2026-08-23_v2",
-        )
-        self.assertEqual(
-            plan["sizing_policy_version"],
-            "capital_flexible_sizing_2026-08-23_v2",
-        )
+        with self.assertRaisesRegex(ValueError, "explicit RuntimeConfig Pilot identity"):
+            build_preliminary_trade_plan(signal)
 
     def test_under5_uses_lane_sizing_without_fresh_catalyst_blocker(self) -> None:
         signal = {

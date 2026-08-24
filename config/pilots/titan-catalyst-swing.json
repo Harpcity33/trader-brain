@@ -1,0 +1,200 @@
+{
+  "schema_version": "titan_pilot_contract_2026-08-23_v1",
+  "pilot_id": "titan_catalyst_swing",
+  "display_name": "Titan Catalyst Swing",
+  "decision_contract_version": "titan_catalyst_swing_2026-08-23_v1",
+  "strategy_version": "titan_shadow_pilots_2026-08-23_v1",
+  "provenance": {
+    "canonical_path": "config/pilots/titan-catalyst-swing.json",
+    "owner": "Trader Brain Research",
+    "reviewer": "UNASSIGNED_INDEPENDENT_REVIEWER",
+    "approval_authority": "EXPLICIT_USER_VERSIONED_AUTHORIZATION_REQUIRED_FOR_ANY_LIVE_PROMOTION",
+    "supersedes": null,
+    "superseded_by": null,
+    "immutable_exact_bytes": true,
+    "hash_algorithm": "SHA-256"
+  },
+  "status": "SHADOW_ONLY",
+  "allowed_book_modes": [
+    "SHADOW"
+  ],
+  "broker_authority": false,
+  "trade_authority": false,
+  "truth_authorities": {
+    "market_data": "MASSIVE_DATA_ONLY",
+    "broker_state": "ROBINHOOD_ONLY",
+    "live_fills": "ROBINHOOD_CONFIRMED_ONLY",
+    "paper_fills": "SIMULATION_MODEL_ONLY",
+    "shadow_outcomes": "CAUSAL_COUNTERFACTUAL_ONLY"
+  },
+  "causal_inputs": {
+    "data_dependencies": [
+      "point-in-time Massive equity price, volume, NBBO, news, reference, and market-context data",
+      "point-in-time earnings, guidance, filing, financing, dilution, regulatory, and corporate-action evidence",
+      "explicit causal decision and outcome timestamps"
+    ],
+    "decision_time_rule": "Freeze catalyst knowledge and market evidence at the research decision timestamp; later news may label outcomes only.",
+    "completed_bar_rule": "Use completed bars through T-1 and label current partial-bar or quote evidence separately.",
+    "missing_data_rule": "Record unavailable catalyst, filing, quote, and corporate-action fields as UNKNOWN; do not infer or backfill from later disclosures.",
+    "future_information_allowed": false
+  },
+  "decision_rules": {
+    "implementation_status": "SHADOW_NOT_IMPLEMENTED",
+    "setup_rules": [
+      "UNKNOWN until a prospective catalyst taxonomy, gap behavior, liquidity regime, and consolidation/reacceleration definition are versioned",
+      "candidate research must distinguish verified catalyst, checked-none, unavailable, stale, and conflicted states"
+    ],
+    "entry_or_research_rules": [
+      "research observations only; no broker review, risk authorization, buying-power reservation, or order",
+      "proposed one-to-five-session horizons must be declared at T and may not be optimized after the outcome"
+    ],
+    "exit_or_outcome_rules": [
+      "UNKNOWN until frozen target, invalidation, gap-through, cost, and mandatory evaluation horizons are prospectively defined",
+      "outcomes must report both path-dependent R and overnight gap/tail loss without treating a stop as guaranteed"
+    ],
+    "invalidations": [
+      "catalyst contradiction, financing or dilution, security-status failure, stale quote, failed liquidity, or unavailable point-in-time evidence",
+      "any attempted LIVE, PAPER, broker, risk, or allocation action under this SHADOW-only contract"
+    ]
+  },
+  "instrument_scope": {
+    "research_only": true,
+    "included": [
+      "catalyst_equity_holds_modeled_for_one_to_five_sessions",
+      "gap_continuation_and_post_catalyst_consolidation_research"
+    ],
+    "excluded": [
+      "broker_order",
+      "live_position",
+      "capital_reservation",
+      "automatic_promotion"
+    ],
+    "notes": [
+      "Overnight behavior is research-only and cannot override the live no-overnight rule."
+    ]
+  },
+  "lane_risk_translation": {
+    "status": "UNKNOWN_NOT_ACTIVATED",
+    "notional_rule": "UNKNOWN; no notional, quantity, buying power, or capital is authorized or reserved.",
+    "stop_defined_risk_rule": "UNKNOWN until a causal swing invalidation and next-session gap model are validated.",
+    "stress_loss_rule": "Must model overnight gap, halt, dilution, financing, and correlated catalyst tails before promotion evidence can be complete.",
+    "lane_adjustments": [
+      "separate earnings, regulatory, financing, contract, analyst, and sympathy catalyst regimes",
+      "separate liquid large-cap and lower-liquidity equity execution regimes",
+      "do not transfer intraday no-overnight risk assumptions into swing research"
+    ]
+  },
+  "cost_execution_model": {
+    "status": "UNKNOWN_NOT_IMPLEMENTED",
+    "quote_source": "UNKNOWN until continuous causal bid/ask coverage and a tradable instrument intersection are verified.",
+    "spread_model": "UNKNOWN; future research must use decision-time executable spread rather than full-day or backfilled spread.",
+    "slippage_model": "UNKNOWN; must include open gaps, market impact, halt resumption, and exit slippage.",
+    "fee_model": "UNKNOWN; report unavailable costs explicitly rather than assuming zero.",
+    "fill_model": "UNKNOWN; same-bar confirmation and fill are prohibited without event-sequenced quotes or ticks.",
+    "maximum_contractual_loss_rule": "For long equity there is no contractual stop guarantee; report stress and gap loss separately."
+  },
+  "session_calendar_rules": {
+    "timezone": "America/New_York",
+    "calendar": "U.S. equity trading calendar with corporate-action and halt awareness",
+    "research_or_entry_window": "SHADOW research timestamps only; proposed one-to-five-session windows remain unimplemented.",
+    "mandatory_flat_rule": "NOT_APPLICABLE_SHADOW_ONLY; any future overnight authority requires a new explicit contract.",
+    "holiday_rule": "No synthetic trading-session progression on market holidays; label calendar gaps explicitly."
+  },
+  "capital_policy": {
+    "allocator": "CENTRAL_DYNAMIC_RISK_CONTROLLER",
+    "fixed_module_budget": false,
+    "live_notional_range_pct": [
+      0,
+      100
+    ],
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "leverage_allowed": false,
+    "leaderboard_can_reallocate_capital": false
+  },
+  "record_identity": {
+    "required_on_record_types": [
+      "candidate",
+      "decision",
+      "campaign",
+      "outcome",
+      "grade",
+      "pretrade_risk_facts"
+    ],
+    "required_fields": [
+      "pilot_id",
+      "book_mode",
+      "decision_contract_version",
+      "decision_contract_hash"
+    ],
+    "book_mode_enum": [
+      "LIVE",
+      "PAPER",
+      "SHADOW"
+    ],
+    "contract_hash_rule": "LOWERCASE_SHA256_OF_EXACT_CANONICAL_CONTRACT_FILE_BYTES"
+  },
+  "suspension_criteria": {
+    "entry_or_research_kill_conditions": [
+      "point-in-time catalyst or corporate-action provenance unavailable",
+      "future leakage, survivorship contamination, or overlapping ticker-session double counting detected",
+      "execution or overnight-tail model absent for a claimed profitability result",
+      "any non-SHADOW book mode or nonzero trade, risk, reservation, or allocation authority"
+    ],
+    "operator_stop_semantics": "Registered SHADOW research is zero-authority; any future runtime research stop must be explicit and may never release the LIVE emergency-entry stop.",
+    "automatic_restart_allowed": false
+  },
+  "evidence_standard": {
+    "performance_status": "UNKNOWN_INSUFFICIENT_EVIDENCE",
+    "minimum_independent_position_episodes": 100,
+    "minimum_trading_sessions": 40,
+    "minimum_distinct_underlyings": 30,
+    "chronological_holdout_required": true,
+    "after_cost_clustered_ci_lower_bound_must_exceed_zero": true,
+    "independent_review_required": true,
+    "metrics_may_be_unknown": true
+  },
+  "fact_sheet_rules": {
+    "schema_version": "titan_pilot_fact_sheet_2026-08-23_v1",
+    "classification": "PRIVATE_TRADER_BRAIN",
+    "separate_by_book_mode": true,
+    "combined_performance": null,
+    "required_metrics": [
+      "after_cost_expectancy_r",
+      "ticker_session_clustered_95pct_ci",
+      "maximum_drawdown_r",
+      "profit_factor",
+      "win_rate_pct",
+      "execution_shortfall_bps",
+      "entry_slippage_bps",
+      "exit_slippage_bps",
+      "effective_independent_sample_size",
+      "distinct_ticker_session_count",
+      "trading_session_count",
+      "distinct_underlying_count",
+      "evidence_coverage_pct",
+      "policy_hash",
+      "decision_contract_hash",
+      "known_failure_modes"
+    ],
+    "forbidden_content": [
+      "credentials",
+      "raw_broker_payloads",
+      "licensed_massive_source_data",
+      "cross_book_combined_performance"
+    ],
+    "authority": "REPORTING_ONLY"
+  },
+  "promotion_policy": {
+    "automatic_live_promotion": false,
+    "leaderboard_grants_authority": false,
+    "shadow_evidence_required": true,
+    "independent_review_required": true,
+    "explicit_versioned_authorization_required": true
+  },
+  "known_failure_modes": [
+    "overnight gaps can bypass modeled invalidation",
+    "catalyst interpretation can be stale or wrong",
+    "financing or dilution can reverse a favorable move",
+    "ticker-session observations are not independent across one catalyst regime"
+  ]
+}
