@@ -22,5 +22,9 @@ Run on valid U.S. trading weekdays during the regular options session. Reconcile
 
 This engine has no unattended order authority, no atomic bracket/OCO claim, no guaranteed stop execution, and no guaranteed profit or loss outcome. Its failure must never halt or modify the established equity live desk.
 '''
-status = "ACTIVE"
-rrule = "DTSTART;TZID=America/New_York:20260831T093000\nRRULE:FREQ=MINUTELY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9,10,11,12,13,14,15"
+status = "PAUSED"
+rrule = "RRULE:FREQ=MINUTELY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9,10,11,12,13,14,15"
+
+# READY_NOT_INSTALLED: Codex permits one active heartbeat per task, and the
+# existing production equity heartbeat owns the current task. Activation must
+# target a separately user-authorized task; no cron workaround is permitted.

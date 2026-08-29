@@ -1,5 +1,5 @@
 version = 1
-id = "titan-daily-market-study"
+id = "titan-daily-market-study-04-00-06-30-et"
 kind = "cron"
 name = "Titan Daily Market Study — 04:00–06:30 ET"
 prompt = '''
@@ -17,11 +17,11 @@ Create today's evidence-backed market regime, preferred and avoided setup IDs, d
 
 Write exactly one immutable create-only artifact at research/daily-strategy/YYYY-MM-DD.md in Harpcity33/trader-brain and commit it with a date-specific research commit by 06:30 America/New_York. Check that the path does not exist before creation; if it exists, do not replace or amend it. Include exact data provenance and timestamps without credentials. If an input stage fails, name it, mark its fields UNAVAILABLE, and continue independent safe stages. A failure of this workflow must have no effect on the established live equity desk or any separate options engine.
 '''
-status = "PAUSED"
-rrule = "DTSTART;TZID=America/New_York:20260831T040000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
+status = "ACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
 execution_environment = "local"
 model = "gpt-5.6-sol"
 reasoning_effort = "high"
 
-# Repository definition only. Activation is a separate validated deployment step.
-# A project_id is intentionally omitted until the saved Codex project is resolved.
+# Deployed through the Codex automation interface as a projectless local task.
+# The prompt uses Massive and GitHub directly and has no broker authority.

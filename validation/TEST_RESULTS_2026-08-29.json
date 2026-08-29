@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-08-29T16:00:00Z",
+  "upgrade_python": "3.12",
+  "upgrade_unit_tests": {
+    "passed": 64,
+    "failed": 0
+  },
+  "existing_titan_runtime_tests": {
+    "passed": 24,
+    "failed": 0
+  },
+  "repository_validator": {
+    "status": "PASS",
+    "json_files": 8,
+    "toml_files": 3,
+    "python_files": 23,
+    "manifest_hash_policy": "reported by validator output, not embedded to avoid self-reference"
+  },
+  "broker_mutations_during_validation": 0,
+  "equity_automation_status_during_validation": "ACTIVE_UNCHANGED",
+  "titan_mcp_process_observed_running": true,
+  "launch_agent_last_exit_status": 0
+}
