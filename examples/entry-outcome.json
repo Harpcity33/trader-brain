@@ -1,0 +1,16 @@
+{
+  "observation_end": "YYYY-MM-DDT16:00:00-04:00",
+  "session_high": null,
+  "session_low": null,
+  "actual_exit_price": null,
+  "actual_pnl": null,
+  "actual_pnl_r": null,
+  "earliest_pnl": null,
+  "earliest_pnl_r": null,
+  "conservative_pnl": null,
+  "conservative_pnl_r": null,
+  "hesitation_cost": null,
+  "confirmation_savings": null,
+  "mfe": null,
+  "mae": null
+}

@@ -1,0 +1,204 @@
+{
+  "schema_version": "titan_pilot_contract_2026-08-23_v1",
+  "pilot_id": "titan_defined_risk_options",
+  "display_name": "Titan Defined-Risk Options Research",
+  "decision_contract_version": "titan_defined_risk_options_2026-08-23_v1",
+  "strategy_version": "titan_shadow_pilots_2026-08-23_v1",
+  "provenance": {
+    "canonical_path": "config/pilots/titan-defined-risk-options.json",
+    "owner": "Trader Brain Research",
+    "reviewer": "UNASSIGNED_INDEPENDENT_REVIEWER",
+    "approval_authority": "EXPLICIT_USER_VERSIONED_AUTHORIZATION_REQUIRED_FOR_ANY_LIVE_PROMOTION",
+    "supersedes": null,
+    "superseded_by": null,
+    "immutable_exact_bytes": true,
+    "hash_algorithm": "SHA-256"
+  },
+  "status": "SHADOW_ONLY",
+  "allowed_book_modes": [
+    "SHADOW"
+  ],
+  "broker_authority": false,
+  "trade_authority": false,
+  "truth_authorities": {
+    "market_data": "MASSIVE_DATA_ONLY",
+    "broker_state": "ROBINHOOD_ONLY",
+    "live_fills": "ROBINHOOD_CONFIRMED_ONLY",
+    "paper_fills": "SIMULATION_MODEL_ONLY",
+    "shadow_outcomes": "CAUSAL_COUNTERFACTUAL_ONLY"
+  },
+  "causal_inputs": {
+    "data_dependencies": [
+      "causal underlying price, volume, NBBO, volatility, catalyst, and structural evidence",
+      "exact point-in-time option chain, contract terms, two-sided quotes, sizes, volume, open interest, Greeks, and implied volatility when available",
+      "expiration, exercise, assignment, corporate-action, and earnings calendar state"
+    ],
+    "decision_time_rule": "Freeze the underlying thesis, exact legs, chain, quote, terms, and payoff at the research timestamp.",
+    "completed_bar_rule": "Underlying completed-bar features end at T-1; option quotes must retain their own timestamps and may not be inferred from the underlying.",
+    "missing_data_rule": "Any unavailable chain, leg quote, size, term, assignment, or cost input remains UNKNOWN and makes an executability or profitability claim ineligible.",
+    "future_information_allowed": false
+  },
+  "decision_rules": {
+    "implementation_status": "SHADOW_NOT_IMPLEMENTED",
+    "setup_rules": [
+      "UNKNOWN until causal single-leg and defined-max-loss vertical spread families are separately versioned",
+      "the underlying must qualify independently before any option expression is evaluated"
+    ],
+    "entry_or_research_rules": [
+      "research observations only; every spread and sell-to-open leg has zero broker and trade authority",
+      "freeze exact strikes, expiration, side, quantity, net debit or credit, maximum loss, maximum gain, and cancellation rule at T"
+    ],
+    "exit_or_outcome_rules": [
+      "UNKNOWN until event-sequenced multi-leg fills, early-close, expiration, assignment, pin, and liquidity assumptions are versioned",
+      "grade the complete position after all leg costs and never use the underlying move as a substitute for option P&L"
+    ],
+    "invalidations": [
+      "missing or stale leg quote, crossed market, failed depth, changed terms, earnings or corporate-action conflict, or undefined maximum loss",
+      "any attempted LIVE, PAPER, broker, risk, or allocation action under this SHADOW-only contract"
+    ]
+  },
+  "instrument_scope": {
+    "research_only": true,
+    "included": [
+      "single_leg_long_call_or_put_research",
+      "defined_max_loss_vertical_debit_spread_research",
+      "defined_max_loss_vertical_credit_spread_research"
+    ],
+    "excluded": [
+      "broker_order",
+      "live_option_spread",
+      "live_sell_to_open",
+      "exercise_or_assignment_action",
+      "capital_reservation",
+      "automatic_promotion"
+    ],
+    "notes": [
+      "Every spread and sell-to-open expression is research-only.",
+      "Modeled maximum loss must include contract multiplier, commissions, spread, slippage, assignment, and early-close assumptions."
+    ]
+  },
+  "lane_risk_translation": {
+    "status": "UNKNOWN_NOT_ACTIVATED",
+    "notional_rule": "UNKNOWN; no contract quantity, buying power, or capital is authorized or reserved.",
+    "stop_defined_risk_rule": "UNKNOWN until exact multi-leg closeout and stop behavior are modeled from executable leg quotes.",
+    "stress_loss_rule": "Must use contractual maximum loss plus modeled legging, assignment, pin, gap, halt, and liquidity stress without assuming a stop fill.",
+    "lane_adjustments": [
+      "single-leg long options, debit spreads, and defined-risk credit spreads are distinct evidence lanes",
+      "group multiple contracts and legs on one underlying thesis into one independent position episode",
+      "0DTE, exercise, assignment action, and live sell-to-open remain excluded"
+    ]
+  },
+  "cost_execution_model": {
+    "status": "UNKNOWN_NOT_IMPLEMENTED",
+    "quote_source": "UNKNOWN until contemporaneous executable quote and size exist for every leg.",
+    "spread_model": "UNKNOWN; must model each leg and executable net spread rather than option OHLC range.",
+    "slippage_model": "UNKNOWN; must include multi-leg fill sequence, partial fill, cancel/replace, and closeout slippage.",
+    "fee_model": "UNKNOWN; must include per-contract and regulatory costs and may not silently assume zero.",
+    "fill_model": "UNKNOWN; midpoint fills are prohibited unless supported by a prospectively calibrated fill-probability model.",
+    "maximum_contractual_loss_rule": "Record exact contractual maximum loss for every frozen leg set, then add non-overlapping fees and execution/assignment stresses."
+  },
+  "session_calendar_rules": {
+    "timezone": "America/New_York",
+    "calendar": "U.S. options and underlying equity calendars with expiration, earnings, exercise, and corporate-action awareness",
+    "research_or_entry_window": "SHADOW research timestamps only; no executable option or spread window is active.",
+    "mandatory_flat_rule": "NOT_APPLICABLE_SHADOW_ONLY; any future live hold, expiration, or overnight rule requires a new explicit contract.",
+    "holiday_rule": "Do not synthesize option sessions or maturity across closed-market dates without explicit calendar handling."
+  },
+  "capital_policy": {
+    "allocator": "CENTRAL_DYNAMIC_RISK_CONTROLLER",
+    "fixed_module_budget": false,
+    "live_notional_range_pct": [
+      0,
+      100
+    ],
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "leverage_allowed": false,
+    "leaderboard_can_reallocate_capital": false
+  },
+  "record_identity": {
+    "required_on_record_types": [
+      "candidate",
+      "decision",
+      "campaign",
+      "outcome",
+      "grade",
+      "pretrade_risk_facts"
+    ],
+    "required_fields": [
+      "pilot_id",
+      "book_mode",
+      "decision_contract_version",
+      "decision_contract_hash"
+    ],
+    "book_mode_enum": [
+      "LIVE",
+      "PAPER",
+      "SHADOW"
+    ],
+    "contract_hash_rule": "LOWERCASE_SHA256_OF_EXACT_CANONICAL_CONTRACT_FILE_BYTES"
+  },
+  "suspension_criteria": {
+    "entry_or_research_kill_conditions": [
+      "exact chain, leg quote, contract term, or timestamp coverage unavailable",
+      "multi-leg execution, fees, assignment, pin, or maximum-loss model absent",
+      "future leakage or repeated-contract pseudo-replication detected",
+      "any non-SHADOW book mode or nonzero trade, risk, reservation, or allocation authority"
+    ],
+    "operator_stop_semantics": "Registered SHADOW research is zero-authority; it cannot alter, release, or bypass the LIVE emergency-entry stop.",
+    "automatic_restart_allowed": false
+  },
+  "evidence_standard": {
+    "performance_status": "UNKNOWN_INSUFFICIENT_EVIDENCE",
+    "minimum_independent_position_episodes": 100,
+    "minimum_trading_sessions": 40,
+    "minimum_distinct_underlyings": 30,
+    "chronological_holdout_required": true,
+    "after_cost_clustered_ci_lower_bound_must_exceed_zero": true,
+    "independent_review_required": true,
+    "metrics_may_be_unknown": true
+  },
+  "fact_sheet_rules": {
+    "schema_version": "titan_pilot_fact_sheet_2026-08-23_v1",
+    "classification": "PRIVATE_TRADER_BRAIN",
+    "separate_by_book_mode": true,
+    "combined_performance": null,
+    "required_metrics": [
+      "after_cost_expectancy_r",
+      "ticker_session_clustered_95pct_ci",
+      "maximum_drawdown_r",
+      "profit_factor",
+      "win_rate_pct",
+      "execution_shortfall_bps",
+      "entry_slippage_bps",
+      "exit_slippage_bps",
+      "effective_independent_sample_size",
+      "distinct_ticker_session_count",
+      "trading_session_count",
+      "distinct_underlying_count",
+      "evidence_coverage_pct",
+      "policy_hash",
+      "decision_contract_hash",
+      "known_failure_modes"
+    ],
+    "forbidden_content": [
+      "credentials",
+      "raw_broker_payloads",
+      "licensed_massive_source_data",
+      "cross_book_combined_performance"
+    ],
+    "authority": "REPORTING_ONLY"
+  },
+  "promotion_policy": {
+    "automatic_live_promotion": false,
+    "leaderboard_grants_authority": false,
+    "shadow_evidence_required": true,
+    "independent_review_required": true,
+    "explicit_versioned_authorization_required": true
+  },
+  "known_failure_modes": [
+    "stale or incomplete chains can make a spread look executable when it is not",
+    "multi-leg slippage can erase theoretical edge",
+    "assignment and pin risk can invalidate simplified payoff assumptions",
+    "effective sample size can be overstated by repeated contracts on one underlying"
+  ]
+}

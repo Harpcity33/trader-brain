@@ -1,0 +1,653 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trader-brain.local/schemas/pilot-contract-2026-08-23-v1.schema.json",
+  "title": "Trader Brain Pilot Decision Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pilot_id",
+    "display_name",
+    "decision_contract_version",
+    "strategy_version",
+    "provenance",
+    "status",
+    "allowed_book_modes",
+    "broker_authority",
+    "trade_authority",
+    "truth_authorities",
+    "causal_inputs",
+    "decision_rules",
+    "instrument_scope",
+    "lane_risk_translation",
+    "cost_execution_model",
+    "session_calendar_rules",
+    "capital_policy",
+    "record_identity",
+    "suspension_criteria",
+    "evidence_standard",
+    "fact_sheet_rules",
+    "promotion_policy",
+    "known_failure_modes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "titan_pilot_contract_2026-08-23_v1"
+    },
+    "pilot_id": {
+      "type": "string",
+      "pattern": "^titan_[a-z0-9_]+$"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_contract_version": {
+      "type": "string",
+      "pattern": "^titan_[a-z0-9_]+_2026-08-23_v1$"
+    },
+    "strategy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_path",
+        "owner",
+        "reviewer",
+        "approval_authority",
+        "supersedes",
+        "superseded_by",
+        "immutable_exact_bytes",
+        "hash_algorithm"
+      ],
+      "properties": {
+        "canonical_path": {
+          "type": "string",
+          "pattern": "^config/pilots/.+\\.json$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supersedes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "superseded_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "immutable_exact_bytes": {
+          "const": true
+        },
+        "hash_algorithm": {
+          "const": "SHA-256"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "ACTIVE_LIVE",
+        "SHADOW_ONLY"
+      ]
+    },
+    "allowed_book_modes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "LIVE",
+          "PAPER",
+          "SHADOW"
+        ]
+      }
+    },
+    "broker_authority": {
+      "type": "boolean"
+    },
+    "trade_authority": {
+      "type": "boolean"
+    },
+    "truth_authorities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market_data",
+        "broker_state",
+        "live_fills",
+        "paper_fills",
+        "shadow_outcomes"
+      ],
+      "properties": {
+        "market_data": {
+          "const": "MASSIVE_DATA_ONLY"
+        },
+        "broker_state": {
+          "const": "ROBINHOOD_ONLY"
+        },
+        "live_fills": {
+          "const": "ROBINHOOD_CONFIRMED_ONLY"
+        },
+        "paper_fills": {
+          "const": "SIMULATION_MODEL_ONLY"
+        },
+        "shadow_outcomes": {
+          "const": "CAUSAL_COUNTERFACTUAL_ONLY"
+        }
+      }
+    },
+    "causal_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data_dependencies",
+        "decision_time_rule",
+        "completed_bar_rule",
+        "missing_data_rule",
+        "future_information_allowed"
+      ],
+      "properties": {
+        "data_dependencies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision_time_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completed_bar_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "missing_data_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "future_information_allowed": {
+          "const": false
+        }
+      }
+    },
+    "decision_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_status",
+        "setup_rules",
+        "entry_or_research_rules",
+        "exit_or_outcome_rules",
+        "invalidations"
+      ],
+      "properties": {
+        "implementation_status": {
+          "enum": [
+            "LIVE_IMPLEMENTED",
+            "SHADOW_NOT_IMPLEMENTED",
+            "SHADOW_RESEARCH_ONLY"
+          ]
+        },
+        "setup_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "entry_or_research_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "exit_or_outcome_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "invalidations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "instrument_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "research_only",
+        "included",
+        "excluded"
+      ],
+      "properties": {
+        "research_only": {
+          "type": "boolean"
+        },
+        "included": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lane_risk_translation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "notional_rule",
+        "stop_defined_risk_rule",
+        "stress_loss_rule",
+        "lane_adjustments"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "IMPLEMENTED",
+            "UNKNOWN_NOT_ACTIVATED"
+          ]
+        },
+        "notional_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stop_defined_risk_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stress_loss_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lane_adjustments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cost_execution_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "quote_source",
+        "spread_model",
+        "slippage_model",
+        "fee_model",
+        "fill_model",
+        "maximum_contractual_loss_rule"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "LIVE_EXECUTABLE",
+            "UNKNOWN_NOT_IMPLEMENTED",
+            "SHADOW_MODELED"
+          ]
+        },
+        "quote_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spread_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slippage_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fee_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fill_model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum_contractual_loss_rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "session_calendar_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "calendar",
+        "research_or_entry_window",
+        "mandatory_flat_rule",
+        "holiday_rule"
+      ],
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calendar": {
+          "type": "string",
+          "minLength": 1
+        },
+        "research_or_entry_window": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mandatory_flat_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "holiday_rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "capital_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocator",
+        "fixed_module_budget",
+        "live_notional_range_pct",
+        "max_unleveraged_buying_power_fraction",
+        "leverage_allowed",
+        "leaderboard_can_reallocate_capital"
+      ],
+      "properties": {
+        "allocator": {
+          "const": "CENTRAL_DYNAMIC_RISK_CONTROLLER"
+        },
+        "fixed_module_budget": {
+          "const": false
+        },
+        "live_notional_range_pct": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": 0
+            },
+            {
+              "const": 100
+            }
+          ],
+          "items": false
+        },
+        "max_unleveraged_buying_power_fraction": {
+          "const": 1.0
+        },
+        "leverage_allowed": {
+          "const": false
+        },
+        "leaderboard_can_reallocate_capital": {
+          "const": false
+        }
+      }
+    },
+    "record_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_on_record_types",
+        "required_fields",
+        "book_mode_enum",
+        "contract_hash_rule"
+      ],
+      "properties": {
+        "required_on_record_types": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "candidate",
+              "decision",
+              "campaign",
+              "outcome",
+              "grade",
+              "pretrade_risk_facts"
+            ]
+          }
+        },
+        "required_fields": {
+          "const": [
+            "pilot_id",
+            "book_mode",
+            "decision_contract_version",
+            "decision_contract_hash"
+          ]
+        },
+        "book_mode_enum": {
+          "const": [
+            "LIVE",
+            "PAPER",
+            "SHADOW"
+          ]
+        },
+        "contract_hash_rule": {
+          "const": "LOWERCASE_SHA256_OF_EXACT_CANONICAL_CONTRACT_FILE_BYTES"
+        }
+      }
+    },
+    "suspension_criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_or_research_kill_conditions",
+        "operator_stop_semantics",
+        "automatic_restart_allowed"
+      ],
+      "properties": {
+        "entry_or_research_kill_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "operator_stop_semantics": {
+          "type": "string",
+          "minLength": 1
+        },
+        "automatic_restart_allowed": {
+          "const": false
+        }
+      }
+    },
+    "evidence_standard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "performance_status",
+        "minimum_independent_position_episodes",
+        "minimum_trading_sessions",
+        "minimum_distinct_underlyings",
+        "chronological_holdout_required",
+        "after_cost_clustered_ci_lower_bound_must_exceed_zero",
+        "independent_review_required",
+        "metrics_may_be_unknown"
+      ],
+      "properties": {
+        "performance_status": {
+          "enum": [
+            "INCUMBENT_LIVE_UNSEALED",
+            "UNKNOWN_INSUFFICIENT_EVIDENCE"
+          ]
+        },
+        "minimum_independent_position_episodes": {
+          "type": "integer",
+          "minimum": 100
+        },
+        "minimum_trading_sessions": {
+          "type": "integer",
+          "minimum": 15
+        },
+        "minimum_distinct_underlyings": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chronological_holdout_required": {
+          "const": true
+        },
+        "after_cost_clustered_ci_lower_bound_must_exceed_zero": {
+          "const": true
+        },
+        "independent_review_required": {
+          "const": true
+        },
+        "metrics_may_be_unknown": {
+          "type": "boolean"
+        }
+      }
+    },
+    "fact_sheet_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "classification",
+        "separate_by_book_mode",
+        "combined_performance",
+        "required_metrics",
+        "forbidden_content",
+        "authority"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "titan_pilot_fact_sheet_2026-08-23_v1"
+        },
+        "classification": {
+          "const": "PRIVATE_TRADER_BRAIN"
+        },
+        "separate_by_book_mode": {
+          "const": true
+        },
+        "combined_performance": {
+          "const": null
+        },
+        "required_metrics": {
+          "type": "array",
+          "minItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "forbidden_content": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "authority": {
+          "const": "REPORTING_ONLY"
+        }
+      }
+    },
+    "promotion_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "automatic_live_promotion",
+        "leaderboard_grants_authority",
+        "shadow_evidence_required",
+        "independent_review_required",
+        "explicit_versioned_authorization_required"
+      ],
+      "properties": {
+        "automatic_live_promotion": {
+          "const": false
+        },
+        "leaderboard_grants_authority": {
+          "const": false
+        },
+        "shadow_evidence_required": {
+          "type": "boolean"
+        },
+        "independent_review_required": {
+          "const": true
+        },
+        "explicit_versioned_authorization_required": {
+          "const": true
+        }
+      }
+    },
+    "known_failure_modes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SHADOW_ONLY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "allowed_book_modes": {
+            "const": [
+              "SHADOW"
+            ]
+          },
+          "broker_authority": {
+            "const": false
+          },
+          "trade_authority": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}

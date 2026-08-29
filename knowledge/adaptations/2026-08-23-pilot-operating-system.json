@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-23",
+  "strategy_version": "titan_live_canonical_2026-08-23_v3",
+  "authorization": "explicit_user_authorization_to_proceed_with_phase_1_profitability_architecture",
+  "objective": "Isolate strategy evidence by Pilot and truth book, preserve one broker-authoritative live incumbent, and add auditable operating controls without reducing dynamic capital authority or activating unproven strategies.",
+  "canonical_live_pilot": {
+    "pilot_id": "titan_momentum_equity",
+    "display_name": "Titan Momentum Equity",
+    "book_mode": "LIVE",
+    "decision_contract_version": "titan_momentum_equity_2026-08-23_v1",
+    "decision_contract_path": "config/pilots/titan-momentum-equity.json",
+    "decision_contract_hash": "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21",
+    "sole_broker_authority": true,
+    "sole_live_trade_authority": true
+  },
+  "registered_shadow_pilots": [
+    {
+      "pilot_id": "titan_catalyst_swing",
+      "decision_contract_version": "titan_catalyst_swing_2026-08-23_v1",
+      "decision_contract_path": "config/pilots/titan-catalyst-swing.json",
+      "decision_contract_hash": "1b1c1f1500d215639430251810a78cdcce60ecea72cf07848af5162d1e540d56",
+      "status": "REGISTERED_INSUFFICIENT_EVIDENCE",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "trade_authority": false,
+      "risk_authorization_authority": false,
+      "capital_allocation_authority": false
+    },
+    {
+      "pilot_id": "titan_defined_risk_options",
+      "decision_contract_version": "titan_defined_risk_options_2026-08-23_v1",
+      "decision_contract_path": "config/pilots/titan-defined-risk-options.json",
+      "decision_contract_hash": "7734f8775f3c513c17120834f6954b5292c59b87b2fdb7a4a3298c2f40a49bbb",
+      "status": "REGISTERED_INSUFFICIENT_EVIDENCE",
+      "implementation_status": "NOT_IMPLEMENTED_SPREAD_RESEARCH_ONLY",
+      "trade_authority": false,
+      "risk_authorization_authority": false,
+      "capital_allocation_authority": false
+    },
+    {
+      "pilot_id": "titan_crypto_momentum",
+      "decision_contract_version": "titan_crypto_momentum_2026-08-23_v1",
+      "decision_contract_path": "config/pilots/titan-crypto-momentum.json",
+      "decision_contract_hash": "c359dd1d39f7a59e2046ee63d238c451d138335bee809ac1801ed56dca4fce0c",
+      "status": "REGISTERED_INSUFFICIENT_EVIDENCE",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "trade_authority": false,
+      "risk_authorization_authority": false,
+      "capital_allocation_authority": false
+    },
+    {
+      "pilot_id": "titan_equity_setup_challengers",
+      "decision_contract_version": "titan_equity_setup_challengers_2026-08-23_v1",
+      "decision_contract_path": "config/pilots/titan-equity-setup-challengers.json",
+      "decision_contract_hash": "b099823f49b3b13d55e8063c98662b01c6ce4293313687aae5bde683dd060f88",
+      "status": "REGISTERED_INSUFFICIENT_EVIDENCE",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "trade_authority": false,
+      "risk_authorization_authority": false,
+      "capital_allocation_authority": false
+    }
+  ],
+  "truth_books": {
+    "book_mode_enum": [
+      "LIVE",
+      "PAPER",
+      "SHADOW"
+    ],
+    "live_truth": "Robinhood-confirmed orders, fills, positions, protection, and P&L only.",
+    "paper_truth": "Causal simulation under an explicit execution-model version without broker order or fill identifiers.",
+    "shadow_truth": "Causal zero-authority observations and counterfactual outcomes without broker submissions, fills, or capital reservations.",
+    "cross_book_aggregation_allowed": false,
+    "relabeling_or_transfer_allowed": false
+  },
+  "capital_policy": {
+    "central_dynamic_risk_controller": true,
+    "fixed_pilot_budgets": false,
+    "initial_live_notional_pct_range": [
+      0,
+      100
+    ],
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "leaderboard_can_reallocate_capital": false,
+    "shadow_pilots_can_reserve_capital": false
+  },
+  "operational_controls": {
+    "emergency_entry_stop": "durable_fail_closed_blocks_entry_add_reentry_runtime_release_unavailable",
+    "emergency_entry_stop_release": "stopped_service_explicit_user_approval_only",
+    "broker_ack_deadline_seconds": 10,
+    "buying_power_mismatch_tolerance_formula": "max(5.0, 0.01 * current_broker_confirmed_equity_dollars)",
+    "standardized_pretrade_schema": "titan_live_pretrade_risk_facts_2026-08-23_v1",
+    "final_preview_precedes_entry_gate": true,
+    "entry_gate_returns_canonical_pretrade_facts": true,
+    "preview_identity_is_preserved_in_authorization": true,
+    "submission_intent_is_append_only_before_broker_call": true,
+    "broker_ack_deadline_anchor": "submission_intent_at_plus_10_seconds",
+    "submission_unknown_resolution_states": [
+      "ORDER_FOUND",
+      "NO_ORDER_CONFIRMED"
+    ],
+    "order_found_stays_serialized_until_campaign_bind": true
+  },
+  "reporting": {
+    "fact_sheet_schema": "titan_pilot_fact_sheet_2026-08-23_v1",
+    "leaderboard_schema": "titan_pilot_leaderboard_2026-08-23_v1",
+    "leaderboard_authority": "REPORTING_ONLY",
+    "shadow_pilots_initial_rank": null,
+    "shadow_pilots_initial_status": "REGISTERED_INSUFFICIENT_EVIDENCE",
+    "numeric_metrics_may_remain_unknown": true,
+    "fabricated_metrics_prohibited": true
+  },
+  "pending_final_integration_hashes": {
+    "canonical_automation_sha256": "94104e2c13620496b15e4b4aaa3a4688061ff7eae082fbd1fbe616787f78ef2f",
+    "protected_semantics_sha256": "f774dbd01d1b28176f7b92140c5c985fbf1fb4c905a2380d4faab3f880ed5bb2",
+    "runtime_storage_sha256": "f1a1c35bc87904f7e16ecf158cbe81bf6fd2d0e57a653a0c229d3d4346d6d9ad",
+    "runtime_cli_sha256": "409c07660326bce7c630298e4eeba6069461258e30c74451ecab1bae3f4cff3a",
+    "runtime_config_sha256": "a5ba3e5f89a2f659d7a50ddd57cccf0005bc002a9888ae331992303a4eb3ddd4",
+    "runtime_massive_sha256": "cda862f2283d6a0ec12d3a47f33fa4f93dc0f1e36dd42b3a5ba6e8a22b9c0eae",
+    "validator_sha256": "f55cf7477b55031a25fc21433864e1838d22ac732ec05a20a42d95b51f0123ec"
+  },
+  "deployment": {
+    "status": "deployed",
+    "live_runtime_changed": true,
+    "broker_calls_during_build": 0,
+    "orders_created_during_build": 0,
+    "github_changed_during_build": false
+  }
+}

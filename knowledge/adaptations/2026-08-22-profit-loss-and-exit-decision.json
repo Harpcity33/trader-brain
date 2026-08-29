@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "change_id": "titan_profit_loss_golden_rule_2026_08_22_v1",
+  "authorized_at": "2026-08-22",
+  "status": "production_rule",
+  "execution_model": {
+    "market_data": "Massive",
+    "decision_controller": "Robinhood Titan Momentum Engine heartbeat",
+    "broker": "Robinhood Agentic Trading",
+    "account_display": "ending 7153",
+    "autonomous_submission_authorized": true
+  },
+  "golden_rule": {
+    "primary_daily_attack_objective_net_usd": 150,
+    "hard_account_day_loss_lock_usd": -100,
+    "warning_recalibration_usd": -75,
+    "opening_attack_window_et": "09:30-10:30",
+    "equity_submission_not_before_et": "09:35",
+    "option_submission_not_before_et": "09:45",
+    "profit_objective_is_guarantee": false,
+    "forced_trade_authorized": false,
+    "loss_lock_overridable": false
+  },
+  "aggressive_participation": [
+    "mandatory opening-window market discovery and broker audit on every wake",
+    "maintain exact plans for the best one or two independent candidates",
+    "submit promptly when every controlling live gate and exact trigger passes",
+    "use authorized size when structure, liquidity, protection, and loss headroom support it",
+    "do not default to token size from generalized conservatism"
+  ],
+  "later_exit_study": {
+    "status": "no_promotion",
+    "source_rows_scanned": 3311045,
+    "observed_rth_rows_analyzed": 2163448,
+    "trigger_rows_accounted": 37432,
+    "causal_trades": 3380,
+    "primary_live_comparable_trades": 1160,
+    "exit_rules": 23,
+    "cost_scenarios_bps_each_side": [0, 5, 10, 20],
+    "selected_later_rule": null,
+    "decision": "Retain existing structural exits and conditional runner logic; do not delay exits merely to pursue the daily profit objective."
+  },
+  "evidence": {
+    "equity_bars_1m_sha256": "936d5cc22633e4ace7b6014424d0e2d284e8166431f0249829015a2be8165415",
+    "later_exit_manifest_sha256": "d0dd0a2c56559d932cfa7964a6ab59a2d0cf1f0d403a10e7efba81f022fdbae0",
+    "full_candle_report": "knowledge/reports/2026-08-22-full-candle-exit-study.md"
+  },
+  "unchanged_controls": [
+    "Massive is data-only and never proves an order or fill",
+    "fresh Robinhood account, order, position, quote, Level 2, and review state",
+    "structural trigger, invalidation, chase, liquidity, spread, and depth gates",
+    "full-quantity protection and broker-confirmed reconciliation",
+    "catastrophe stop and no-overnight rule",
+    "aggregate, correlated, and lane risk limits"
+  ],
+  "rollback": {
+    "automation": "restore the dated pre-amendment automation backup and revalidate TOML, task identity, schedule, and target thread",
+    "policy_record": "supersede this immutable record with a newer explicitly authorized version; do not rewrite history"
+  }
+}

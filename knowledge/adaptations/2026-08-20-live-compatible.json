@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_report": "knowledge/reports/2026-08-20-trader-brain-handoff.md",
+  "source_sha256": "9708d270101a0259fa05a4b651d587ceab37145677c38864ef43b37abcce5f48",
+  "authorized_by_user": true,
+  "authorization_scope": "Adapt Titan strategy without weakening newer live rules",
+  "accepted_adaptations": [
+    {
+      "id": "persistent_event_decisions",
+      "category": "data_collection",
+      "status": "approved",
+      "rule": "Record every reviewed runtime event with its contemporaneous decision and reason before acknowledgement. Preserve append-only history for EOD reconstruction."
+    },
+    {
+      "id": "reject_entry_keep_watch",
+      "category": "scanner_logic",
+      "status": "approved",
+      "rule": "Separate immediate entry rejection from momentum-watch eligibility. Extension alone may reject a chase without discarding a liquid leader that can form a new valid base or reclaim."
+    },
+    {
+      "id": "remaining_capacity_ranking",
+      "category": "strategy_logic",
+      "status": "approved",
+      "rule": "Rank executable opportunity using live structure, liquidity, participation, sector confirmation, catalyst integrity when applicable, and remaining move capacity; raw percentage gain is not the primary rank."
+    },
+    {
+      "id": "downside_long_put_board",
+      "category": "scanner_logic",
+      "status": "approved",
+      "rule": "Maintain a downside board for qualifying underlyings. Execution remains limited to independently qualified single-leg long puts under all existing option rules; no short stock or spreads."
+    },
+    {
+      "id": "transformative_catalyst_context",
+      "category": "strategy_logic",
+      "status": "approved",
+      "rule": "Treat a verified transformative catalyst as evidence that historical gap envelopes may be less predictive, while retaining live structure, ATR/chase, exhaustion, liquidity, dilution, risk, review, and protection gates."
+    },
+    {
+      "id": "massive_exhaustive_promoted_coverage",
+      "category": "data_collection",
+      "status": "approved",
+      "rule": "At 04:00 ET refresh the full active common-stock/ADR universe and full-market baseline, process every eligible one-minute aggregate as live bars arrive, and maintain quote/one-second subscriptions for 100% of symbols promoted by the broad watch gates without a top-30 truncation."
+    },
+    {
+      "id": "weighted_preliminary_trade_plans",
+      "category": "analytics",
+      "status": "approved",
+      "rule": "Persist the Trader Brain weighted opportunity score, evidence coverage, ATR-based remaining-move-capacity estimate, and preliminary trigger/stop/target plan for every promoted candidate. These artifacts rank attention only and cannot bypass complete live Titan or broker gates."
+    }
+  ],
+  "explicitly_excluded": [
+    "paper-only $500 cash-account model",
+    "mandatory full-capital deployment",
+    "forced lower-conviction trades",
+    "same-day cash-account settlement restrictions replacing Limited Margin rules",
+    "swing or overnight positions",
+    "short stock",
+    "option spreads",
+    "retroactive or reconstructed fills",
+    "any weakening of broker review, protection, loss caps, liquidity, dilution, manipulation, authentication, or no-overnight rules"
+  ]
+}

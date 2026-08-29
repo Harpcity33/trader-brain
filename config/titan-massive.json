@@ -1,0 +1,154 @@
+{
+  "mode": "shadow",
+  "websocket_url": "wss://socket.massive.com/stocks",
+  "rest_base_url": "https://api.massive.com",
+  "keychain_service": "titan-massive-api",
+  "database_path": "~/Library/Application Support/Titan Momentum/runtime/titan-intelligence.sqlite3",
+  "event_export_path": "~/Library/Application Support/Titan Momentum/runtime/events.jsonl",
+  "log_path": "~/Library/Application Support/Titan Momentum/runtime/titan-massive.log",
+  "timezone": "America/New_York",
+  "start_time_et": "04:00",
+  "stop_time_et": "16:05",
+  "snapshot_refresh_seconds": 300,
+  "stale_data_seconds": 90,
+  "quote_watch_count": 1000,
+  "eligible_ticker_types": [
+    "CS",
+    "ADRC",
+    "ETF",
+    "FUND"
+  ],
+  "candidate_min_signal_strength": 62,
+  "candidate_min_price": 1,
+  "candidate_max_price": 1000,
+  "candidate_min_gap_pct": 4,
+  "watch_min_gap_pct": 3,
+  "candidate_min_dollar_volume": 2000000,
+  "watch_min_signal_strength": 50,
+  "under5_min_dollar_volume": 7500000,
+  "max_quote_spread_pct": 0.75,
+  "under5_max_quote_spread_pct": 0.9375,
+  "retention_days": 15,
+  "score_is_entry_gate": false,
+  "fresh_news_required": false,
+  "state_is_entry_gate": false,
+  "entry_states": [
+    "BUILDING",
+    "ACCELERATING",
+    "BREAKOUT"
+  ],
+  "max_spread_to_structural_risk": 0.15,
+  "shadow_policy_version": "sol_ultra_pilot_architecture_2026-08-23_v4",
+  "policy_version": "capital_flexible_live_preparation_2026-08-23_v2",
+  "supersedes_policy_version": "profit_seeking_live_preparation_2026-08-22_v1",
+  "sizing_policy": {
+    "version": "capital_flexible_sizing_2026-08-23_v2",
+    "max_unleveraged_buying_power_fraction": 1.0,
+    "account_day_loss_limit_dollars": 100,
+    "single_setup_concentration_allowed": true,
+    "leverage_allowed": false,
+    "initial_allocation_pct_range": [
+      0,
+      100
+    ],
+    "full_initial_allocation_allowed": true,
+    "adds_optional": true
+  },
+  "pilot_architecture": {
+    "version": "titan_pilot_registry_2026-08-23_v1",
+    "registry_path": "pilots/registry-2026-08-23-v1.json",
+    "registry_hash": "5c36bffef679adef038a3556b82eb03ad1b3373ce076d41d4b370c9d93aa7f72",
+    "current_watcher_identity": {
+      "pilot_id": "titan_momentum_equity",
+      "book_mode": "SHADOW",
+      "decision_contract_version": "titan_momentum_equity_2026-08-23_v1",
+      "decision_contract_hash": "dba59bd7fb006e5c0ec8fd31fb467076638ba6de9e30442fdc5411449c4d7c21",
+      "decision_contract_path": "pilots/titan-momentum-equity.json",
+      "strategy_version": "titan_live_canonical_2026-08-23_v3",
+      "trade_authority": false,
+      "broker_authority": false,
+      "risk_authorization_authority": false,
+      "buying_power_reservation_authority": false,
+      "capital_allocation_authority": false
+    },
+    "sole_live_pilot_id": "titan_momentum_equity",
+    "sole_broker_authority_pilot_id": "titan_momentum_equity",
+    "registered_shadow_only_pilots": [
+      "titan_catalyst_swing",
+      "titan_defined_risk_options",
+      "titan_crypto_momentum",
+      "titan_equity_setup_challengers"
+    ],
+    "activated_shadow_research_pilots": [],
+    "book_mode_enum": [
+      "LIVE",
+      "PAPER",
+      "SHADOW"
+    ],
+    "truth_books_must_be_separate": true,
+    "cross_book_aggregation_allowed": false,
+    "leaderboard_authority": "REPORTING_ONLY",
+    "central_dynamic_allocator": true,
+    "fixed_module_budgets": false,
+    "shadow_pilot_trade_authority": false,
+    "shadow_pilot_risk_authorization_authority": false,
+    "shadow_pilot_capital_allocation_authority": false
+  },
+  "live_operational_contract": {
+    "pretrade_risk_facts_schema_version": "titan_live_pretrade_risk_facts_2026-08-23_v1",
+    "pre_submit_sequence": [
+      "FRESH_BROKER_RECONCILIATION",
+      "EMERGENCY_ENTRY_STOP_STATUS",
+      "EXACT_ROBINHOOD_PREVIEW",
+      "PREVIEW_COMPARISON",
+      "ENTRY_RISK_GATE_AND_RESERVATION",
+      "DURABLE_SUBMISSION_INTENT",
+      "BROKER_ORDER_REQUEST"
+    ],
+    "required_preview_fields": [
+      "preview_id",
+      "preview_confirmed_at",
+      "preview_account_key",
+      "preview_instrument_key",
+      "preview_side",
+      "preview_order_quantity",
+      "preview_limit_price",
+      "preview_equity_dollars",
+      "preview_current_gross_exposure_dollars",
+      "preview_working_entry_notional_dollars",
+      "preview_projected_cost_dollars"
+    ],
+    "broker_ack_deadline_seconds": 10,
+    "broker_ack_deadline_anchor": "SUBMISSION_INTENT_AT",
+    "submission_intent_initial_timestamps": null,
+    "submission_intent_append_only": true,
+    "submission_unknown_resolution_states": [
+      "ORDER_FOUND",
+      "NO_ORDER_CONFIRMED"
+    ],
+    "order_found_remains_serialized_until_campaign_bind": true,
+    "no_order_resolution_requires_newer_broker_snapshot": true,
+    "buying_power_mismatch_tolerance_formula": "max(5.0, 0.01 * current_broker_confirmed_equity_dollars)",
+    "hard_block_projected_gross_above_equity": true,
+    "hard_block_notional_above_unleveraged_buying_power": true,
+    "hard_block_account_or_quantity_contradiction": true,
+    "hard_block_negative_money_value": true,
+    "emergency_entry_stop_fail_closed": true,
+    "emergency_entry_stop_blocks": [
+      "ENTRY",
+      "ADD",
+      "REENTRY"
+    ],
+    "emergency_entry_stop_does_not_block": [
+      "PROTECTION",
+      "EXIT",
+      "CANCEL",
+      "CLOSEOUT",
+      "RECONCILIATION",
+      "GRADING",
+      "REPORTING"
+    ],
+    "emergency_entry_stop_release_authority": "STOPPED_SERVICE_EXPLICIT_USER_APPROVAL_ONLY",
+    "emergency_entry_stop_release_interface": "UNAVAILABLE_IN_AUTOMATION_RUNTIME"
+  }
+}

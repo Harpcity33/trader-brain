@@ -1,0 +1,43 @@
+#!/bin/zsh
+set -euo pipefail
+
+PROJECT_ROOT="${0:A:h:h}"
+TEMPLATE="${PROJECT_ROOT}/config/com.titan.momentum-watcher.plist.template"
+TARGET_DIR="${HOME}/Library/LaunchAgents"
+TARGET="${TARGET_DIR}/com.titan.momentum-watcher.plist"
+DEPLOY_ROOT="${HOME}/Library/Application Support/Titan Momentum"
+TEMP_FILE="$(mktemp -t titan-momentum-watcher.XXXXXX)"
+trap 'rm -f "${TEMP_FILE}"' EXIT
+
+mkdir -p \
+  "${TARGET_DIR}" \
+  "${DEPLOY_ROOT}/config" \
+  "${DEPLOY_ROOT}/runtime" \
+  "${DEPLOY_ROOT}/scripts" \
+  "${DEPLOY_ROOT}/titan_runtime"
+
+# LaunchAgents can be denied access to code under ~/Documents by macOS privacy
+# controls. Keep a runtime-only deployment under Application Support instead.
+cp -R "${PROJECT_ROOT}/titan_runtime/." "${DEPLOY_ROOT}/titan_runtime/"
+cp "${PROJECT_ROOT}/scripts/titan-massive" "${DEPLOY_ROOT}/scripts/titan-massive"
+cp "${PROJECT_ROOT}/scripts/ingest-trader-brain-daily" "${DEPLOY_ROOT}/scripts/ingest-trader-brain-daily"
+cp "${PROJECT_ROOT}/config/titan-massive.json" "${DEPLOY_ROOT}/config/titan-massive.json"
+chmod 700 \
+  "${DEPLOY_ROOT}/scripts/titan-massive" \
+  "${DEPLOY_ROOT}/scripts/ingest-trader-brain-daily"
+
+if [[ ! -e "${DEPLOY_ROOT}/runtime/titan-intelligence.sqlite3" && -e "${PROJECT_ROOT}/runtime/titan-intelligence.sqlite3" ]]; then
+  cp "${PROJECT_ROOT}/runtime/titan-intelligence.sqlite3" "${DEPLOY_ROOT}/runtime/titan-intelligence.sqlite3"
+fi
+
+sed "s|__PROJECT_ROOT__|${DEPLOY_ROOT}|g" "${TEMPLATE}" > "${TEMP_FILE}"
+plutil -lint "${TEMP_FILE}"
+cp "${TEMP_FILE}" "${TARGET}"
+launchctl bootout "gui/${UID}/com.titan.momentum-watcher" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/${UID}" "${TARGET}"
+launchctl enable "gui/${UID}/com.titan.momentum-watcher"
+launchctl kickstart -k "gui/${UID}/com.titan.momentum-watcher"
+
+echo "Installed ${TARGET}"
+echo "Deployed watcher runtime to ${DEPLOY_ROOT}"
+echo "The watcher will start at 04:00 ET on weekdays for premarket collection."

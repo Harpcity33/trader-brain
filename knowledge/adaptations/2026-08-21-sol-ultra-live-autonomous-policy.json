@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "change_id": "sol_ultra_live_autonomous_2026_08_21_v1",
+  "authorized_at": "2026-08-21",
+  "status": "production_rule",
+  "execution_model": {
+    "market_data": "Massive",
+    "decision_controller": "Robinhood Titan Momentum Engine heartbeat",
+    "broker": "Robinhood Agentic Trading",
+    "account_display": "ending 7153",
+    "autonomous_submission_authorized": true
+  },
+  "promoted_changes": [
+    "opportunity and acceleration scores are ranking and measurement inputs, not entry vetoes",
+    "fresh news is optional while adverse-news, filing, dilution, listing, and manipulation checks remain mandatory",
+    "momentum state is context rather than a standalone authorization gate",
+    "opening-range breakout, VWAP reclaim or hold, and first controlled pullback receive priority above $5",
+    "duplicate trigger exposure is limited by symbol and ticker-session",
+    "quoted spread must not exceed 15 percent of structural risk"
+  ],
+  "unchanged_controls": [
+    "Robinhood account, position, order, and buying-power audit",
+    "fresh Massive and Robinhood quotes",
+    "Robinhood Level 2 and lane-specific spread and depth",
+    "exact contemporaneous trigger and causal structure",
+    "structural invalidation and chase controls",
+    "halt, eligibility, filing, dilution, listing, promotion, and manipulation rejection",
+    "clean broker review and broker-confirmed order status",
+    "full-quantity protective order",
+    "allocation, aggregate-risk, correlated-risk, and daily-loss ceilings",
+    "no leverage, averaging down, widened catastrophe stop, or overnight exposure"
+  ],
+  "runtime_policy": {
+    "score_is_entry_gate": false,
+    "fresh_news_required": false,
+    "state_is_entry_gate": false,
+    "max_spread_to_structural_risk": 0.15,
+    "strategy_version": "sol_ultra_live_autonomous_2026-08-21_v1"
+  },
+  "evidence_boundary": {
+    "live_risk_expansion_supported": false,
+    "note": "SOL Ultra supported broader candidate participation and setup prioritization, not higher live sizing or loss ceilings."
+  },
+  "rollback": {
+    "automation": "remove or supersede the SOL ULTRA MASSIVE LIVE-AUTONOMOUS POLICY amendment",
+    "runtime": "restore the pre-promotion config and runtime files from the dated deployment backup",
+    "candidate_gates": "set score_is_entry_gate, fresh_news_required, or state_is_entry_gate to true as needed"
+  }
+}

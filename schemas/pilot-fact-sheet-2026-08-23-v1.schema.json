@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trader-brain.local/schemas/pilot-fact-sheet-2026-08-23-v1.schema.json",
+  "title": "Private Trader Brain Per-Book Pilot Fact Sheet",
+  "description": "One immutable fact sheet describes exactly one Pilot and one LIVE, PAPER, or SHADOW truth book. Recorder output is reporting-only and grants no trade or capital-reallocation authority.",
+  "x-trader-brain-authority": {
+    "reporting_only": true,
+    "trade_authority": false,
+    "capital_reallocation_authority": false
+  },
+  "x-trader-brain-contract-metric-mapping": {
+    "after_cost_expectancy_r": ["metrics.net_expectancy_r_after_costs"],
+    "ticker_session_clustered_95pct_ci": [
+      "metrics.clustered_95pct_lower_bound_expectancy_r",
+      "metrics.clustered_95pct_upper_bound_expectancy_r"
+    ],
+    "maximum_drawdown_r": ["metrics.max_drawdown_r"],
+    "profit_factor": ["metrics.profit_factor"],
+    "win_rate_pct": ["metrics.win_rate_pct"],
+    "execution_shortfall_bps": ["metrics.execution_shortfall_bps"],
+    "entry_slippage_bps": ["metrics.entry_slippage_bps"],
+    "exit_slippage_bps": ["metrics.exit_slippage_bps"],
+    "effective_independent_sample_size": ["metrics.effective_independent_sample_size"],
+    "distinct_ticker_session_count": ["metrics.distinct_ticker_session_count"],
+    "trading_session_count": ["metrics.session_count"],
+    "distinct_underlying_count": ["metrics.underlying_count"],
+    "evidence_coverage_pct": ["metrics.evidence_coverage_pct"],
+    "policy_hash": ["policy_hash"],
+    "decision_contract_hash": ["decision_contract_hash"],
+    "known_failure_modes": ["known_failure_modes"]
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pilot_id",
+    "pilot_name",
+    "book_mode",
+    "fact_sheet_version",
+    "decision_contract_version",
+    "decision_contract_hash",
+    "policy_hash",
+    "measured_through",
+    "evidence_status",
+    "metrics",
+    "known_failure_modes",
+    "evidence"
+  ],
+  "properties": {
+    "pilot_id": {
+      "type": "string",
+      "pattern": "^titan_[a-z0-9_]+$"
+    },
+    "pilot_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "book_mode": {
+      "enum": ["LIVE", "PAPER", "SHADOW"]
+    },
+    "fact_sheet_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_contract_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_contract_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "policy_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "measured_through": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence_status": {
+      "enum": ["INSUFFICIENT", "ESTIMABLE"]
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "known_failure_modes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "minProperties": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidence_status": {"const": "INSUFFICIENT"}
+        }
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "net_expectancy_r_after_costs": {"const": null},
+              "clustered_95pct_lower_bound_expectancy_r": {"const": null},
+              "clustered_95pct_upper_bound_expectancy_r": {"const": null},
+              "expected_shortfall_95_r": {"const": null},
+              "expected_shortfall_99_r": {"const": null},
+              "max_drawdown_r": {"const": null},
+              "profit_factor": {"const": null},
+              "win_rate_pct": {"const": null},
+              "execution_shortfall_bps": {"const": null},
+              "entry_slippage_bps": {"const": null},
+              "exit_slippage_bps": {"const": null},
+              "top_day_profit_concentration_pct": {"const": null},
+              "largest_winner_profit_concentration_pct": {"const": null}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_status": {"const": "ESTIMABLE"}
+        }
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "net_expectancy_r_after_costs": {"type": "number"},
+              "clustered_95pct_lower_bound_expectancy_r": {"type": "number"},
+              "clustered_95pct_upper_bound_expectancy_r": {"type": "number"},
+              "expected_shortfall_95_r": {"type": "number", "minimum": 0},
+              "expected_shortfall_99_r": {"type": "number", "minimum": 0},
+              "max_drawdown_r": {"type": "number", "minimum": 0},
+              "profit_factor": {"type": "number", "minimum": 0},
+              "win_rate_pct": {"type": "number", "minimum": 0, "maximum": 100},
+              "execution_shortfall_bps": {"type": "number", "minimum": 0},
+              "entry_slippage_bps": {"type": "number"},
+              "exit_slippage_bps": {"type": "number"},
+              "top_day_profit_concentration_pct": {"type": "number", "minimum": 0, "maximum": 100},
+              "largest_winner_profit_concentration_pct": {"type": "number", "minimum": 0, "maximum": 100},
+              "effective_independent_sample_size": {"type": "number", "exclusiveMinimum": 0},
+              "position_episode_count": {"type": "integer", "minimum": 100},
+              "distinct_ticker_session_count": {"type": "integer", "minimum": 1},
+              "session_count": {"type": "integer", "minimum": 40},
+              "underlying_count": {"type": "integer", "minimum": 30}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "percentage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "net_expectancy_r_after_costs",
+        "clustered_95pct_lower_bound_expectancy_r",
+        "clustered_95pct_upper_bound_expectancy_r",
+        "expected_shortfall_95_r",
+        "expected_shortfall_99_r",
+        "max_drawdown_r",
+        "profit_factor",
+        "win_rate_pct",
+        "execution_shortfall_bps",
+        "entry_slippage_bps",
+        "exit_slippage_bps",
+        "top_day_profit_concentration_pct",
+        "largest_winner_profit_concentration_pct",
+        "effective_independent_sample_size",
+        "evidence_coverage_pct",
+        "quote_coverage_pct",
+        "fill_rate_pct",
+        "no_fill_rate_pct",
+        "stale_data_rate_pct",
+        "order_reject_rate_pct",
+        "position_episode_count",
+        "distinct_ticker_session_count",
+        "session_count",
+        "underlying_count",
+        "control_breach_count"
+      ],
+      "properties": {
+        "net_expectancy_r_after_costs": {"$ref": "#/$defs/nullableNumber"},
+        "clustered_95pct_lower_bound_expectancy_r": {"$ref": "#/$defs/nullableNumber"},
+        "clustered_95pct_upper_bound_expectancy_r": {"$ref": "#/$defs/nullableNumber"},
+        "expected_shortfall_95_r": {"$ref": "#/$defs/nullableNumber"},
+        "expected_shortfall_99_r": {"$ref": "#/$defs/nullableNumber"},
+        "max_drawdown_r": {"$ref": "#/$defs/nullableNumber"},
+        "profit_factor": {"$ref": "#/$defs/nullableNumber"},
+        "win_rate_pct": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "execution_shortfall_bps": {"$ref": "#/$defs/nullableNumber"},
+        "entry_slippage_bps": {"$ref": "#/$defs/nullableNumber"},
+        "exit_slippage_bps": {"$ref": "#/$defs/nullableNumber"},
+        "top_day_profit_concentration_pct": {"$ref": "#/$defs/nullableNumber"},
+        "largest_winner_profit_concentration_pct": {"$ref": "#/$defs/nullableNumber"},
+        "effective_independent_sample_size": {"type": "number", "minimum": 0},
+        "evidence_coverage_pct": {"$ref": "#/$defs/percentage"},
+        "quote_coverage_pct": {"$ref": "#/$defs/percentage"},
+        "fill_rate_pct": {"$ref": "#/$defs/percentage"},
+        "no_fill_rate_pct": {"$ref": "#/$defs/percentage"},
+        "stale_data_rate_pct": {"$ref": "#/$defs/percentage"},
+        "order_reject_rate_pct": {"$ref": "#/$defs/percentage"},
+        "position_episode_count": {"type": "integer", "minimum": 0},
+        "distinct_ticker_session_count": {"type": "integer", "minimum": 0},
+        "session_count": {"type": "integer", "minimum": 0},
+        "underlying_count": {"type": "integer", "minimum": 0},
+        "control_breach_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
