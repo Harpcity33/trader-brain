@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Harpcity33/trader-brain/schemas/trade-record.schema.json",
+  "title": "Titan isolated trade record",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "trade_id",
+    "strategy_id",
+    "ledger_kind",
+    "setup_id",
+    "instrument",
+    "recorded_at",
+    "planned_risk_dollars",
+    "planned_risk_pct",
+    "stress_risk_dollars",
+    "stress_risk_pct",
+    "setup_score",
+    "execution_score",
+    "market_regime",
+    "actual_route",
+    "shadow_routes",
+    "metrics"
+  ],
+  "properties": {
+    "trade_id": {"type": "string", "minLength": 1},
+    "strategy_id": {"type": "string", "minLength": 1},
+    "ledger_kind": {
+      "enum": ["live-equity", "live-options", "paper-aggressive"]
+    },
+    "setup_id": {
+      "enum": [
+        "OPENING_DRIVE_CONTINUATION",
+        "ORB_BREAKOUT",
+        "FIRST_PULLBACK",
+        "VWAP_RECLAIM",
+        "VWAP_CONTINUATION",
+        "CATALYST_CONTINUATION",
+        "GAP_CONTINUATION",
+        "FAILED_BREAKOUT_REVERSAL",
+        "SECTOR_SYMPATHY",
+        "POST_EARNINGS_CONTINUATION",
+        "OTHER_APPROVED_SETUP"
+      ]
+    },
+    "instrument": {
+      "enum": ["stock", "long_call", "long_put", "debit_spread"]
+    },
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "planned_risk_dollars": {"type": "number", "minimum": 0},
+    "planned_risk_pct": {"type": "number", "minimum": 0},
+    "stress_risk_dollars": {"type": "number", "minimum": 0},
+    "stress_risk_pct": {"type": "number", "minimum": 0},
+    "setup_score": {"type": "number", "minimum": 0, "maximum": 100},
+    "execution_score": {"type": "number", "minimum": 0, "maximum": 100},
+    "market_regime": {"type": "string", "minLength": 1},
+    "actual_route": {"type": "object"},
+    "shadow_routes": {"type": "object"},
+    "metrics": {
+      "type": "object",
+      "required": [
+        "planned_R",
+        "realized_R",
+        "MAE_R",
+        "MFE_R",
+        "exit_efficiency",
+        "gross_PnL",
+        "net_PnL",
+        "spread_cost",
+        "slippage_cost",
+        "process_grade"
+      ]
+    }
+  }
+}
+

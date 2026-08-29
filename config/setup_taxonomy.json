@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "required_field": "setup_id",
+  "setup_ids": [
+    "OPENING_DRIVE_CONTINUATION",
+    "ORB_BREAKOUT",
+    "FIRST_PULLBACK",
+    "VWAP_RECLAIM",
+    "VWAP_CONTINUATION",
+    "CATALYST_CONTINUATION",
+    "GAP_CONTINUATION",
+    "FAILED_BREAKOUT_REVERSAL",
+    "SECTOR_SYMPATHY",
+    "POST_EARNINGS_CONTINUATION",
+    "OTHER_APPROVED_SETUP"
+  ],
+  "policy": {
+    "generic_momentum_is_not_a_valid_setup_id": true,
+    "unknown_setup_ids_fail_closed": true,
+    "statistics_are_partitioned_by_setup_id": true
+  }
+}

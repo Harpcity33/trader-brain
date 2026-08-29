@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "strategy_id": "titan_daily_market_study_v1",
+  "automation_id": "titan-daily-market-study",
+  "timezone": "America/New_York",
+  "schedule": {
+    "kind": "single_daily_cron_workflow",
+    "start_local": "04:00:00",
+    "analysis_deadline_local": "06:30:00",
+    "valid_us_trading_days_only": true,
+    "single_run_per_trading_day": true,
+    "authoritative_market_calendar_required": true,
+    "unexpected_closure_behavior": "skip_and_report_research_unavailable",
+    "rrule": "DTSTART;TZID=America/New_York:20260831T040000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
+  },
+  "history": {
+    "minimum_months": 6,
+    "preferred_months": 12,
+    "missing_data_behavior": "mark_UNAVAILABLE_never_infer_or_fabricate",
+    "windows": [
+      {
+        "id": "prior_day",
+        "importance": "very_high_diagnostic",
+        "purpose": "process_execution_false_positive_and_missed_opportunity_diagnosis"
+      },
+      {
+        "id": "last_7_days",
+        "importance": "high_tactical",
+        "purpose": "near_term_setup_and_execution_behavior"
+      },
+      {
+        "id": "last_30_days",
+        "importance": "high_regime",
+        "purpose": "current_regime_breadth_volatility_and_setup_expectancy"
+      },
+      {
+        "id": "last_90_days",
+        "importance": "medium_high_stability",
+        "purpose": "rolling_stability_and_regime_transition_context"
+      },
+      {
+        "id": "six_months",
+        "importance": "medium_structural",
+        "purpose": "minimum_walk_forward_and_structural_history"
+      },
+      {
+        "id": "twelve_months",
+        "importance": "background_regime_comparison",
+        "purpose": "preferred_long_horizon_context_when_data_quality_permits"
+      }
+    ],
+    "validation": {
+      "time_ordered_walk_forward": true,
+      "rolling_windows": true,
+      "regime_segmentation": true,
+      "out_of_sample_evaluation": true,
+      "realistic_execution_assumptions": true,
+      "no_single_day_refit": true
+    }
+  },
+  "prior_day_audit": {
+    "must_run_first": true,
+    "artifact_classes": [
+      "predictions/premarket",
+      "live_candidates",
+      "ledgers/paper",
+      "ledgers/live-equity",
+      "ledgers/live-options",
+      "rejections-and-no-trades",
+      "fills-and-execution",
+      "reviews/eod",
+      "operational-errors",
+      "knowledge/promoted-edges",
+      "research/observations"
+    ],
+    "process_outcome_quadrants": [
+      "GOOD_PROCESS_GOOD_OUTCOME",
+      "GOOD_PROCESS_BAD_OUTCOME",
+      "BAD_PROCESS_GOOD_OUTCOME",
+      "BAD_PROCESS_BAD_OUTCOME"
+    ],
+    "profitable_rule_violation_policy": "diagnose_but_never_reinforce_or_promote"
+  },
+  "daily_strategy": {
+    "artifact_path_template": "research/daily-strategy/{trading_date}.md",
+    "write_mode": "create_exclusive",
+    "overwrite": false,
+    "top_candidate_limit": 5,
+    "pad_candidate_list": false,
+    "daily_tactical_adjustment_expiration": "end_of_current_trading_day",
+    "permanent_edge_mutation_authority": false
+  },
+  "failure_isolation": {
+    "may_pause_or_edit_live_equity_automation": false,
+    "may_mutate_broker_orders": false,
+    "research_failure_behavior": "publish_partial_artifact_with_unavailable_fields_when_safe",
+    "massive_gap_behavior": "mark_UNAVAILABLE_and_continue_independent_stages",
+    "optional_route_failure_behavior": "mark_UNAVAILABLE_and_preserve_equity_desk"
+  }
+}

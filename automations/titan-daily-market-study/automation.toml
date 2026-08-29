@@ -1,0 +1,27 @@
+version = 1
+id = "titan-daily-market-study"
+kind = "cron"
+name = "Titan Daily Market Study — 04:00–06:30 ET"
+prompt = '''
+Run one independent Titan daily market-study workflow for repository Harpcity33/trader-brain under strategy titan_daily_market_study_v1. This is research only. It has no authority to place, cancel, or replace a broker order and must never pause, edit, replace, or otherwise interfere with the existing robinhood-momentum-engine live equity heartbeat.
+
+First verify the date against an authoritative U.S. exchange calendar. If it is a weekend, market holiday, or unexpected closure, do not guess and do not create a normal trading-day plan. Report the market-study run as not applicable. If the calendar itself is unavailable, report research unavailable and stop this research workflow only.
+
+For a valid trading day, begin by reading the prior trading day's immutable Titan artifacts from the repository: premarket predictions, live candidates, paper trades, live equity trades, live option trades, rejected and NO TRADE decisions, broker-confirmed fills and execution data, EOD review, operational errors, promoted-edge state, and unvalidated observations. Ask the complete process, timing, MAE/MFE, exit, route, IV/theta, slippage, false-positive, and missed-opportunity questions. Classify each structured signal as GOOD_PROCESS_GOOD_OUTCOME, GOOD_PROCESS_BAD_OUTCOME, BAD_PROCESS_GOOD_OUTCOME, or BAD_PROCESS_BAD_OUTCOME. Never reinforce a profitable process violation.
+
+Then use Massive as primary market data to study SPY, QQQ, IWM, DIA where useful, major sectors, breadth, trend, volatility, gaps, risk-on/risk-off behavior, index-relative momentum, leadership/rotation, liquidity, and the broad eligible U.S. stock universe. Professional-live hard eligibility is price strictly above $5, session volume at least 750,000 shares, current Robinhood tradability, and fresh data. News is context, never a hard eligibility gate. Supplement raw volume with 20-day median dollar volume, relative volume, current/premarket dollar volume, spread, displayed depth, and historical spread behavior when available.
+
+For every serious candidate, use time-ordered evidence for the prior day, last 7 days, last 30 days, last 90 days, six months minimum, and twelve months when data quality permits. Study gap frequency and continuation/fades, intraday volatility, opening range, VWAP and first-pullback behavior, HOD breakouts and failures, catalyst and post-earnings continuation, market/sector relative strength, volume/liquidity changes, and typical MAE/MFE after the same setup_id. Give recency the configured diagnostic/tactical emphasis without mechanically refitting the model to yesterday. Use rolling and walk-forward/out-of-sample comparisons, regime segmentation, realistic bid/ask execution assumptions, and mark missing fields UNAVAILABLE; never fabricate.
+
+Create today's evidence-backed market regime, preferred and avoided setup IDs, daily tactical parameters, and a ranked Top 5 or fewer serious candidates. Do not pad the list. Keep hard safety gates separate from SETUP_SCORE and EXECUTION_SCORE. Compare feasible whole-share stock, long-call, long-put, and positively eligible debit-spread routes after spread, slippage, fees, theta, IV change, premium risk, and target probability; log feasible non-selected routes as shadows, but do not place an order. Every daily tactical adjustment must state reason and evidence and expire at the end of the current trading day. Treat permanent promoted edges as read-only.
+
+Write exactly one immutable create-only artifact at research/daily-strategy/YYYY-MM-DD.md in Harpcity33/trader-brain and commit it with a date-specific research commit by 06:30 America/New_York. Check that the path does not exist before creation; if it exists, do not replace or amend it. Include exact data provenance and timestamps without credentials. If an input stage fails, name it, mark its fields UNAVAILABLE, and continue independent safe stages. A failure of this workflow must have no effect on the established live equity desk or any separate options engine.
+'''
+status = "PAUSED"
+rrule = "DTSTART;TZID=America/New_York:20260831T040000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
+execution_environment = "local"
+model = "gpt-5.6-sol"
+reasoning_effort = "high"
+
+# Repository definition only. Activation is a separate validated deployment step.
+# A project_id is intentionally omitted until the saved Codex project is resolved.
