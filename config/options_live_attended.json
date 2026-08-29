@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "strategy_id": "titan_options_live_attended_v1",
+  "account_last4": "7153",
+  "authority": {
+    "unattended_order_mutation": false,
+    "exact_attended_confirmation_required": true,
+    "broker_review_must_be_immediately_preceding": true,
+    "review_must_be_unexpired": true,
+    "local_review_ttl_seconds": 120,
+    "local_review_binding": "exact_order_tuple_plus_quote_timestamp_plus_evidence_revision",
+    "retry_unknown_submission": false
+  },
+  "startup_reconciliation": {
+    "required": [
+      "account_state",
+      "account_type",
+      "options_approval_level",
+      "broker_buying_power",
+      "unleveraged_buying_power",
+      "equity_positions",
+      "equity_orders",
+      "option_positions",
+      "option_orders"
+    ],
+    "dedicated_options_buying_power": {
+      "required_when_exposed_by_broker": true,
+      "fallback": "require_exact_order_review_order_checks_to_confirm_affordability"
+    }
+  },
+  "enabled_strategies": {
+    "long_call": true,
+    "long_put": true,
+    "debit_spread": false,
+    "debit_spread_enablement_gate": {
+      "minimum_options_level": "option_level_3",
+      "allowed_account_types": [
+        "margin",
+        "limited_margin"
+      ],
+      "fresh_positive_broker_verification_required": true
+    }
+  },
+  "contract_selection": {
+    "preferred_intraday_dte": {
+      "min": 7,
+      "max": 21
+    },
+    "preferred_short_swing_dte": {
+      "min": 21,
+      "max": 45
+    },
+    "preferred_abs_delta": {
+      "min": 0.5,
+      "max": 0.7
+    },
+    "allowed_moneyness": [
+      "ATM",
+      "MODESTLY_ITM"
+    ],
+    "order_type": "limit",
+    "default_quantity": 1,
+    "maximum_quantity_without_explicit_size_exception": 1,
+    "cheap_far_otm_forbidden": true
+  },
+  "risk": {
+    "central_config": "config/risk_limits.json",
+    "stress_loss_for_long_option": "full_premium_paid_including_multiplier_and_quantity",
+    "full_premium_must_fit_central_stress_limit": true,
+    "max_total_open_stress_risk_pct_field": "max_total_open_stress_risk_pct",
+    "margin_or_debit_beyond_unleveraged_buying_power": false
+  },
+  "event_volatility_test": {
+    "required_before_pre_event_long_option": true,
+    "pass_expression": "expected_underlying_move_pct > implied_move_pct + spread_drag_pct + slippage_pct + iv_crush_risk_pct + uncertainty_reserve_pct",
+    "unavailable_result": "NO_TRADE"
+  },
+  "sessions": {
+    "market_hours": "regular_hours",
+    "new_entry_window": "09:35-15:30 America/New_York",
+    "closeout_preparation_local": "15:50",
+    "broker_confirmed_flat_deadline_local": "15:55",
+    "overnight_hold_enabled_initially": false
+  },
+  "failure_isolation": {
+    "options_chain_failure": "OPTIONS_NO_TRADE",
+    "eligibility_unresolved": "OPTIONS_NO_TRADE",
+    "broker_state_unknown": "OPTIONS_NO_TRADE",
+    "equity_live_engine_effect": "NONE"
+  }
+}
