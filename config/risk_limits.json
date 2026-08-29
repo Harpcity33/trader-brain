@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0.0",
+  "currency": "USD",
+  "equity_basis": "broker_confirmed_current_usable_equity",
+  "normal_planned_risk_pct": 0.03,
+  "a_plus_planned_risk_pct": 0.04,
+  "premarket_planned_risk_pct": 0.02,
+  "premarket_stress_risk_pct": 0.04,
+  "max_single_trade_stress_risk_pct": 0.05,
+  "max_total_open_planned_risk_pct": 0.05,
+  "max_total_open_stress_risk_pct": 0.05,
+  "daily_new_entry_lock_pct": 0.06,
+  "hard_daily_loss_kill_pct": 0.08,
+  "weekly_loss_lock_pct": 0.12,
+  "live_drawdown_review_pct": 0.20,
+  "absolute_dollar_ceilings": {
+    "normal_planned_risk_dollars": null,
+    "a_plus_planned_risk_dollars": null,
+    "premarket_planned_risk_dollars": null,
+    "premarket_stress_risk_dollars": null,
+    "max_single_trade_stress_risk_dollars": null,
+    "max_total_open_planned_risk_dollars": null,
+    "max_total_open_stress_risk_dollars": null,
+    "daily_new_entry_lock_dollars": 100.0,
+    "hard_daily_loss_kill_dollars": null,
+    "weekly_loss_lock_dollars": null,
+    "live_drawdown_review_dollars": null
+  },
+  "reserve_policy": {
+    "positive_execution_reserve_required": true,
+    "premarket_stress_must_include_liquidity_slippage_reserve": true
+  },
+  "notes": [
+    "Every limit is recomputed from broker-confirmed current usable equity.",
+    "When an applicable absolute dollar ceiling is configured, the smaller of the percentage cap and dollar ceiling controls.",
+    "The $100 daily new-entry lock is retained as the existing secondary emergency ceiling."
+  ]
+}

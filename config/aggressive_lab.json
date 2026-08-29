@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "strategy_id": "TITAN_AGGRESSIVE_LAB",
+  "execution_mode": "paper_only",
+  "live_order_authority": false,
+  "ledger_path": "ledgers/paper-aggressive",
+  "statistics_may_merge_with_live_equity": false,
+  "statistics_may_merge_with_live_options": false,
+  "experimental_families": [
+    "0DTE_DIRECTIONAL_OPTIONS",
+    "SUB_5_MOMENTUM",
+    "FAR_OTM_CONTRACTS",
+    "HALT_RESUMPTIONS",
+    "EXTREME_OPENING_RANGE_MOMENTUM",
+    "HIGH_RISK_LOW_FLOAT",
+    "RETAIL_SOCIAL_ATTENTION"
+  ],
+  "promotion_effect": "NONE_WITHOUT_SEPARATE_VALIDATION_AND_VERSIONED_REVIEW"
+}
+

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "name": "titan_setup_and_execution_scoring_v1",
+  "setup_score": {
+    "label": "SETUP_SCORE",
+    "probability_claim": false,
+    "status": "initial_hypothesis_preserved_from_repository",
+    "weights_points": {
+      "liquidity": 15,
+      "relative_volume": 15,
+      "technical_structure_vwap": 20,
+      "catalyst_context": 15,
+      "sector_market_sympathy": 10,
+      "prior_90_day_behavior": 15,
+      "gap_behavior": 5,
+      "other_massive_data": 5
+    }
+  },
+  "execution_score": {
+    "label": "EXECUTION_SCORE",
+    "equity_components": [
+      "spread",
+      "displayed_depth",
+      "projected_slippage",
+      "volatility",
+      "order_size_liquidity",
+      "halt_risk"
+    ],
+    "option_components": [
+      "spread",
+      "spread_pct_premium",
+      "option_depth",
+      "underlying_liquidity",
+      "projected_slippage",
+      "contract_activity_open_interest",
+      "iv_greek_quality",
+      "expiration_risk"
+    ]
+  },
+  "hard_gates_run_first": true,
+  "hard_gate_failures_cannot_be_overridden_by_scores": true,
+  "news_is_context_not_eligibility": true
+}
+
