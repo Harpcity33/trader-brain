@@ -8,6 +8,10 @@ This is the repository-side definition for one standalone daily research run, no
 - Broker authority: none.
 - Live equity dependency: none; failure cannot halt or alter `robinhood-momentum-engine`.
 
-The checked-in definition remains `PAUSED` until deployment resolves the saved Codex project, validates the connected Massive and GitHub access in a manual run, and creates the standalone cron through the Codex automation interface. The deployment must not modify the existing equity heartbeat or its target task.
+Deployed automation ID: `titan-daily-market-study-04-00-06-30-et`. It is
+`ACTIVE` as a projectless local cron created through the Codex automation
+interface. The first scheduled trading-day run is the live provider/access
+validation; any provider failure remains isolated and must be reported without
+touching the equity heartbeat.
 
 The weekday recurrence does not assert that every weekday is tradable. The prompt and research engine both require authoritative holiday and unexpected-closure evidence before doing trading-day work.

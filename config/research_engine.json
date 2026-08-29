@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "strategy_id": "titan_daily_market_study_v1",
-  "automation_id": "titan-daily-market-study",
+  "automation_id": "titan-daily-market-study-04-00-06-30-et",
   "timezone": "America/New_York",
   "schedule": {
     "kind": "single_daily_cron_workflow",
@@ -11,7 +11,7 @@
     "single_run_per_trading_day": true,
     "authoritative_market_calendar_required": true,
     "unexpected_closure_behavior": "skip_and_report_research_unavailable",
-    "rrule": "DTSTART;TZID=America/New_York:20260831T040000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
+    "rrule": "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=4;BYMINUTE=0;BYSECOND=0"
   },
   "history": {
     "minimum_months": 6,

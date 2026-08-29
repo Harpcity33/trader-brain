@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "strategy_id": "titan_options_live_attended_v1",
+  "deployment_status": "READY_NOT_INSTALLED_REQUIRES_DEDICATED_TASK",
   "account_last4": "7153",
   "authority": {
     "unattended_order_mutation": false,
