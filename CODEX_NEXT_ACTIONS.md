@@ -1,3 +1,19 @@
+# Current priority — Full-Live Autonomy for September 8, 2026
+
+**Read [CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md](CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md) before beginning the next implementation task.**
+
+Shian's latest direction is full-live autonomous operation, faster execution, and confirmed activity/exception updates instead of routine manual execution, using the existing stack with **zero incremental paid service spending**. The requested operating date is September 8, 2026, America/New_York.
+
+The linked brief supersedes the earlier conversation attachment's tiny pilot-only scope, unapproved one-share/two-attempt/dollar caps, and arbitrary minimum paper-session waiting period. It does **not** supersede existing owner-approved risk limits, strategy/account scope, mandatory broker/platform controls, or protection/reconciliation requirements. Full-live describes the intended operating mode, not unlimited capital or proof that deployment has occurred.
+
+Implement tested executable production components and provide a user-controlled activation/cutover path. Do not stop at another planning document. Reuse verified existing authorization instead of asking for known information; explicitly identify only genuinely missing permissions or policy fields. No live orders, transfers, account changes, or live scheduler activation are authorized as coding smoke tests. This instruction update does not itself enable trading.
+
+Prioritize the protection, overnight-control, and revoked-token failures recorded in `reviews/weekly/2026-W36.md`. Preserve one account-level execution owner, durable unknown-order reconciliation, actual working protection, existing risk policy, and accurate closeout/notification state. Do not infer that an ACTIVE configuration label means a healthy live service exists.
+
+The system-validation requirements below remain applicable wherever they do not conflict with the new implementation priority. Preserve their evidence, research/live separation, risk, and validation controls. Report actual implementation/deployment status and evidence under the paths specified in the full-live brief.
+
+---
+
 # Codex Next Actions: Trader Brain System Validation
 
 ## Operating principle
