@@ -1,0 +1,119 @@
+{
+  "schema_version": "titan_full_live_config_2026-09-08_v1",
+  "runtime_id": "titan_full_live_autonomy_2026-09-08_v1",
+  "strategy_id": "titan_live_attended_compat_premarket_2026-08-27_v2",
+  "account": {
+    "masked_identifier": "ending-7153",
+    "required_last4": "7153",
+    "allowed_type": "limited_margin",
+    "margin_debit_allowed": false
+  },
+  "scope": {
+    "allowed_instruments": ["stock"],
+    "allowed_direction": "long",
+    "whole_shares_only": true,
+    "minimum_price_exclusive": "5.00",
+    "minimum_session_volume_inclusive": 750000,
+    "options_enabled": false,
+    "shorting_enabled": false,
+    "fractional_enabled": false,
+    "averaging_down_enabled": false,
+    "add_enabled": false,
+    "reentry_enabled": false,
+    "stop_widening_enabled": false,
+    "overnight_enabled": false
+  },
+  "sessions": {
+    "timezone": "America/New_York",
+    "premarket_start": "07:00",
+    "premarket_entry_cutoff": "09:25",
+    "premarket_mode": "attended_only",
+    "transition_end": "09:35",
+    "regular_entry_cutoff": "15:30",
+    "closeout_start_minutes_before_close": 10,
+    "flat_deadline_minutes_before_close": 5
+  },
+  "risk": {
+    "limits_path": "config/risk_limits.json",
+    "limits_live_provenance_verified": false,
+    "limits_provenance_state": "checked_in_staged_overlay_not_applied_to_active_equity_prompt",
+    "daily_realized_loss_lock_dollars": "100.00",
+    "profit_goal_dollars": "150.00",
+    "post_goal_floor_dollars": "125.00",
+    "positive_execution_reserve_required": true,
+    "loss_lock_is_irreversible_for_session": true
+  },
+  "evidence": {
+    "broker_snapshot_max_age_seconds": 5,
+    "quote_max_age_seconds": 5,
+    "completed_bar_max_age_seconds": 120,
+    "plan_ttl_seconds": 30,
+    "require_completed_bar_causality": true,
+    "require_robinhood_tradability": true,
+    "require_displayed_depth": true,
+    "require_advanced_order_reconciliation": true,
+    "max_spread_bps": null,
+    "minimum_depth_multiple": null
+  },
+  "market_data": {
+    "adapter": "local_titan_massive_sqlite_read_only",
+    "database_path": "~/Library/Application Support/Titan Momentum/runtime/titan-intelligence.sqlite3",
+    "producer_pilot_id": "titan_momentum_equity",
+    "producer_book_mode": "SHADOW",
+    "producer_decision_contract_hash": "0b1cfbd1fb9524f7dbda47a046422258c23978e396d0f9d4b150ede888128350",
+    "health_max_age_seconds": 15,
+    "candidate_max_age_seconds": 120,
+    "max_active_candidates": 64,
+    "source_is_execution_authority": false
+  },
+  "discovery": {
+    "adapter": "local_massive_full_live_pipeline",
+    "pipeline_configured": false,
+    "instrument_evidence_provider": "unavailable",
+    "quality_revalidation_provider": "unavailable",
+    "minimum_setup_score": null,
+    "minimum_execution_score": null,
+    "a_plus_setup_score": null,
+    "a_plus_execution_score": null
+  },
+  "execution": {
+    "order_ack_timeout_seconds": 10,
+    "reconcile_interval_seconds": 2,
+    "unknown_reconcile_interval_seconds": 1,
+    "protection_order_type": "stop_market",
+    "protection_time_in_force": "gtc",
+    "protection_market_hours": "regular_hours",
+    "one_account_writer_required": true,
+    "durable_intent_before_submit": true,
+    "automatic_retry_unknown_submission": false,
+    "local_mutation_interlock_enabled": false,
+    "broker_adapter": "robinhood_codex_connector",
+    "supported_unattended_mutation": false,
+    "per_mutation_user_confirmation_required": true
+  },
+  "notifications": {
+    "durable_outbox_required": true,
+    "delivery_sink": "local_jsonl_staging",
+    "intended_destination": "existing_codex_heartbeat",
+    "destination_bridge_configured": false,
+    "suppress_scan_chatter": true,
+    "redact_account_to_last4": true
+  },
+  "authority": {
+    "live_entries_enabled": false,
+    "owner_activation_required": true,
+    "activation_record_required": true,
+    "blockers": [
+      "BROKER_REQUIRES_PER_MUTATION_USER_CONFIRMATION",
+      "ADVANCED_ORDER_RECONCILIATION_UNAVAILABLE",
+      "DAEMON_ACCESSIBLE_SUPPORTED_BROKER_CLIENT_UNAVAILABLE",
+      "LOCAL_MUTATION_INTERLOCK_DISABLED",
+      "LIVE_DISCOVERY_EVIDENCE_PROVIDERS_UNAVAILABLE",
+      "APPROVED_LIVE_SCORE_THRESHOLDS_UNRESOLVED",
+      "RISK_POLICY_LIVE_PROVENANCE_UNRESOLVED",
+      "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
+      "APPROVED_NUMERIC_SPREAD_THRESHOLD_UNRESOLVED",
+      "APPROVED_NUMERIC_DEPTH_THRESHOLD_UNRESOLVED"
+    ]
+  }
+}

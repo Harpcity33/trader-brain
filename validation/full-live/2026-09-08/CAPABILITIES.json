@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "document_type": "broker_capability_and_authority_evidence",
+  "generated_at_utc": "2026-09-07T22:51:20.776Z",
+  "target_date": "2026-09-08",
+  "account_masked": "••••7153",
+  "connector": {
+    "name": "Robinhood connected tool",
+    "context": "Codex model-mediated attended flow",
+    "daemon_transport_configured": false,
+    "secrets_copied_to_repository": false,
+    "adapter_default": "fail_closed_read_evidence_only",
+    "production_unattended_mutations_supported": false
+  },
+  "evidence": {
+    "robinhood_read_window_utc": {
+      "start": "2026-09-07T22:51:09.819Z",
+      "end": "2026-09-07T22:51:12.953Z"
+    },
+    "titan_risk_read_window_utc": {
+      "start": "2026-09-07T22:51:20.746Z",
+      "end": "2026-09-07T22:51:20.776Z"
+    },
+    "mutating_calls_made_during_audit": false,
+    "live_reviews_made_during_audit": false,
+    "auth": {
+      "successful_authenticated_reads": true,
+      "assertion_scope": "point_in_time_only",
+      "point_in_time_verified_at_utc": "2026-09-07T22:51:12.953Z",
+      "ongoing_auth_guaranteed": false,
+      "daemon_login_refresh_or_challenge_available": false,
+      "meaning": "Successful connector reads prove that the attended connector was authenticated at the evidence time; they do not establish future session health or daemon credentials."
+    },
+    "account": {
+      "agent_accessible_account_count": 1,
+      "state": "active",
+      "brokerage_account_type": "individual",
+      "cash_management_type": "limited_margin",
+      "management_type": "self_directed",
+      "is_default": false,
+      "deactivated": false,
+      "options_level": "option_level_2",
+      "affiliate": "rhf"
+    },
+    "funds_usd": {
+      "total_value": "912.80",
+      "cash": "912.80",
+      "buying_power": "912.8000",
+      "unleveraged_buying_power": "912.8000",
+      "intraday_buying_power": null,
+      "overnight_buying_power": null,
+      "pending_deposits": "0",
+      "equity_value": "0",
+      "option_value": "0",
+      "crypto_value": "0",
+      "unsettled_funds": "602.9300",
+      "unsettled_funds_semantics": "informational_may_lag_not_order_gating",
+      "no_margin_sizing_ceiling": "unleveraged_buying_power"
+    },
+    "positions_and_orders": {
+      "standard_equity_open_positions": 0,
+      "nonzero_option_positions": 0,
+      "standard_equity_orders_today": 0,
+      "option_orders_today": 0,
+      "equity_active_state_counts": {
+        "new": 0,
+        "queued": 0,
+        "confirmed": 0,
+        "unconfirmed": 0,
+        "partially_filled": 0,
+        "pending_cancelled": 0,
+        "locating": 0,
+        "locate_failed": 0
+      },
+      "option_active_state_counts": {
+        "queued": 0,
+        "confirmed": 0,
+        "partially_filled": 0,
+        "pending_cancelled": 0
+      },
+      "pagination_remaining": false,
+      "advanced_orders_read": false,
+      "whole_broker_flatness_proven": false,
+      "flatness_caveat": "The active connector surface did not expose get_advanced_orders, so zero standard equity and option records cannot prove whole-broker flatness."
+    },
+    "realized_pnl": {
+      "standard_equity_today_usd": "0.00",
+      "closed_standard_equity_trades_today": 0,
+      "broker_bucket_through_utc": "2026-09-07T22:51:09Z"
+    },
+    "existing_risk_state": {
+      "entry_stop_state": "released",
+      "entry_stop_valid": true,
+      "new_entries_allowed": true,
+      "trade_authority": false,
+      "risk_authorizations": 0,
+      "active_campaigns": 0,
+      "meaning": "A released entry stop is a risk-gate state and is not trading authority."
+    }
+  },
+  "connector_contract": {
+    "reads": {
+      "account": true,
+      "cash_and_buying_power": true,
+      "standard_equity_positions": true,
+      "standard_equity_orders": true,
+      "option_positions": true,
+      "option_orders": true,
+      "advanced_orders_on_active_surface": false,
+      "streaming_order_or_fill_events": false,
+      "lookup_order_by_client_ref_id": false
+    },
+    "attended_equity_operations": {
+      "review": true,
+      "place_after_exact_explicit_confirmation": true,
+      "cancel_after_own_explicit_confirmation": true,
+      "replace": false,
+      "atomic_bracket_oco_oto": false,
+      "trailing_stop": false
+    },
+    "supported_order_types": [
+      "market",
+      "limit",
+      "stop_market",
+      "stop_limit"
+    ],
+    "supported_time_in_force": [
+      "gfd",
+      "gtc"
+    ],
+    "supported_market_hours": [
+      "regular_hours",
+      "extended_hours",
+      "all_day_hours"
+    ],
+    "session_constraints": [
+      "extended_hours and all_day_hours accept limit orders only",
+      "market, stop_market, and stop_limit orders are regular_hours only",
+      "fractional or dollar-based equity orders are regular-hours market orders only",
+      "regular-hours stops do not protect a premarket fill before 09:30 America/New_York"
+    ],
+    "confirmation_requirements": [
+      "Display the complete exact order tuple, every order_check, and the verbatim market-data disclosure.",
+      "Obtain explicit confirmation for the immediately preceding exact review even when order_checks is empty.",
+      "Refresh review and confirmation after any tuple, evidence, session-tag, or expiry change.",
+      "Obtain separate explicit confirmation for every cancel, replacement, protection order, and exit."
+    ],
+    "review_receipt": {
+      "broker_bound_execution_token_exposed": false,
+      "connector_expiry_exposed": false,
+      "safe_for_deferred_daemon_execution": false
+    },
+    "cancellation": {
+      "asynchronous": true,
+      "accepted_means_cancelled": false,
+      "requires_conclusive_polling": true,
+      "fill_race_possible": true
+    },
+    "unknown_submission": {
+      "blind_retry_allowed": false,
+      "same_ref_id_retry_only_after_known_transient_failure": true,
+      "submission_acknowledgement_is_fill_evidence": false
+    }
+  },
+  "authority": {
+    "user_request_authorizes_build_test_and_user_controlled_activation_procedure": true,
+    "user_request_authorizes_live_order_or_cancel_now": false,
+    "existing_verified_policy": "attended regular-hours long equity above 5 USD, whole shares, no margin/debit, with required broker controls",
+    "existing_verified_policy_authorizes_full_unattended_trading": false,
+    "connector_native_confirmation_can_be_bypassed": false
+  },
+  "production_blockers": [
+    {
+      "code": "ATTENDED_CONFIRMATION_REQUIRED",
+      "blocking": true,
+      "detail": "The connector and approved policy require a current exact review and explicit user confirmation for every order mutation."
+    },
+    {
+      "code": "NO_DAEMON_BROKER_TRANSPORT",
+      "blocking": true,
+      "detail": "The repository has no supported daemon-accessible Robinhood client, credentials, auth refresh, or challenge flow."
+    },
+    {
+      "code": "ADVANCED_ORDER_VISIBILITY_INCOMPLETE",
+      "blocking": true,
+      "detail": "The active connector surface lacks advanced-order reads, preventing whole-broker reconciliation."
+    },
+    {
+      "code": "NO_ATOMIC_PROTECTION",
+      "blocking": true,
+      "detail": "No bracket/OCO/OTO primitive guarantees protection alongside entry; stop orders are regular-hours only."
+    },
+    {
+      "code": "UNKNOWN_SUBMISSION_RECONCILIATION_GAP",
+      "blocking": true,
+      "detail": "No client-ref lookup or event stream closes an ambiguous submission safely under the no-blind-retry policy."
+    },
+    {
+      "code": "RISK_POLICY_LIVE_PROVENANCE_UNRESOLVED",
+      "blocking": true,
+      "detail": "The deterministic percentage overlay is checked in but its implementation status says it was staged and not applied to the active equity prompt; it cannot be silently promoted."
+    },
+    {
+      "code": "NUMERIC_LIQUIDITY_AND_SCORE_POLICY_UNRESOLVED",
+      "blocking": true,
+      "detail": "No approved numeric spread, displayed-depth, live setup-score, execution-score, or A+ cutoff values were found."
+    },
+    {
+      "code": "LIVE_DISCOVERY_PROVIDERS_UNAVAILABLE",
+      "blocking": true,
+      "detail": "The current daemon has no supported Robinhood tradability/instrument reader or independent live quality revalidation provider."
+    },
+    {
+      "code": "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
+      "blocking": true,
+      "detail": "The durable local outbox/sink is implemented, but no delivery bridge and receipt test for the existing Codex heartbeat destination is configured."
+    }
+  ],
+  "claims_not_made": [
+    "ongoing Robinhood authentication",
+    "whole-broker flatness",
+    "unattended order authority",
+    "atomic entry protection",
+    "premarket native stop protection",
+    "guaranteed order fill, profit, or loss outcome"
+  ]
+}

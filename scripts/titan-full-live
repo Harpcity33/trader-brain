@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Hermetic launcher for a source checkout or installed full-live release."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import runpy
+import sys
+
+
+def _paths() -> tuple[Path, Path | None]:
+    release_root = Path(__file__).resolve().parents[1]
+    install_root: Path | None = None
+    if release_root.parent.name == "releases":
+        install_root = release_root.parent.parent
+    return release_root, install_root
+
+
+def main() -> int:
+    if sys.version_info < (3, 11):
+        print("titan-full-live requires Python 3.11 or newer", file=sys.stderr)
+        return 70
+    release_root, install_root = _paths()
+    # Installed releases are immutable and verified as an exact file set. Do
+    # not let normal imports create unmanifested __pycache__ files inside them.
+    sys.dont_write_bytecode = True
+    source_root = release_root / "src"
+    if not source_root.is_dir():
+        print(f"release source directory is missing: {source_root}", file=sys.stderr)
+        return 66
+    sys.path.insert(0, str(source_root))
+    os.environ.setdefault("TITAN_FULL_LIVE_RELEASE_ROOT", str(release_root))
+    if install_root is not None:
+        os.environ.setdefault("TITAN_FULL_LIVE_INSTALL_ROOT", str(install_root))
+    runpy.run_module("titan_brain.live.cli", run_name="__main__")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

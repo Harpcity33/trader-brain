@@ -1,47 +1,106 @@
-# Titan Momentum Additive Architecture
+# Titan full-live architecture
+
+## Production lifecycle
 
 ```text
-                  immutable repository evidence
-                              │
-        ┌─────────────────────┴─────────────────────┐
-        │                                           │
-04:00 daily market study                    promoted edges (read-only)
-Massive + prior-day artifacts                       │
-        │                                           │
-        └──────── daily strategy (expires EOD) ─────┘
-                              │
-               ┌──────────────┴──────────────┐
-               │                             │
-existing equity heartbeat            attended options heartbeat
-(independent production core)         (independent, Level 2 only)
-               │                             │
-         exact equity review             exact option review
-         + user confirmation              + user confirmation
-               │                             │
-       live-equity ledger              live-options ledger
-               └──────────────┬──────────────┘
-                              │
-                     EOD R/process review
-                              │
-                  research observations only
-
-TITAN_AGGRESSIVE_LAB ── paper-only ledger ── no live authority
+existing Massive producer (SHADOW, read-only)
+                    │
+                    ▼
+query-only local adapter ── sequence/freshness/completed-bar checks
+                    │
+                    ▼
+bounded active set ── Robinhood tradability + independent geometry/quality
+                    │
+                    ▼
+expiring signed plan ── exact quote/spread/depth/session evidence
+                    │
+                    ▼
+fresh whole-broker snapshot ── account-wide deterministic risk + cash reserve
+                    │
+                    ▼
+durable plan + risk reservation + intent (single SQLite transaction)
+                    │
+                    ▼
+supported broker review/place boundary ── stable client reference
+                    │
+          timeout/ambiguous result
+              ┌─────┴─────┐
+              ▼           ▼
+        known result    UNKNOWN ── reserve exposure, notify, no retry
+              │           │
+              └─────┬─────┘
+                    ▼
+strictly newer broker reconciliation + idempotent fill deltas
+                    │
+                    ▼
+per-fill protection obligation ── submitted is not working
+                    │
+                    ▼
+verified broker-held protection / cancel-before-close / safe close
+                    │
+                    ▼
+confirmed-event outbox ── retry/dedupe/redaction ── EOD evidence
 ```
 
-The production equity heartbeat is not imported by, blocked on, or replaced by
-new code. Research has no broker authority. Options failure produces options
-NO TRADE only. Aggressive-paper evidence is never aggregated with live results.
+The account reconciliation and protection path runs before discovery on every
+tick. Data/research loss blocks affected entries but does not suspend position
+management. Authentication, storage, broker, lifecycle, and notification
+failures become durable incidents. Manual or unowned broker activity is never
+absorbed as strategy-owned exposure.
 
-## Control precedence
+## Authority barriers
 
-1. Fresh broker/account/session/tradability evidence.
-2. Unknown-order and unresolved-exposure reconciliation.
-3. Hard eligibility and deterministic risk gates.
-4. SETUP_SCORE.
-5. Instrument-specific EXECUTION_SCORE.
-6. Conservative route expectancy after costs.
-7. Exact broker review and exact attended confirmation.
+An order mutation requires all of these simultaneously:
 
-No score can override a failed item above it. No component claims guaranteed
-profit, bracket atomicity, or unattended order protection.
+1. a reviewed content-addressed release and matching durable runtime identity;
+2. the sole kernel writer lock and matching database writer lease;
+3. signed configuration with live entries and the local mutation interlock
+   explicitly enabled;
+4. a consumed, unexpired, one-use owner activation record bound to release,
+   policy, account, and schema;
+5. fresh complete whole-broker evidence, no unknown exposure, and verified
+   risk/session/capacity gates;
+6. a supported daemon broker client whose native confirmation semantics allow
+   the requested action; and
+7. an exact current broker review at the transport boundary.
 
+The current checked-in release intentionally fails several of those barriers.
+There is no force flag, environment-variable live override, database edit
+procedure, confirmation auto-click, or fallback broker credential scraper.
+
+## Safety state
+
+The SQLite writer uses WAL plus full synchronous durability. It persists:
+
+- content-hashed plans and account-wide risk reservations;
+- stable intent/client IDs before submission;
+- monotonic broker order/fill revisions;
+- separate required, submitted, working, failed, and satisfied protection;
+- irreversible daily loss/profit-crossing and closeout latches;
+- manual/unknown exposure, incidents, notification attempts, and latency;
+- an append-only event chain and release/config/policy/runtime binding.
+
+Only authoritative, strictly newer broker evidence can resolve an ambiguous
+submission, establish working protection, prove cancellation, or prove
+flatness. Independent exit capacity prevents two sell paths from reserving the
+same shares.
+
+## Existing lanes and boundaries
+
+- The existing `robinhood-momentum-engine` remains an attended compatibility
+  lane until the owner explicitly cuts over. It is not the new daemon.
+- Premarket entries remain attended-only because regular-hours stop orders do
+  not protect a premarket fill before 09:30 ET.
+- Research and the Massive shadow producer have zero broker authority.
+- Aggressive-paper evidence and ledgers remain isolated from live authority.
+- Options remain a separately authorized attended lane and are not enabled by
+  this equity release.
+
+## Deployment states
+
+`BUILT` means source/release tests pass. `INSTALLED_PAUSED` means a verified
+release is present with authority off and a disabled plist staged only inside
+its isolated subtree. `RUNNING_RECONCILE_ONLY` requires an observed process and
+fresh reconciliation. `ACTIVE` requires consumed owner activation plus a
+subsequent clean service-side reconciliation. These states are never inferred
+from filenames, configuration labels, or scheduler text.
