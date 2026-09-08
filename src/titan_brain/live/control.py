@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -23,7 +24,7 @@ from .models import EngineMode
 from .state import LiveStateStore, StateConflict, canonical_json
 
 
-CONTROL_SCHEMA = "titan_full_live_control_2026-09-08_v1"
+CONTROL_SCHEMA = "titan_full_live_control_2026-09-08_v2"
 CONTROL_COMMANDS = frozenset(
     {"PAUSE_NEW_ENTRIES", "MANAGED_CLOSEOUT", "DEACTIVATE_FLAT"}
 )
@@ -32,6 +33,52 @@ MAX_CONTROL_BYTES = 64 * 1024
 
 class ControlError(RuntimeError):
     """A control request is malformed, stale, or cannot be applied safely."""
+
+
+class HmacControlAuthenticator:
+    """Release-shipped request authenticator over an injected local secret.
+
+    The secret is never persisted.  ``authorization_binding_id`` is a
+    non-secret, signed/durable identity for the injected authorization and is
+    included in every authenticated request.  Only broker-mutating controls
+    require a tag; safety-reducing pause and flat deactivation remain usable
+    without manufacturing new authority.
+    """
+
+    implementation_id = "titan_hmac_control_authenticator_2026-09-08_v1"
+
+    def __init__(self, key: bytes, *, authorization_binding_id: str) -> None:
+        material = bytes(key)
+        binding = str(authorization_binding_id).strip()
+        if len(material) < 32:
+            raise ValueError("control authentication key must contain at least 256 bits")
+        if len(binding) != 64 or any(
+            character not in "0123456789abcdef" for character in binding
+        ):
+            raise ValueError(
+                "control authorization binding must be a nonsecret 256-bit receipt"
+            )
+        self._key = material
+        self._authorization_binding_id = binding
+
+    @property
+    def authorization_binding_id(self) -> str:
+        return self._authorization_binding_id
+
+    def sign(self, body: Mapping[str, Any]) -> str:
+        return hmac.new(
+            self._key,
+            canonical_json(dict(body)).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def verify(self, body: Mapping[str, Any], tag: str) -> bool:
+        supplied = str(tag)
+        if len(supplied) != 64 or any(
+            character not in "0123456789abcdef" for character in supplied
+        ):
+            return False
+        return hmac.compare_digest(self.sign(body), supplied)
 
 
 @dataclass(frozen=True)
@@ -72,12 +119,16 @@ class ControlInbox:
         runtime_id: str,
         release_manifest_hash: str,
         max_snapshot_age: timedelta,
+        authenticator: HmacControlAuthenticator | None = None,
     ) -> None:
         self.root = Path(root).resolve()
         self.account_key = str(account_key)
         self.runtime_id = str(runtime_id)
         self.release_manifest_hash = str(release_manifest_hash)
         self.max_snapshot_age = max_snapshot_age
+        if authenticator is not None and type(authenticator) is not HmacControlAuthenticator:
+            raise ValueError("control authenticator must use the release-shipped implementation")
+        self.authenticator = authenticator
         if not self.account_key or not self.runtime_id:
             raise ValueError("control account_key and runtime_id are required")
         if len(self.release_manifest_hash) != 64:
@@ -132,7 +183,26 @@ class ControlInbox:
             "requested_at": requested_at.astimezone(timezone.utc).isoformat(),
             "arguments": args,
             "nonce": str(uuid4()),
+            "control_authentication_method": (
+                HmacControlAuthenticator.implementation_id
+                if command_value == "MANAGED_CLOSEOUT"
+                else "none"
+            ),
+            "control_authorization_binding_id": (
+                self.authenticator.authorization_binding_id
+                if command_value == "MANAGED_CLOSEOUT" and self.authenticator is not None
+                else None
+            ),
         }
+        if command_value == "MANAGED_CLOSEOUT":
+            if self.authenticator is None:
+                raise ControlError(
+                    "managed closeout requires injected authenticated control authority"
+                )
+            authorization_tag: str | None = self.authenticator.sign(body)
+        else:
+            authorization_tag = None
+        body["control_authorization_tag"] = authorization_tag
         request_id = hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
         payload = {**body, "request_id": request_id}
         encoded = (canonical_json(payload) + "\n").encode("utf-8")
@@ -179,7 +249,7 @@ class ControlInbox:
                 changed = False
                 destination = self.rejected / path.name
                 status = "REJECTED"
-                detail = f"{type(exc).__name__}: {str(exc)[:500]}"
+                detail = f"{type(exc).__name__}:CONTROL_REQUEST_REJECTED"
             os.replace(path, destination)
             _fsync_directory(destination.parent)
             results.append(
@@ -214,6 +284,9 @@ class ControlInbox:
             "requested_at",
             "arguments",
             "nonce",
+            "control_authentication_method",
+            "control_authorization_binding_id",
+            "control_authorization_tag",
             "request_id",
         }
         if not isinstance(payload, dict) or set(payload) != expected:
@@ -276,6 +349,24 @@ class ControlInbox:
                 reason=reason,
             )
         if command == "MANAGED_CLOSEOUT":
+            if self.authenticator is None:
+                raise ControlError(
+                    "managed closeout has no runtime control authenticator"
+                )
+            if (
+                payload["control_authentication_method"]
+                != HmacControlAuthenticator.implementation_id
+                or payload["control_authorization_binding_id"]
+                != self.authenticator.authorization_binding_id
+            ):
+                raise ControlError("managed closeout authorization binding differs")
+            authenticated = dict(payload)
+            authenticated.pop("request_id", None)
+            supplied_tag = authenticated.pop("control_authorization_tag", None)
+            if not isinstance(supplied_tag, str) or not self.authenticator.verify(
+                authenticated, supplied_tag
+            ):
+                raise ControlError("managed closeout authorization tag differs")
             if mode is EngineMode.MANAGED_CLOSEOUT:
                 return False
             return store.set_runtime_mode(
@@ -301,4 +392,5 @@ __all__ = [
     "ControlError",
     "ControlInbox",
     "ControlResult",
+    "HmacControlAuthenticator",
 ]

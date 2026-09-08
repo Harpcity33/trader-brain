@@ -5,11 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from enum import Enum
 import hashlib
 import json
 from typing import Any, Iterable
 
 from .money import decimal_value, whole_shares
+
+
+class MarketSessionState(str, Enum):
+    """Entry-evidence state, deliberately separate from service health."""
+
+    ENTRY_ELIGIBLE = "ENTRY_ELIGIBLE"
+    WAITING_FOR_SESSION = "WAITING_FOR_SESSION"
 
 
 def _aware(value: datetime, field: str) -> datetime:
@@ -204,7 +212,24 @@ class MarketDataCache:
         if prior is not None and quote.observed_at < prior.observed_at:
             return False
         if prior is not None and quote.observed_at == prior.observed_at:
-            if quote == prior:
+            if quote.newest_venue_at < prior.newest_venue_at:
+                return False
+            if quote.newest_venue_at > prior.newest_venue_at:
+                self.quotes[quote.symbol] = quote
+                return True
+            # Two sources can be sampled in one local clock tick. Source labels
+            # do not turn identical executable market facts into a conflict.
+            comparable = (
+                "bid",
+                "ask",
+                "bid_size",
+                "ask_size",
+                "venue_bid_at",
+                "venue_ask_at",
+                "tradable",
+                "halted",
+            )
+            if all(getattr(quote, field) == getattr(prior, field) for field in comparable):
                 return False
             raise ValueError("conflicting quote at the same observation time")
         self.quotes[quote.symbol] = quote
@@ -330,4 +355,10 @@ class MarketDataCache:
         )
 
 
-__all__ = ["CompletedBar", "EvidenceDecision", "MarketDataCache", "Quote"]
+__all__ = [
+    "CompletedBar",
+    "EvidenceDecision",
+    "MarketDataCache",
+    "MarketSessionState",
+    "Quote",
+]

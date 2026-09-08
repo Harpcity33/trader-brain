@@ -45,7 +45,7 @@ class NotificationLatencyTests(unittest.TestCase):
             "ENTRY_FILLED",
             {
                 "event_id": "fill-1",
-                "account_number": "1234567153",
+                "account_number": "1234569999",
                 "symbol": "xyz",
                 "quantity": 2,
                 "state": "filled",
@@ -54,7 +54,7 @@ class NotificationLatencyTests(unittest.TestCase):
             },
         )
         self.assertEqual(notification.dedupe_key, "ENTRY_FILLED:fill-1")
-        self.assertEqual(notification.payload["account_number"], "ending-7153")
+        self.assertEqual(notification.payload["account_number"], "ending-9999")
         self.assertEqual(notification.payload["access_token"], "[REDACTED]")
         self.assertIn("protection=PENDING", notification.body)
 
@@ -67,7 +67,9 @@ class NotificationLatencyTests(unittest.TestCase):
             path = Path(directory) / "notifications.jsonl"
             sink = JsonlNotificationSink(path)
             receipt = sink.send(build_notification("READINESS", {"event_id": "ready", "state": "paused"}))
-            self.assertEqual(len(receipt), 64)
+            self.assertEqual(len(receipt.receipt_hash), 64)
+            self.assertEqual(receipt.route_id, sink.route.route_id)
+            self.assertEqual(receipt.assurance.value, "LOCAL_STAGED")
             row = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(row["event_type"], "READINESS")
 
@@ -169,7 +171,7 @@ class NotificationLatencyTests(unittest.TestCase):
                         account_key="ending-7153",
                         template="BROKER_SUBMISSION_UNKNOWN",
                         payload={
-                            "account": "1234567153",
+                            "account": "1234569999",
                             "symbol": "XYZ",
                             "intent_id": "intent-1",
                             "state": "UNKNOWN",
@@ -187,7 +189,7 @@ class NotificationLatencyTests(unittest.TestCase):
                 )
                 self.assertEqual(delivered["event_type"], "UNRESOLVED_SUBMISSION")
                 self.assertEqual(delivered["severity"], "urgent")
-                self.assertEqual(delivered["payload"]["account"], "ending-7153")
+                self.assertEqual(delivered["payload"]["account"], "ending-9999")
 
 
 if __name__ == "__main__":

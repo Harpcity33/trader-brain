@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import plistlib
@@ -12,13 +14,16 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 from titan_brain.live.release import (
     MANIFEST_SCHEMA,
     calculate_manifest_hash,
     load_release_manifest,
 )
+from titan_brain.live import cli as live_cli
 from titan_brain.live.policy import PolicyBundle
+from titan_brain.live.state import LiveStateStore
 from titan_brain.live.writer_lock import AccountWriterLock
 
 
@@ -122,6 +127,14 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
         self.assertIn("config/risk_limits.json", inventory)
         self.assertIn("src/titan_brain/live/state.py", inventory)
         self.assertIn("scripts/titan-full-live", inventory)
+        self.assertEqual(
+            manifest["notification_launchd_template"],
+            "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
+        )
+        self.assertIn(
+            "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
+            inventory,
+        )
 
     def test_manifest_semantics_and_source_tree_fail_closed(self) -> None:
         result = self.build()
@@ -181,6 +194,7 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
             "pause-new-entries",
             "managed-closeout",
             "deactivate",
+            "notification-worker",
         ):
             self.assertIn(command, completed.stdout)
 
@@ -266,6 +280,19 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
 class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
+        self.fixed_lock_directory = self.base / "fixed-user-locks"
+        self.lock_directory_patch = mock.patch.object(
+            installer,
+            "_user_account_writer_lock_directory",
+            return_value=self.fixed_lock_directory,
+        )
+        self.lock_directory_patch.start()
+        self.runtime_lock_directory_patch = mock.patch.object(
+            live_cli,
+            "user_account_writer_lock_directory",
+            return_value=self.fixed_lock_directory,
+        )
+        self.runtime_lock_directory_patch.start()
         self.result = self.build()
         self.application_root = self.base / "Application Support/Titan Momentum"
         self.install_root = self.application_root / "full-live"
@@ -275,6 +302,8 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         self.legacy = legacy
 
     def tearDown(self) -> None:
+        self.runtime_lock_directory_patch.stop()
+        self.lock_directory_patch.stop()
         super().tearDown()
 
     def install(self):
@@ -284,13 +313,114 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             python_executable=Path(sys.executable),
         )
 
-    def test_install_is_isolated_paused_and_stages_disabled_launchd(self) -> None:
+    def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        """Exercise command behavior with an in-process test lock resolver.
+
+        The installed launcher itself is subprocess-tested only with ``--help``
+        because production intentionally has no flag or environment override
+        for the fixed per-user lock location.
+        """
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            returncode = live_cli.main(arguments)
+        return subprocess.CompletedProcess(
+            args=list(arguments),
+            returncode=returncode,
+            stdout=stdout.getvalue(),
+            stderr=stderr.getvalue(),
+        )
+
+    def downgrade_state_schema(self, version: int) -> None:
+        """Create the exact historical full v1 or v2 shape from a fresh v3 DB."""
+
+        if version not in {1, 2}:
+            raise ValueError("test downgrade supports only historical v1/v2")
+        database = self.install_root / "state/full-live.sqlite3"
+        connection = sqlite3.connect(database)
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("DROP TABLE notification_worker_lease")
+        connection.execute(
+            "ALTER TABLE notification_outbox RENAME TO notification_outbox_current"
+        )
+        connection.execute(
+            """CREATE TABLE notification_outbox (
+                message_id TEXT PRIMARY KEY,
+                event_key TEXT NOT NULL UNIQUE,
+                account_key TEXT NOT NULL,
+                template TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                state TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                last_attempt_at TEXT,
+                next_attempt_at TEXT,
+                delivered_at TEXT,
+                last_error TEXT,
+                delivery_receipt TEXT
+            )"""
+        )
+        v1_columns = (
+            "message_id,event_key,account_key,template,payload_json,created_at,"
+            "state,attempt_count,last_attempt_at,next_attempt_at,delivered_at,"
+            "last_error,delivery_receipt"
+        )
+        connection.execute(
+            f"""INSERT INTO notification_outbox({v1_columns})
+                  SELECT {v1_columns} FROM notification_outbox_current"""
+        )
+        connection.execute("DROP TABLE notification_outbox_current")
+        connection.execute(
+            """CREATE INDEX outbox_pending
+                 ON notification_outbox(state, created_at)"""
+        )
+        connection.execute(
+            "UPDATE schema_meta SET version=1,applied_at=? WHERE singleton=1",
+            ("2026-09-08T00:00:00+00:00",),
+        )
+        connection.execute("PRAGMA user_version=1")
+        if version == 2:
+            for name, column_type in installer._STATE_V2_OUTBOX_COLUMNS:
+                connection.execute(
+                    f"ALTER TABLE notification_outbox ADD COLUMN {name} {column_type}"
+                )
+            connection.execute(
+                """CREATE INDEX outbox_claimable
+                     ON notification_outbox(
+                         state, next_attempt_at, claim_expires_at, created_at
+                     )"""
+            )
+            connection.execute(
+                "UPDATE schema_meta SET version=2,applied_at=? WHERE singleton=1",
+                ("2026-09-08T00:01:00+00:00",),
+            )
+            connection.execute("PRAGMA user_version=2")
+        connection.commit()
+        connection.close()
+
+    def build_next_release(self, marker: str) -> dict[str, str]:
+        readme = self.source_root / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8") + f"\n{marker}\n",
+            encoding="utf-8",
+        )
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", marker)
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        return self.build(marker.replace(" ", "-").lower())
+
+    def test_install_is_isolated_paused_and_stages_independent_disabled_launchd(self) -> None:
         record = self.install()
         self.assertEqual(record["installed_mode"], "PAUSED")
         self.assertFalse(record["broker_accessed"])
         self.assertFalse(record["legacy_runtime_modified"])
         self.assertFalse(record["launchd"]["installer_called_launchctl"])
         self.assertEqual(record["launchd"]["actual_loaded_state"], "NOT_QUERIED")
+        self.assertEqual(
+            record["launchd"]["process_role"],
+            "trading_coordinator_enqueue_only",
+        )
         self.assertEqual(self.legacy.read_text(encoding="utf-8"), "legacy-unchanged")
 
         current = self.install_root / "current"
@@ -311,6 +441,43 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         self.assertIn("serve", plist["ProgramArguments"])
         self.assertIn("--install-root", plist["ProgramArguments"])
         self.assertEqual(plist["ProgramArguments"][0], str(Path(sys.executable).resolve()))
+        self.assertEqual(plist["ProgramArguments"][1:4], ["-I", "-S", "-B"])
+
+        notification_metadata = record["launchd"]["notification_worker"]
+        self.assertFalse(notification_metadata["installer_called_launchctl"])
+        self.assertEqual(notification_metadata["actual_loaded_state"], "NOT_QUERIED")
+        self.assertEqual(
+            notification_metadata["process_role"],
+            "independent_notification_outbox_delivery",
+        )
+        notification_path = Path(notification_metadata["staged_plist"])
+        self.assertNotEqual(notification_path, plist_path)
+        with notification_path.open("rb") as handle:
+            notification_plist = plistlib.load(handle)
+        self.assertEqual(
+            notification_plist["Label"],
+            "com.harpcity.trader-brain-full-live-notifications",
+        )
+        self.assertIs(notification_plist["Disabled"], True)
+        self.assertNotIn("RunAtLoad", notification_plist)
+        self.assertEqual(
+            notification_plist["KeepAlive"], {"SuccessfulExit": False}
+        )
+        self.assertIn("notification-worker", notification_plist["ProgramArguments"])
+        self.assertNotIn("serve", notification_plist["ProgramArguments"])
+        self.assertEqual(
+            notification_plist["ProgramArguments"][0],
+            str(Path(sys.executable).resolve()),
+        )
+        self.assertEqual(
+            notification_plist["ProgramArguments"][1:4], ["-I", "-S", "-B"]
+        )
+        self.assertNotEqual(
+            notification_plist["StandardOutPath"], plist["StandardOutPath"]
+        )
+        self.assertNotEqual(
+            notification_plist["StandardErrorPath"], plist["StandardErrorPath"]
+        )
 
         completed = subprocess.run(
             [sys.executable, str(current / "scripts/titan-full-live"), "--help"],
@@ -319,51 +486,64 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        initialized = subprocess.run(
-            [
-                sys.executable,
-                str(current / "scripts/titan-full-live"),
-                "init-state",
-                "--install-root",
-                str(self.install_root),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        initialized = self.run_cli(
+            "init-state",
+            "--install-root",
+            str(self.install_root),
         )
         self.assertEqual(initialized.returncode, 0, initialized.stderr)
         initialized_payload = json.loads(initialized.stdout)
         self.assertEqual(initialized_payload["runtime"]["mode"], "PAUSED")
         self.assertEqual(initialized_payload["runtime"]["authority_enabled"], 0)
-        doctor = subprocess.run(
-            [
-                sys.executable,
-                str(current / "scripts/titan-full-live"),
-                "doctor",
-                "--install-root",
-                str(self.install_root),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        notification_test = self.run_cli(
+            "notification-test",
+            "--install-root",
+            str(self.install_root),
+            "--event-id",
+            "paused-install-route-test",
+        )
+        self.assertEqual(notification_test.returncode, 0, notification_test.stderr)
+        notification_test_payload = json.loads(notification_test.stdout)
+        self.assertTrue(notification_test_payload["queued"])
+        self.assertFalse(
+            notification_test_payload["delivery_attempted_by_command"]
+        )
+        self.assertFalse((self.install_root / "state/notifications.jsonl").exists())
+        connection = sqlite3.connect(self.install_root / "state/full-live.sqlite3")
+        state = connection.execute(
+            "SELECT state,attempt_count FROM notification_outbox"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(state, ("PENDING", 0))
+
+        notification_worker = self.run_cli(
+            "notification-worker",
+            "--install-root",
+            str(self.install_root),
+            "--once",
+        )
+        self.assertEqual(
+            notification_worker.returncode, 0, notification_worker.stderr
+        )
+        worker_payload = json.loads(notification_worker.stdout)
+        self.assertEqual(worker_payload["sent"], 1)
+        self.assertEqual(worker_payload["failed"], 0)
+        self.assertTrue((self.install_root / "state/notifications.jsonl").is_file())
+        doctor = self.run_cli(
+            "doctor",
+            "--install-root",
+            str(self.install_root),
         )
         self.assertEqual(doctor.returncode, 2, doctor.stderr)
         doctor_payload = json.loads(doctor.stdout)
         self.assertFalse(doctor_payload["ready_for_owner_activation"])
         self.assertIn("LIVE_ENTRIES_DISABLED_IN_SIGNED_CONFIG", doctor_payload["blockers"])
-        prepare = subprocess.run(
-            [
-                sys.executable,
-                str(current / "scripts/titan-full-live"),
-                "prepare-activation",
-                "--install-root",
-                str(self.install_root),
-                "--ttl-seconds",
-                "300",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        prepare = self.run_cli(
+            "prepare-activation",
+            "--install-root",
+            str(self.install_root),
+            "--ttl-seconds",
+            "300",
         )
         self.assertEqual(prepare.returncode, 2)
         self.assertIn("LIVE_ENTRIES_DISABLED_IN_SIGNED_CONFIG", prepare.stderr)
@@ -377,15 +557,22 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
     def test_reinstall_is_idempotent_only_while_database_proves_paused(self) -> None:
         first = self.install()
         database = self.install_root / "state/full-live.sqlite3"
-        connection = sqlite3.connect(database)
-        connection.execute(
-            "CREATE TABLE runtime_identity (singleton INTEGER PRIMARY KEY, mode TEXT NOT NULL)"
+        initialized = self.run_cli(
+            "init-state",
+            "--install-root",
+            str(self.install_root),
         )
-        connection.execute("INSERT INTO runtime_identity(singleton, mode) VALUES (1, 'PAUSED')")
-        connection.commit()
-        connection.close()
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
         second = self.install()
         self.assertEqual(first["release_id"], second["release_id"])
+        self.assertFalse(second["runtime_identity_migration"]["performed"])
+        self.assertEqual(
+            second["runtime_identity_migration"]["reason"],
+            "IDENTITY_ALREADY_MATCHED",
+        )
+        self.assertFalse(
+            second["runtime_identity_migration"]["schema_migration"]["performed"]
+        )
 
         connection = sqlite3.connect(database)
         connection.execute("UPDATE runtime_identity SET mode='ACTIVE' WHERE singleton=1")
@@ -393,6 +580,464 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         connection.close()
         with self.assertRaisesRegex(installer.InstallError, "requires PAUSED"):
             self.install()
+
+    def test_genuine_v1_upgrade_preserves_outbox_and_audit_before_rebind(self) -> None:
+        first = self.install()
+        initialized = self.run_cli(
+            "init-state", "--install-root", str(self.install_root)
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        self.downgrade_state_schema(1)
+        database = self.install_root / "state/full-live.sqlite3"
+        connection = sqlite3.connect(database)
+        connection.execute(
+            """INSERT INTO notification_outbox(
+                   message_id,event_key,account_key,template,payload_json,
+                   created_at,state,attempt_count
+               ) VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                "historical-v1-message",
+                "historical-v1-event",
+                "ending-7153",
+                "SELL_EXIT_REVIEW_REQUIRED",
+                '{"redacted":true}',
+                "2026-09-08T12:00:00+00:00",
+                "PENDING",
+                2,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO activation_records(
+                   activation_id,account_key,record_hash,created_at,expires_at,
+                   consumed_at,record_json
+               ) VALUES(?,?,?,?,?,NULL,?)""",
+            (
+                "historical-v1-activation",
+                "ending-7153",
+                "b" * 64,
+                "2026-09-08T12:00:00+00:00",
+                "2026-09-08T12:05:00+00:00",
+                "{}",
+            ),
+        )
+        connection.commit()
+        connection.close()
+        old_pointer = (self.install_root / "current").resolve()
+        next_result = self.build_next_release("genuine v1 migration fixture")
+
+        upgraded = installer.install(
+            Path(next_result["archive"]),
+            self.install_root,
+            python_executable=Path(sys.executable),
+        )
+        self.assertNotEqual(first["release_id"], upgraded["release_id"])
+        self.assertNotEqual((self.install_root / "current").resolve(), old_pointer)
+        migration = upgraded["runtime_identity_migration"]
+        self.assertTrue(migration["performed"])
+        self.assertEqual(migration["schema_migration"]["path"], [1, 2, 3])
+        self.assertTrue(migration["schema_migration"]["performed"])
+        self.assertEqual(migration["invalidated_activation_records"], 1)
+
+        connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+        metadata = connection.execute(
+            "SELECT version FROM schema_meta WHERE singleton=1"
+        ).fetchone()
+        message = connection.execute(
+            "SELECT * FROM notification_outbox WHERE message_id=?",
+            ("historical-v1-message",),
+        ).fetchone()
+        activation = connection.execute(
+            "SELECT consumed_at FROM activation_records WHERE activation_id=?",
+            ("historical-v1-activation",),
+        ).fetchone()
+        runtime = connection.execute(
+            "SELECT generation,release_manifest_hash FROM runtime_identity WHERE singleton=1"
+        ).fetchone()
+        event_types = [
+            row[0]
+            for row in connection.execute(
+                "SELECT event_type FROM audit_events ORDER BY sequence"
+            ).fetchall()
+        ]
+        worker_columns = [
+            row[1]
+            for row in connection.execute(
+                'PRAGMA table_info("notification_worker_lease")'
+            ).fetchall()
+        ]
+        connection.close()
+        self.assertEqual(metadata["version"], 3)
+        self.assertEqual(message["event_key"], "historical-v1-event")
+        self.assertEqual(message["attempt_count"], 2)
+        self.assertIsNone(message["claim_owner"])
+        self.assertIsNone(message["delivery_route_id"])
+        self.assertIsNotNone(activation["consumed_at"])
+        self.assertEqual(runtime["generation"], 1)
+        self.assertEqual(runtime["release_manifest_hash"], upgraded["release_id"])
+        self.assertEqual(
+            worker_columns, list(installer._STATE_V3_WORKER_COLUMNS)
+        )
+        self.assertEqual(
+            event_types,
+            [
+                "RUNTIME_INITIALIZED_PAUSED",
+                "STATE_SCHEMA_UPGRADED",
+                "RUNTIME_RELEASE_IDENTITY_MIGRATED_PAUSED",
+            ],
+        )
+        with LiveStateStore(database) as state:
+            self.assertTrue(state.verify_event_chain()[0])
+
+    def test_genuine_v2_schema_only_upgrade_invalidates_old_activation(self) -> None:
+        self.install()
+        initialized = self.run_cli(
+            "init-state", "--install-root", str(self.install_root)
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        self.downgrade_state_schema(2)
+        database = self.install_root / "state/full-live.sqlite3"
+        connection = sqlite3.connect(database)
+        connection.execute(
+            """INSERT INTO activation_records(
+                   activation_id,account_key,record_hash,created_at,expires_at,
+                   consumed_at,record_json
+               ) VALUES(?,?,?,?,?,NULL,?)""",
+            (
+                "historical-v2-activation",
+                "ending-7153",
+                "c" * 64,
+                "2026-09-08T12:00:00+00:00",
+                "2026-09-08T12:05:00+00:00",
+                "{}",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO notification_outbox(
+                   message_id,event_key,account_key,template,payload_json,
+                   created_at,state,attempt_count,claim_owner,claim_expires_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "historical-v2-claimed-message",
+                "historical-v2-claimed-event",
+                "ending-7153",
+                "BUY_REVIEW_REQUIRED",
+                '{"redacted":true}',
+                "2026-09-08T12:00:00+00:00",
+                "PENDING",
+                0,
+                "unproven-old-worker",
+                "2026-09-08T12:05:00+00:00",
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "notification claims released"
+        ):
+            self.install()
+        connection = sqlite3.connect(database)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(
+            connection.execute(
+                "SELECT generation FROM runtime_identity WHERE singleton=1"
+            ).fetchone()[0],
+            0,
+        )
+        connection.execute(
+            """UPDATE notification_outbox
+                  SET claim_owner=NULL,claim_expires_at=NULL
+                WHERE message_id=?""",
+            ("historical-v2-claimed-message",),
+        )
+        connection.commit()
+        connection.close()
+
+        upgraded = self.install()
+        migration = upgraded["runtime_identity_migration"]
+        self.assertTrue(migration["performed"])
+        self.assertEqual(migration["reason"], "PAUSED_SCHEMA_AUTHORITY_REBOUND")
+        self.assertEqual(migration["schema_migration"]["path"], [2, 3])
+        self.assertEqual(migration["invalidated_activation_records"], 1)
+        connection = sqlite3.connect(database)
+        runtime = connection.execute(
+            "SELECT generation,mode,authority_enabled FROM runtime_identity WHERE singleton=1"
+        ).fetchone()
+        activation = connection.execute(
+            "SELECT consumed_at FROM activation_records WHERE activation_id=?",
+            ("historical-v2-activation",),
+        ).fetchone()
+        events = connection.execute(
+            "SELECT event_type FROM audit_events ORDER BY sequence"
+        ).fetchall()
+        connection.close()
+        self.assertEqual(runtime, (1, "PAUSED", 0))
+        self.assertIsNotNone(activation[0])
+        self.assertEqual(
+            events,
+            [
+                ("RUNTIME_INITIALIZED_PAUSED",),
+                ("STATE_SCHEMA_UPGRADED",),
+                ("RUNTIME_RELEASE_IDENTITY_MIGRATED_PAUSED",),
+            ],
+        )
+
+        repeated = self.install()
+        self.assertFalse(repeated["runtime_identity_migration"]["performed"])
+        connection = sqlite3.connect(database)
+        self.assertEqual(
+            connection.execute(
+                "SELECT generation FROM runtime_identity WHERE singleton=1"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0],
+            3,
+        )
+        connection.close()
+
+    def test_partial_or_unexpected_legacy_schema_is_rejected_without_mutation(self) -> None:
+        self.install()
+        initialized = self.run_cli(
+            "init-state", "--install-root", str(self.install_root)
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        self.downgrade_state_schema(1)
+        database = self.install_root / "state/full-live.sqlite3"
+        pointer = (self.install_root / "current").resolve()
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "ALTER TABLE notification_outbox ADD COLUMN claim_owner TEXT"
+        )
+        connection.commit()
+        connection.close()
+
+        with self.assertRaisesRegex(installer.InstallError, "columns differ"):
+            self.install()
+        self.assertEqual((self.install_root / "current").resolve(), pointer)
+        connection = sqlite3.connect(database)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(
+            connection.execute(
+                "SELECT version FROM schema_meta WHERE singleton=1"
+            ).fetchone()[0],
+            1,
+        )
+        worker = connection.execute(
+            """SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name='notification_worker_lease'"""
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(worker, 0)
+
+    def test_unexpected_v3_schema_object_is_rejected_before_pointer_change(self) -> None:
+        self.install()
+        initialized = self.run_cli(
+            "init-state", "--install-root", str(self.install_root)
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        database = self.install_root / "state/full-live.sqlite3"
+        pointer = (self.install_root / "current").resolve()
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "CREATE VIEW unsupported_runtime_view AS SELECT mode FROM runtime_identity"
+        )
+        connection.commit()
+        connection.close()
+
+        with self.assertRaisesRegex(installer.InstallError, "unsupported views"):
+            self.install()
+        self.assertEqual((self.install_root / "current").resolve(), pointer)
+        connection = sqlite3.connect(database)
+        self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0],
+            1,
+        )
+        connection.close()
+
+    def test_paused_release_switch_migrates_identity_and_invalidates_authority(self) -> None:
+        first = self.install()
+        initialized = self.run_cli(
+            "init-state",
+            "--install-root",
+            str(self.install_root),
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        database = self.install_root / "state/full-live.sqlite3"
+        old_release = Path(first["current_release"])
+        old_manifest = json.loads(
+            (self.install_root / "release-manifest.json").read_text(encoding="utf-8")
+        )
+
+        connection = sqlite3.connect(database)
+        connection.execute(
+            """INSERT INTO activation_records(
+                   activation_id,account_key,record_hash,created_at,expires_at,
+                   consumed_at,record_json
+               ) VALUES(?,?,?,?,?,NULL,?)""",
+            (
+                "pending-prior-release-activation",
+                "ending-7153",
+                "a" * 64,
+                "2026-09-08T12:00:00+00:00",
+                "2026-09-08T12:05:00+00:00",
+                "{}",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO account_writer_lease(
+                   account_key,owner_id,process_id,generation,acquired_at,
+                   heartbeat_at,released_at
+               ) VALUES(?,?,?,?,?,?,NULL)""",
+            (
+                "ending-7153",
+                "prior-release-owner",
+                4242,
+                1,
+                "2026-09-08T12:00:00+00:00",
+                "2026-09-08T12:00:01+00:00",
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        readme = self.source_root / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8")
+            + "\nRelease-identity migration fixture.\n",
+            encoding="utf-8",
+        )
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", "next release fixture")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        next_result = self.build("next-release")
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "all runtime leases released"
+        ):
+            installer.install(
+                Path(next_result["archive"]),
+                self.install_root,
+                python_executable=Path(sys.executable),
+            )
+        self.assertEqual((self.install_root / "current").resolve(), old_release)
+        connection = sqlite3.connect(database)
+        unchanged = connection.execute(
+            "SELECT release_manifest_hash,generation FROM runtime_identity WHERE singleton=1"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(unchanged, (old_manifest["release_manifest_hash"], 0))
+
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "UPDATE account_writer_lease SET released_at=? WHERE account_key=?",
+            ("2026-09-08T12:00:02+00:00", "ending-7153"),
+        )
+        connection.execute(
+            """INSERT INTO notification_worker_lease(
+                   account_key,worker_id,process_id,generation,route_id,provider,
+                   destination_fingerprint,route_version,started_at,heartbeat_at,
+                   last_sent_count,last_failed_count,released_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
+            (
+                "ending-7153",
+                "prior-notification-worker",
+                4343,
+                1,
+                "route-test",
+                "test-provider",
+                "d" * 64,
+                "v1",
+                "2026-09-08T12:00:00+00:00",
+                "2026-09-08T12:00:01+00:00",
+                0,
+                0,
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "all runtime leases released"
+        ):
+            installer.install(
+                Path(next_result["archive"]),
+                self.install_root,
+                python_executable=Path(sys.executable),
+            )
+        self.assertEqual((self.install_root / "current").resolve(), old_release)
+
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "UPDATE notification_worker_lease SET released_at=? WHERE account_key=?",
+            ("2026-09-08T12:00:03+00:00", "ending-7153"),
+        )
+        connection.commit()
+        connection.close()
+
+        migrated = installer.install(
+            Path(next_result["archive"]),
+            self.install_root,
+            python_executable=Path(sys.executable),
+        )
+        migration = migrated["runtime_identity_migration"]
+        next_manifest = json.loads(
+            (self.install_root / "release-manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(migration["required"])
+        self.assertTrue(migration["performed"])
+        self.assertEqual(migration["reason"], "PAUSED_IDENTITY_REBOUND")
+        self.assertEqual(migration["invalidated_activation_records"], 1)
+        self.assertEqual(migration["generation"], 1)
+        self.assertNotEqual(migrated["release_id"], first["release_id"])
+        self.assertEqual(
+            (self.install_root / "current").resolve(),
+            Path(migrated["current_release"]),
+        )
+
+        connection = sqlite3.connect(database)
+        connection.row_factory = sqlite3.Row
+        runtime = connection.execute(
+            "SELECT * FROM runtime_identity WHERE singleton=1"
+        ).fetchone()
+        activation = connection.execute(
+            "SELECT consumed_at FROM activation_records WHERE activation_id=?",
+            ("pending-prior-release-activation",),
+        ).fetchone()
+        event = connection.execute(
+            """SELECT event_type,entity_id,payload_json
+                 FROM audit_events ORDER BY sequence DESC LIMIT 1"""
+        ).fetchone()
+        connection.close()
+        self.assertEqual(runtime["release_manifest_hash"], migrated["release_id"])
+        self.assertEqual(runtime["config_hash"], next_manifest["config_hash"])
+        self.assertEqual(runtime["policy_hash"], next_manifest["policy_hash"])
+        self.assertEqual(runtime["mode"], "PAUSED")
+        self.assertEqual(runtime["authority_enabled"], 0)
+        self.assertIsNone(runtime["activated_at"])
+        self.assertEqual(runtime["generation"], 1)
+        self.assertIsNotNone(activation["consumed_at"])
+        self.assertEqual(event["event_type"], "RUNTIME_RELEASE_IDENTITY_MIGRATED_PAUSED")
+        self.assertEqual(event["entity_id"], migrated["release_id"])
+        event_payload = json.loads(event["payload_json"])
+        self.assertEqual(event_payload["invalidated_activation_records"], 1)
+        self.assertTrue(
+            event_payload["prior_release_controls_invalidated_by_release_binding"]
+        )
+        with LiveStateStore(database) as state:
+            self.assertTrue(state.verify_event_chain()[0])
+
+        reinitialized = self.run_cli(
+            "init-state",
+            "--install-root",
+            str(self.install_root),
+        )
+        self.assertEqual(reinitialized.returncode, 0, reinitialized.stderr)
+        self.assertFalse(json.loads(reinitialized.stdout)["created"])
 
     def test_existing_release_contamination_is_rejected(self) -> None:
         record = self.install()
@@ -402,8 +1047,11 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             self.install()
 
     def test_account_writer_lock_blocks_release_switch(self) -> None:
-        lock_directory = self.install_root / "state/locks"
-        lock = AccountWriterLock(lock_directory, "ending-7153", owner_id="running-service")
+        lock = AccountWriterLock(
+            self.fixed_lock_directory,
+            "ending-7153",
+            owner_id="running-service",
+        )
         lock.acquire()
         try:
             with self.assertRaisesRegex(installer.InstallError, "interlock is held"):
@@ -411,6 +1059,25 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             self.assertFalse((self.install_root / "current").exists())
         finally:
             lock.release()
+
+    def test_parallel_install_roots_share_one_account_global_interlock(self) -> None:
+        first = self.base / "installation-a/full-live"
+        second = self.base / "unrelated/installation-b/full-live"
+        for root in (first, second):
+            (root / "control").mkdir(parents=True)
+
+        with installer._deployment_interlock(first, "ending-7153"):
+            expected = self.fixed_lock_directory / (
+                "account-"
+                + hashlib.sha256(b"ending-7153").hexdigest()[:24]
+                + ".writer.lock"
+            )
+            self.assertTrue(expected.is_file())
+            self.assertNotEqual(expected.parent, first.parent)
+            self.assertNotEqual(expected.parent, second.parent)
+            with self.assertRaisesRegex(installer.InstallError, "interlock is held"):
+                with installer._deployment_interlock(second, "ending-7153"):
+                    self.fail("parallel install acquired a partitioned writer lock")
 
     def test_symlinked_install_subdirectory_is_rejected(self) -> None:
         self.install_root.mkdir(parents=True)
@@ -451,6 +1118,19 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         )
         self.assertIs(template["Disabled"], True)
         self.assertNotIn("RunAtLoad", template)
+        notification_template = plistlib.loads(
+            (
+                ROOT
+                / "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
+            ).read_bytes()
+        )
+        self.assertIs(notification_template["Disabled"], True)
+        self.assertNotIn("RunAtLoad", notification_template)
+        self.assertNotEqual(notification_template["Label"], template["Label"])
+        self.assertIn(
+            "notification-worker", notification_template["ProgramArguments"]
+        )
+        self.assertIn("serve", template["ProgramArguments"])
 
 
 if __name__ == "__main__":

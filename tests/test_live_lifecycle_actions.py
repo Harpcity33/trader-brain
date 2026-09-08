@@ -87,10 +87,24 @@ def enabled_policy() -> PolicyBundle:
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
-    config["notifications"]["destination_bridge_configured"] = True
+    config["notifications"].update(
+        {
+            "delivery_sink": "gmail_api",
+            "destination_bridge_configured": True,
+            "provider": "gmail",
+            "destination_fingerprint": "f" * 64,
+            "route_version": "synthetic-test-v1",
+            "required_assurance": "PROVIDER_ACCEPTED",
+            "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+            "authorization_binding_id": "d" * 64,
+            "timeout_seconds": 5,
+        }
+    )
     config["discovery"].update(
         {
             "pipeline_configured": True,
+            "provider_composition_id": "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "provider_binding_id": "e" * 64,
             "instrument_evidence_provider": "synthetic_test_only",
             "quality_revalidation_provider": "synthetic_test_only",
             "minimum_setup_score": 70,
@@ -196,6 +210,62 @@ class PositionDisappearsAfterReviewBroker(FakeBrokerClient):
         receipt = super().review_equity_order(request)
         self._snapshot = replace(self._snapshot, equity_positions=())
         return receipt
+
+
+class StaleProviderFactsBroker(FakeBrokerClient):
+    """Return a freshly received envelope containing stale provider facts."""
+
+    stale_final_snapshot = True
+
+    def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
+        account = super().get_account_snapshot(account_masked)
+        if not self.stale_final_snapshot:
+            return account
+        now = self._now()
+        return replace(
+            account,
+            observed_at=now - timedelta(seconds=10),
+            received_at=now,
+        )
+
+
+class RegressedEnvelopeBroker(FakeBrokerClient):
+    """Return otherwise-recent facts with timestamps older than the input."""
+
+    def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
+        account = super().get_account_snapshot(account_masked)
+        now = self._now()
+        return replace(
+            account,
+            observed_at=now - timedelta(seconds=2),
+            received_at=now - timedelta(seconds=1),
+            risk_evidence_as_of=now - timedelta(seconds=2),
+        )
+
+
+class RegressedRiskEvidenceBroker(FakeBrokerClient):
+    def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
+        account = super().get_account_snapshot(account_masked)
+        return replace(
+            account,
+            risk_evidence_as_of=self._now() - timedelta(seconds=10),
+        )
+
+
+class RereceivedActiveOrderBroker(FakeBrokerClient):
+    rereceive_orders = False
+
+    def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
+        account = super().get_account_snapshot(account_masked)
+        if not self.rereceive_orders:
+            return account
+        return replace(
+            account,
+            equity_orders=tuple(
+                replace(order, received_at=self._now())
+                for order in account.equity_orders
+            ),
+        )
 
 
 class LifecycleFixture(unittest.TestCase):
@@ -370,6 +440,181 @@ class LifecycleFixture(unittest.TestCase):
 
 
 class ProductionLifecycleActionsTests(LifecycleFixture):
+    def test_final_cancel_authority_accepts_monotone_rereceipt_and_returns_target(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = RereceivedActiveOrderBroker(
+            initial_snapshot=account, clock=self.clock
+        )
+        actions = self.adapter(broker)
+        protected = actions.protect(
+            snapshot=account,
+            decision=self.protection_decision(account),
+            now=self.clock(),
+        )
+        self.assertTrue(protected.startswith("PROTECTION:ACKNOWLEDGED"), protected)
+        self.clock.advance()
+        supplied = broker.get_account_snapshot(ACCOUNT_MASKED)
+        target = next(
+            order for order in supplied.equity_orders if not order.state.terminal
+        )
+        broker.rereceive_orders = True
+
+        refreshed = actions.require_mutation_authority(
+            snapshot=supplied,
+            operation=MutationOperation.CANCEL,
+            phase=MutationPhase.BEFORE_CANCEL,
+            now=self.clock(),
+            plan_id=self._plan_for_local_order_for_test(actions, target),
+            kind=IntentKind.CANCEL,
+            target=target,
+        )
+
+        refreshed_target = next(
+            order
+            for order in refreshed.equity_orders
+            if order.broker_order_id == target.broker_order_id
+        )
+        self.assertGreater(refreshed_target.received_at, target.received_at)
+
+    @staticmethod
+    def _plan_for_local_order_for_test(
+        actions: ProductionLifecycleActions, target: OrderSnapshot
+    ) -> str:
+        return actions._plan_for_local_order(target.broker_order_id)
+
+    def test_final_entry_authority_rejects_fresh_receipt_with_stale_facts(self) -> None:
+        self.arm()
+        account = snapshot(self.clock(), orders=(), positions=())
+        broker = StaleProviderFactsBroker(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(broker)
+        request = OrderRequest(
+            account_masked=ACCOUNT_MASKED,
+            symbol="XYZ",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            quantity=1,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id=str(uuid4()),
+            limit_price="10.00",
+        )
+
+        with self.assertRaises(MutationAuthorityDenied) as caught:
+            actions.require_mutation_authority(
+                snapshot=account,
+                operation=MutationOperation.ENTRY_PLACE,
+                phase=MutationPhase.BEFORE_PLACE,
+                now=self.clock(),
+                plan_id="plan-entry-stale-facts",
+                kind=IntentKind.ENTRY,
+                request=request,
+            )
+
+        self.assertIn("STALE_SNAPSHOT", caught.exception.failure_codes)
+        self.assertIn(
+            "FINAL_BROKER_SNAPSHOT_OBSERVED_REGRESSED",
+            caught.exception.failure_codes,
+        )
+
+    def test_final_sell_authority_rejects_fresh_receipt_with_stale_facts(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = StaleProviderFactsBroker(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(broker)
+
+        result = actions.protect(
+            snapshot=account,
+            decision=self.protection_decision(account),
+            now=self.clock(),
+        )
+
+        self.assertIn("STALE_SNAPSHOT", result)
+        self.assertIn("FINAL_BROKER_SNAPSHOT_OBSERVED_REGRESSED", result)
+        self.assertFalse(
+            any(call[0] == FakeBrokerClient.PLACE for call in broker.calls)
+        )
+
+    def test_final_sell_authority_rejects_observed_and_receipt_regressions(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = RegressedEnvelopeBroker(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(broker)
+
+        result = actions.protect(
+            snapshot=account,
+            decision=self.protection_decision(account),
+            now=self.clock(),
+        )
+
+        self.assertIn("FINAL_BROKER_SNAPSHOT_OBSERVED_REGRESSED", result)
+        self.assertIn("FINAL_BROKER_SNAPSHOT_RECEIPT_REGRESSED", result)
+        self.assertFalse(
+            any(call[0] == FakeBrokerClient.PLACE for call in broker.calls)
+        )
+
+    def test_final_entry_authority_rejects_stale_regressed_risk_evidence(self) -> None:
+        self.arm()
+        account = snapshot(self.clock(), orders=(), positions=())
+        broker = RegressedRiskEvidenceBroker(
+            initial_snapshot=account, clock=self.clock
+        )
+        actions = self.adapter(broker)
+        request = OrderRequest(
+            account_masked=ACCOUNT_MASKED,
+            symbol="XYZ",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            quantity=1,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id=str(uuid4()),
+            limit_price="10.00",
+        )
+
+        with self.assertRaises(MutationAuthorityDenied) as caught:
+            actions.require_mutation_authority(
+                snapshot=account,
+                operation=MutationOperation.ENTRY_PLACE,
+                phase=MutationPhase.BEFORE_PLACE,
+                now=self.clock(),
+                plan_id="plan-entry-stale-risk",
+                kind=IntentKind.ENTRY,
+                request=request,
+            )
+
+        self.assertIn("ENTRY_RISK_EVIDENCE_REGRESSED", caught.exception.failure_codes)
+        self.assertIn("STALE_ENTRY_RISK_EVIDENCE", caught.exception.failure_codes)
+
+    def test_final_cancel_authority_rejects_fresh_receipt_with_stale_facts(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = StaleProviderFactsBroker(initial_snapshot=account, clock=self.clock)
+        broker.stale_final_snapshot = False
+        actions = self.adapter(broker)
+        protected = actions.protect(
+            snapshot=account,
+            decision=self.protection_decision(account),
+            now=self.clock(),
+        )
+        self.assertTrue(protected.startswith("PROTECTION:ACKNOWLEDGED"), protected)
+        self.clock.advance()
+        with_stop = broker.get_account_snapshot(ACCOUNT_MASKED)
+        close = plan_safe_close(
+            position=with_stop.equity_positions[0],
+            orders=with_stop.equity_orders,
+            symbol="XYZ",
+            snapshot_received_at=with_stop.received_at,
+        )
+        self.assertEqual(close.action, ExitAction.CANCEL_EXIT_ORDERS)
+        broker.stale_final_snapshot = True
+
+        result = actions.closeout(snapshot=with_stop, decision=close, now=self.clock())
+
+        self.assertIn("STALE_SNAPSHOT", result)
+        self.assertIn("FINAL_BROKER_SNAPSHOT_OBSERVED_REGRESSED", result)
+        self.assertFalse(any(call[0] == FakeBrokerClient.CANCEL for call in broker.calls))
+
     def test_fabricated_allowed_risk_cannot_bypass_current_daily_loss(self) -> None:
         """The production mutation capability, not its caller, owns risk truth."""
 

@@ -15,6 +15,7 @@ import hashlib
 import json
 from pathlib import Path
 import os
+import re
 import sqlite3
 import threading
 from typing import Any, Iterator, Mapping, Sequence
@@ -44,7 +45,7 @@ from .models import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 ZERO_HASH = "0" * 64
 
 
@@ -99,6 +100,19 @@ def _iso(value: datetime) -> str:
     if value.tzinfo is None:
         raise ValueError("timestamp must be timezone-aware")
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _safe_notification_error(value: object) -> str:
+    """Persist only bounded machine codes, never provider exception text."""
+
+    candidate = str(value or "").strip().upper()
+    if (
+        candidate.startswith("NOTIFICATION_")
+        and len(candidate) <= 128
+        and all(character.isalnum() or character == "_" for character in candidate)
+    ):
+        return candidate
+    return "NOTIFICATION_DELIVERY_FAILED"
 
 
 SCHEMA_V1 = """
@@ -322,7 +336,29 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
     next_attempt_at TEXT,
     delivered_at TEXT,
     last_error TEXT,
-    delivery_receipt TEXT
+    delivery_receipt TEXT,
+    claim_owner TEXT,
+    claim_expires_at TEXT,
+    delivery_route_id TEXT,
+    delivery_assurance TEXT,
+    delivery_receipt_hash TEXT,
+    delivery_payload_hash TEXT
+);
+
+CREATE TABLE IF NOT EXISTS notification_worker_lease (
+    account_key TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    process_id INTEGER NOT NULL CHECK (process_id > 0),
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    route_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    destination_fingerprint TEXT NOT NULL,
+    route_version TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    last_sent_count INTEGER NOT NULL DEFAULT 0 CHECK (last_sent_count >= 0),
+    last_failed_count INTEGER NOT NULL DEFAULT 0 CHECK (last_failed_count >= 0),
+    released_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS latency_samples (
@@ -359,6 +395,8 @@ CREATE INDEX IF NOT EXISTS incidents_account_open
     ON incidents(account_key, resolved_at);
 CREATE INDEX IF NOT EXISTS outbox_pending
     ON notification_outbox(state, created_at);
+CREATE INDEX IF NOT EXISTS outbox_claimable
+    ON notification_outbox(state, next_attempt_at, claim_expires_at, created_at);
 CREATE INDEX IF NOT EXISTS latency_stage_time
     ON latency_samples(stage, observed_at);
 CREATE INDEX IF NOT EXISTS positions_account
@@ -397,6 +435,143 @@ BEFORE DELETE ON audit_events BEGIN
     SELECT RAISE(ABORT, 'audit events are append-only');
 END;
 """
+
+SCHEMA_V2_MIGRATION = """
+ALTER TABLE notification_outbox ADD COLUMN claim_owner TEXT;
+ALTER TABLE notification_outbox ADD COLUMN claim_expires_at TEXT;
+ALTER TABLE notification_outbox ADD COLUMN delivery_route_id TEXT;
+ALTER TABLE notification_outbox ADD COLUMN delivery_assurance TEXT;
+ALTER TABLE notification_outbox ADD COLUMN delivery_receipt_hash TEXT;
+ALTER TABLE notification_outbox ADD COLUMN delivery_payload_hash TEXT;
+CREATE INDEX IF NOT EXISTS outbox_claimable
+    ON notification_outbox(state, next_attempt_at, claim_expires_at, created_at);
+"""
+
+SCHEMA_V3_MIGRATION = """
+CREATE TABLE IF NOT EXISTS notification_worker_lease (
+    account_key TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    process_id INTEGER NOT NULL CHECK (process_id > 0),
+    generation INTEGER NOT NULL CHECK (generation > 0),
+    route_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    destination_fingerprint TEXT NOT NULL,
+    route_version TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    last_sent_count INTEGER NOT NULL DEFAULT 0 CHECK (last_sent_count >= 0),
+    last_failed_count INTEGER NOT NULL DEFAULT 0 CHECK (last_failed_count >= 0),
+    released_at TEXT
+);
+"""
+
+
+def _semantic_schema_sql(value: object) -> str:
+    collapsed = " ".join(str(value or "").split())
+    return re.sub(r"\s*([(),])\s*", r"\1", collapsed)
+
+
+def _schema_semantic_shape(connection: sqlite3.Connection) -> Mapping[str, Any]:
+    """Describe all user schema semantics without depending on DDL whitespace."""
+
+    objects = [
+        {
+            "type": str(row[0]),
+            "name": str(row[1]),
+            "table": str(row[2]),
+            "sql": _semantic_schema_sql(row[3]),
+        }
+        for row in connection.execute(
+            """SELECT type,name,tbl_name,sql FROM sqlite_master
+                 WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"""
+        ).fetchall()
+    ]
+    tables = sorted(
+        str(row[0])
+        for row in connection.execute(
+            """SELECT name FROM sqlite_master
+                 WHERE type='table' AND name NOT LIKE 'sqlite_%'"""
+        ).fetchall()
+    )
+    table_shapes: dict[str, Any] = {}
+    for table in tables:
+        if not table.replace("_", "").isalnum():
+            raise UnsupportedSchema("state schema contains an unsafe table name")
+        columns = [
+            tuple(row)
+            for row in connection.execute(
+                f'PRAGMA table_xinfo("{table}")'
+            ).fetchall()
+        ]
+        foreign_keys = sorted(
+            tuple(row)
+            for row in connection.execute(
+                f'PRAGMA foreign_key_list("{table}")'
+            ).fetchall()
+        )
+        indexes: list[Mapping[str, Any]] = []
+        for index in connection.execute(
+            f'PRAGMA index_list("{table}")'
+        ).fetchall():
+            index_name = str(index[1])
+            if not index_name.replace("_", "").isalnum():
+                raise UnsupportedSchema("state schema contains an unsafe index name")
+            indexes.append(
+                {
+                    "name": index_name,
+                    "unique": int(index[2]),
+                    "origin": str(index[3]),
+                    "partial": int(index[4]),
+                    "columns": [
+                        tuple(row)
+                        for row in connection.execute(
+                            f'PRAGMA index_xinfo("{index_name}")'
+                        ).fetchall()
+                    ],
+                }
+            )
+        table_shapes[table] = {
+            "columns": columns,
+            "foreign_keys": foreign_keys,
+            "indexes": sorted(indexes, key=lambda value: str(value["name"])),
+        }
+    return {"objects": objects, "tables": table_shapes}
+
+
+def _validate_current_schema(connection: sqlite3.Connection) -> None:
+    """Require exact semantic v3 shape and metadata before runtime use."""
+
+    reference = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        reference.executescript(SCHEMA_V1)
+        expected = _schema_semantic_shape(reference)
+    finally:
+        reference.close()
+    if _schema_semantic_shape(connection) != expected:
+        raise UnsupportedSchema("database schema shape differs from exact runtime v3")
+    metadata = connection.execute(
+        "SELECT singleton,version,applied_at FROM schema_meta"
+    ).fetchall()
+    if (
+        len(metadata) != 1
+        or int(metadata[0][0]) != 1
+        or int(metadata[0][1]) != SCHEMA_VERSION
+    ):
+        raise UnsupportedSchema(
+            "database schema metadata disagrees with runtime v3"
+        )
+    try:
+        applied_at = datetime.fromisoformat(str(metadata[0][2]))
+    except ValueError as exc:
+        raise UnsupportedSchema("database schema metadata timestamp is invalid") from exc
+    if applied_at.tzinfo is None:
+        raise UnsupportedSchema(
+            "database schema metadata timestamp must be timezone-aware"
+        )
+    if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+        raise UnsupportedSchema("database failed SQLite quick_check")
+    if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+        raise UnsupportedSchema("database failed foreign-key validation")
 
 
 _INTENT_TRANSITIONS: Mapping[IntentState, frozenset[IntentState]] = {
@@ -482,6 +657,15 @@ class LiveStateStore:
                     f"database schema {version} is newer than runtime {SCHEMA_VERSION}"
                 )
             if version == 0:
+                user_objects = self._conn.execute(
+                    """SELECT type,name FROM sqlite_master
+                         WHERE name NOT LIKE 'sqlite_%'"""
+                ).fetchall()
+                if user_objects:
+                    raise UnsupportedSchema(
+                        "unversioned database contains a partial schema; "
+                        "automatic repair is forbidden"
+                    )
                 self._conn.executescript(SCHEMA_V1)
                 now = datetime.now(timezone.utc).isoformat()
                 self._conn.execute(
@@ -489,6 +673,14 @@ class LiveStateStore:
                     (SCHEMA_VERSION, now),
                 )
                 self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                _validate_current_schema(self._conn)
+            elif version in {1, 2}:
+                raise UnsupportedSchema(
+                    f"legacy state schema {version} requires the fixed-lock "
+                    "paused release installer migration"
+                )
+            elif version == SCHEMA_VERSION:
+                _validate_current_schema(self._conn)
             elif version != SCHEMA_VERSION:
                 raise UnsupportedSchema(f"no migration path from schema {version}")
 
@@ -674,6 +866,18 @@ class LiveStateStore:
             or readiness.writer_lock_process_id is None
             or readiness.notification_delivery_receipt_hash is None
             or readiness.notification_delivered_at is None
+            or readiness.probe_started_at is None
+            or readiness.probe_completed_at is None
+            or readiness.probe_elapsed_monotonic_seconds is None
+            or readiness.probe_clock_stable is not True
+            or (
+                readiness.daemon_accessible_supported_client
+                and (
+                    readiness.broker_account_binding_fingerprint is None
+                    or readiness.broker_authorization_binding_id is None
+                    or readiness.component_provenance_hash is None
+                )
+            )
         ):
             raise StateConflict("activation readiness is incomplete or blocked")
         age_limits = (
@@ -730,7 +934,7 @@ class LiveStateStore:
 
         snapshot = connection.execute(
             """SELECT * FROM broker_snapshots WHERE account_key=?
-                 ORDER BY received_at DESC,snapshot_id DESC LIMIT 1""",
+                 ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1""",
             (runtime["account_key"],),
         ).fetchone()
         if snapshot is None:
@@ -762,13 +966,13 @@ class LiveStateStore:
         ):
             raise StateConflict("unsupported or external broker exposure is present")
         current = occurred_at.astimezone(timezone.utc)
-        received = datetime.fromisoformat(str(snapshot["received_at"])).astimezone(
+        observed = datetime.fromisoformat(str(snapshot["observed_at"])).astimezone(
             timezone.utc
         )
-        age = current - received
+        age = current - observed
         if age < timedelta(0) or age > max_age:
             raise StateConflict("durable broker reconciliation is stale")
-        if strictly_after is not None and received <= strictly_after.astimezone(timezone.utc):
+        if strictly_after is not None and observed <= strictly_after.astimezone(timezone.utc):
             raise StateConflict("broker reconciliation is not strictly newer than authority")
         audit = connection.execute(
             """SELECT event_id FROM audit_events WHERE stream=?
@@ -903,7 +1107,9 @@ class LiveStateStore:
                 expected_audit_event_id=readiness.reconciliation_audit_event_id,
                 max_age=max_snapshot_age,
             )
-            if datetime.fromisoformat(str(latest["received_at"])).astimezone(
+            # The legacy field name is retained for payload compatibility,
+            # but readiness binds the authoritative provider observation.
+            if datetime.fromisoformat(str(latest["observed_at"])).astimezone(
                 timezone.utc
             ) != readiness.durable_snapshot_received_at:
                 raise StateConflict(
@@ -985,8 +1191,9 @@ class LiveStateStore:
                     "authority cannot be disabled while account-wide broker scope is non-flat"
                 )
             latest = connection.execute(
-                """SELECT snapshot_id,received_at FROM broker_snapshots
-                     WHERE account_key=? ORDER BY received_at DESC,snapshot_id DESC LIMIT 1""",
+                """SELECT snapshot_id,observed_at,received_at FROM broker_snapshots
+                     WHERE account_key=?
+                     ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1""",
                 (runtime["account_key"],),
             ).fetchone()
             if latest is None or latest["snapshot_id"] != flatness_snapshot_id:
@@ -1028,7 +1235,7 @@ class LiveStateStore:
                 raise ValueError("deactivated_at must be timezone-aware")
             when_value = deactivated_at.astimezone(timezone.utc)
             when = _iso(when_value)
-            received = datetime.fromisoformat(str(snapshot["received_at"])).astimezone(
+            observed = datetime.fromisoformat(str(snapshot["observed_at"])).astimezone(
                 timezone.utc
             )
             activation_floor = max(
@@ -1036,13 +1243,13 @@ class LiveStateStore:
                 for value in (runtime["activated_at"], runtime["updated_at"])
                 if value is not None
             )
-            if received <= activation_floor:
+            if observed <= activation_floor:
                 raise StateConflict(
                     "flatness evidence must be strictly newer than activated runtime state"
                 )
-            if when_value <= received:
+            if when_value <= observed:
                 raise StateConflict("deactivation must follow the flatness snapshot")
-            if when_value - received > max_snapshot_age:
+            if when_value - observed > max_snapshot_age:
                 raise StateConflict("flatness snapshot is too old for deactivation")
             connection.execute(
                 """UPDATE runtime_identity SET mode='PAUSED',authority_enabled=0,
@@ -1433,7 +1640,7 @@ class LiveStateStore:
             raise StateConflict("position snapshot crosses accounts")
         with self.transaction() as connection:
             snapshot = connection.execute(
-                "SELECT account_key,positions_reconciled,received_at FROM broker_snapshots WHERE snapshot_id=?",
+                "SELECT account_key,positions_reconciled,observed_at,received_at FROM broker_snapshots WHERE snapshot_id=?",
                 (snapshot_id,),
             ).fetchone()
             if snapshot is None or snapshot["account_key"] != account_key:
@@ -1441,7 +1648,7 @@ class LiveStateStore:
             if not bool(snapshot["positions_reconciled"]):
                 raise StateConflict("cannot reconcile positions from an incomplete snapshot")
             latest = connection.execute(
-                """SELECT b.received_at FROM audit_events e
+                """SELECT b.observed_at FROM audit_events e
                      JOIN broker_snapshots b ON b.snapshot_id=e.entity_id
                      WHERE e.stream=? AND e.event_type='POSITIONS_RECONCILED'
                      ORDER BY e.sequence DESC LIMIT 1""",
@@ -1449,8 +1656,8 @@ class LiveStateStore:
             ).fetchone()
             if (
                 latest is not None
-                and latest["received_at"] is not None
-                and snapshot["received_at"] <= latest["received_at"]
+                and latest["observed_at"] is not None
+                and snapshot["observed_at"] <= latest["observed_at"]
             ):
                 raise OutOfOrderEvent(
                     "complete position replacement is not strictly newer than durable evidence"
@@ -1962,7 +2169,7 @@ class LiveStateStore:
             latest = connection.execute(
                 """SELECT snapshot_id FROM broker_snapshots
                      WHERE account_key=?
-                     ORDER BY received_at DESC,snapshot_id DESC LIMIT 1""",
+                     ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1""",
                 (normalized_account,),
             ).fetchone()
             if latest is None or latest["snapshot_id"] != normalized_snapshot:
@@ -2066,6 +2273,9 @@ class LiveStateStore:
             if any(quantity != 0 for quantity in signed_inventory.values()):
                 return ()
 
+            snapshot_observed_at = datetime.fromisoformat(
+                str(snapshot["observed_at"])
+            ).astimezone(timezone.utc)
             snapshot_received_at = datetime.fromisoformat(
                 str(snapshot["received_at"])
             ).astimezone(timezone.utc)
@@ -2099,7 +2309,7 @@ class LiveStateStore:
                     # RECONCILED is itself derived from authoritative broker
                     # evidence.  The same snapshot may carry that proof, but
                     # a snapshot predating the resolution may never release.
-                    if snapshot_received_at < intent_updated_at:
+                    if snapshot_observed_at < intent_updated_at:
                         continue
                 else:
                     floor_values.append(intent_updated_at)
@@ -2158,7 +2368,7 @@ class LiveStateStore:
                                 )
                             )
                 evidence_floor = max(floor_values)
-                if snapshot_received_at <= evidence_floor:
+                if snapshot_observed_at <= evidence_floor:
                     continue
                 connection.execute(
                     "UPDATE risk_reservations SET state=? WHERE reservation_id=?",
@@ -2176,6 +2386,7 @@ class LiveStateStore:
                         "intent_state": intent_state.value,
                         "proof": "STRICTLY_NEWER_COMPLETE_DURABLE_FLAT_SNAPSHOT",
                         "flatness_snapshot_id": normalized_snapshot,
+                        "snapshot_observed_at": _iso(snapshot_observed_at),
                         "snapshot_received_at": _iso(snapshot_received_at),
                         "evidence_floor_at": _iso(evidence_floor),
                     },
@@ -2735,6 +2946,12 @@ class LiveStateStore:
             "delivered_at": None,
             "last_error": None,
             "delivery_receipt": None,
+            "claim_owner": None,
+            "claim_expires_at": None,
+            "delivery_route_id": None,
+            "delivery_assurance": None,
+            "delivery_receipt_hash": None,
+            "delivery_payload_hash": None,
         }
         with self.transaction() as connection:
             existing_key = connection.execute(
@@ -2777,32 +2994,66 @@ class LiveStateStore:
         error: str | None = None,
         next_attempt_at: datetime | None = None,
         delivery_receipt: str | None = None,
+        claim_owner: str | None = None,
+        delivery_route_id: str | None = None,
+        delivery_assurance: str | None = None,
+        delivery_receipt_hash: str | None = None,
+        delivery_payload_hash: str | None = None,
     ) -> None:
         with self.transaction() as connection:
             row = connection.execute(
-                "SELECT account_key, state FROM notification_outbox WHERE message_id = ?",
+                "SELECT account_key,state,claim_owner FROM notification_outbox WHERE message_id = ?",
                 (message_id,),
             ).fetchone()
             if row is None:
                 raise LiveStateError(f"unknown notification {message_id!r}")
             if row["state"] == OutboxState.DELIVERED.value:
                 return
+            if row["claim_owner"] is not None and row["claim_owner"] != claim_owner:
+                raise StateConflict("notification attempt does not own its durable claim")
+            if claim_owner is not None and row["claim_owner"] is None:
+                raise StateConflict("notification attempt has no durable claim")
             state = OutboxState.DELIVERED if delivered else OutboxState.PENDING
             if not delivered and next_attempt_at is None:
                 next_attempt_at = attempted_at
+            receipt_fields = (
+                delivery_route_id,
+                delivery_assurance,
+                delivery_receipt_hash,
+                delivery_payload_hash,
+            )
+            if delivered and any(item is not None for item in receipt_fields):
+                if not all(item is not None for item in receipt_fields):
+                    raise ValueError("structured notification receipt fields are all required")
+                for field, value in (
+                    ("delivery_route_id", delivery_route_id),
+                    ("delivery_receipt_hash", delivery_receipt_hash),
+                    ("delivery_payload_hash", delivery_payload_hash),
+                ):
+                    if len(str(value)) != 64 or any(
+                        item not in "0123456789abcdef" for item in str(value)
+                    ):
+                        raise ValueError(f"{field} must be lowercase SHA-256")
             connection.execute(
                 """UPDATE notification_outbox SET
                        state = ?, attempt_count = attempt_count + 1,
                        last_attempt_at = ?, next_attempt_at = ?, delivered_at = ?,
-                       last_error = ?, delivery_receipt = ?
+                       last_error = ?, delivery_receipt = ?, claim_owner = NULL,
+                       claim_expires_at = NULL, delivery_route_id = ?,
+                       delivery_assurance = ?, delivery_receipt_hash = ?,
+                       delivery_payload_hash = ?
                    WHERE message_id = ?""",
                 (
                     state.value,
                     _iso(attempted_at),
                     None if delivered else _iso(next_attempt_at),
                     _iso(attempted_at) if delivered else None,
-                    None if delivered else str(error or "delivery failed"),
+                    None if delivered else _safe_notification_error(error),
                     str(delivery_receipt) if delivered and delivery_receipt is not None else None,
+                    delivery_route_id if delivered else None,
+                    delivery_assurance if delivered else None,
+                    delivery_receipt_hash if delivered else None,
+                    delivery_payload_hash if delivered else None,
                     message_id,
                 ),
             )
@@ -2813,7 +3064,247 @@ class LiveStateStore:
                 entity_type="notification",
                 entity_id=message_id,
                 occurred_at=attempted_at,
-                payload={"error": None if delivered else str(error or "delivery failed")},
+                payload={
+                    "error": None if delivered else _safe_notification_error(error),
+                    "route_id": delivery_route_id if delivered else None,
+                    "assurance": delivery_assurance if delivered else None,
+                    "receipt_hash": delivery_receipt_hash if delivered else None,
+                },
+            )
+
+    def claim_due_outbox(
+        self,
+        *,
+        now: datetime,
+        claim_owner: str,
+        claim_expires_at: datetime,
+        limit: int = 20,
+    ) -> list[Mapping[str, Any]]:
+        """Atomically lease due messages to one bounded notification worker."""
+
+        owner = str(claim_owner).strip()
+        if not owner or len(owner) > 128 or any(
+            not (item.isalnum() or item in "._:-") for item in owner
+        ):
+            raise ValueError("notification claim owner is invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("outbox limit must be in [1, 100]")
+        if now.tzinfo is None or claim_expires_at.tzinfo is None:
+            raise ValueError("notification claim times must be timezone-aware")
+        if not now < claim_expires_at <= now + timedelta(minutes=5):
+            raise ValueError("notification claim lease must be in (0, 5 minutes]")
+        current = _iso(now)
+        expires = _iso(claim_expires_at)
+        with self.transaction() as connection:
+            rows = connection.execute(
+                """SELECT * FROM notification_outbox
+                   WHERE state=? AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+                     AND (claim_owner IS NULL OR claim_expires_at<=?)
+                   ORDER BY created_at,message_id LIMIT ?""",
+                (OutboxState.PENDING.value, current, current, limit),
+            ).fetchall()
+            result: list[Mapping[str, Any]] = []
+            for row in rows:
+                updated = connection.execute(
+                    """UPDATE notification_outbox
+                          SET claim_owner=?,claim_expires_at=?
+                        WHERE message_id=? AND state=?
+                          AND (claim_owner IS NULL OR claim_expires_at<=?)""",
+                    (
+                        owner,
+                        expires,
+                        row["message_id"],
+                        OutboxState.PENDING.value,
+                        current,
+                    ),
+                ).rowcount
+                if updated != 1:
+                    continue
+                claimed = dict(row)
+                claimed["claim_owner"] = owner
+                claimed["claim_expires_at"] = expires
+                result.append(claimed)
+                self._append_event(
+                    connection,
+                    stream=row["account_key"],
+                    event_type="NOTIFICATION_CLAIMED",
+                    entity_type="notification",
+                    entity_id=row["message_id"],
+                    occurred_at=now,
+                    payload={"claim_owner": owner, "claim_expires_at": expires},
+                )
+            return result
+
+    def acquire_notification_worker_lease(
+        self,
+        *,
+        account_key: str,
+        worker_id: str,
+        route_id: str,
+        provider: str,
+        destination_fingerprint: str,
+        route_version: str,
+        acquired_at: datetime,
+        process_id: int | None = None,
+        recover_stale_after: timedelta = timedelta(seconds=60),
+    ) -> int:
+        """Acquire the independent delivery-worker singleton for one account."""
+
+        owner = str(worker_id).strip()
+        if not owner or len(owner) > 128 or any(
+            not (item.isalnum() or item in "._:-") for item in owner
+        ):
+            raise ValueError("notification worker ID is invalid")
+        pid = os.getpid() if process_id is None else process_id
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise ValueError("notification worker process ID is invalid")
+        if not timedelta(seconds=1) <= recover_stale_after <= timedelta(minutes=5):
+            raise ValueError("notification worker stale interval must be in [1, 300] seconds")
+        route_values = (
+            str(route_id),
+            str(provider),
+            str(destination_fingerprint),
+            str(route_version),
+        )
+        if (
+            any(
+                len(value) != 64
+                or any(character not in "0123456789abcdef" for character in value)
+                for value in (route_values[0], route_values[2])
+            )
+            or any(not item for item in route_values)
+        ):
+            raise ValueError("notification worker route identity is invalid")
+        when = _iso(acquired_at)
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_worker_lease WHERE account_key=?",
+                (account_key,),
+            ).fetchone()
+            generation = 1
+            if row is not None:
+                generation = int(row["generation"]) + 1
+                active = row["released_at"] is None
+                heartbeat = datetime.fromisoformat(str(row["heartbeat_at"])).astimezone(
+                    timezone.utc
+                )
+                age = acquired_at.astimezone(timezone.utc) - heartbeat
+                if active and age <= recover_stale_after:
+                    raise StateConflict("notification worker lease is already held")
+            connection.execute(
+                """INSERT INTO notification_worker_lease(
+                       account_key,worker_id,process_id,generation,route_id,provider,
+                       destination_fingerprint,route_version,started_at,heartbeat_at,
+                       last_sent_count,last_failed_count,released_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,NULL)
+                   ON CONFLICT(account_key) DO UPDATE SET
+                       worker_id=excluded.worker_id,process_id=excluded.process_id,
+                       generation=excluded.generation,route_id=excluded.route_id,
+                       provider=excluded.provider,
+                       destination_fingerprint=excluded.destination_fingerprint,
+                       route_version=excluded.route_version,started_at=excluded.started_at,
+                       heartbeat_at=excluded.heartbeat_at,last_sent_count=0,
+                       last_failed_count=0,released_at=NULL""",
+                (account_key, owner, pid, generation, *route_values, when, when),
+            )
+            self._append_event(
+                connection,
+                stream=account_key,
+                event_type="NOTIFICATION_WORKER_ACQUIRED",
+                entity_type="notification_worker",
+                entity_id=owner,
+                occurred_at=acquired_at,
+                payload={
+                    "process_id": pid,
+                    "generation": generation,
+                    "route_id": route_values[0],
+                    "provider": route_values[1],
+                    "destination_fingerprint": route_values[2],
+                    "route_version": route_values[3],
+                },
+            )
+            return generation
+
+    def heartbeat_notification_worker(
+        self,
+        *,
+        account_key: str,
+        worker_id: str,
+        generation: int,
+        observed_at: datetime,
+        sent_count: int,
+        failed_count: int,
+        process_id: int | None = None,
+    ) -> None:
+        pid = os.getpid() if process_id is None else process_id
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+            raise ValueError("notification worker generation is invalid")
+        for name, value in (("sent_count", sent_count), ("failed_count", failed_count)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"notification worker {name} is invalid")
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_worker_lease WHERE account_key=?",
+                (account_key,),
+            ).fetchone()
+            if (
+                row is None
+                or row["released_at"] is not None
+                or row["worker_id"] != worker_id
+                or int(row["process_id"]) != pid
+                or int(row["generation"]) != generation
+            ):
+                raise StateConflict("notification worker heartbeat does not own its lease")
+            when = _iso(observed_at)
+            if when < row["heartbeat_at"]:
+                raise OutOfOrderEvent("notification worker heartbeat decreased")
+            connection.execute(
+                """UPDATE notification_worker_lease SET heartbeat_at=?,
+                       last_sent_count=?,last_failed_count=? WHERE account_key=?""",
+                (when, sent_count, failed_count, account_key),
+            )
+
+    def release_notification_worker_lease(
+        self,
+        *,
+        account_key: str,
+        worker_id: str,
+        generation: int,
+        released_at: datetime,
+        process_id: int | None = None,
+    ) -> None:
+        pid = os.getpid() if process_id is None else process_id
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+            raise ValueError("notification worker generation is invalid")
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_worker_lease WHERE account_key=?",
+                (account_key,),
+            ).fetchone()
+            if row is None or row["released_at"] is not None:
+                return
+            if (
+                row["worker_id"] != worker_id
+                or int(row["process_id"]) != pid
+                or int(row["generation"]) != generation
+            ):
+                raise StateConflict("notification worker release does not own its lease")
+            when = _iso(released_at)
+            if when < row["heartbeat_at"]:
+                raise OutOfOrderEvent("notification worker release predates heartbeat")
+            connection.execute(
+                """UPDATE notification_worker_lease SET heartbeat_at=?,released_at=?
+                   WHERE account_key=?""",
+                (when, when, account_key),
+            )
+            self._append_event(
+                connection,
+                stream=account_key,
+                event_type="NOTIFICATION_WORKER_RELEASED",
+                entity_type="notification_worker",
+                entity_id=worker_id,
+                occurred_at=released_at,
+                payload={"process_id": pid, "generation": int(row["generation"])},
             )
 
     def due_outbox(self, *, now: datetime, limit: int = 20) -> list[Mapping[str, Any]]:
@@ -2824,8 +3315,9 @@ class LiveStateStore:
             for row in self._conn.execute(
                 """SELECT * FROM notification_outbox
                    WHERE state=? AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+                     AND (claim_owner IS NULL OR claim_expires_at<=?)
                    ORDER BY created_at,message_id LIMIT ?""",
-                (OutboxState.PENDING.value, _iso(now), limit),
+                (OutboxState.PENDING.value, _iso(now), _iso(now), limit),
             ).fetchall()
         ]
 
@@ -2872,6 +3364,7 @@ class LiveStateStore:
             "protection_obligations": "obligation_id",
             "incidents": "incident_id",
             "notification_outbox": "message_id",
+            "notification_worker_lease": "account_key",
             "latency_samples": "sample_id",
         }
         if allowed.get(table) != key_column:

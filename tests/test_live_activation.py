@@ -198,6 +198,34 @@ class ActivationTests(unittest.TestCase):
                 already_consumed=True,
             )
 
+    def test_activation_rejects_runtime_profile_change_before_owner_authority(self) -> None:
+        prepared = readiness(
+            self.policy,
+            broker_account_binding_fingerprint="5" * 64,
+            broker_authorization_binding_id="6" * 64,
+            component_provenance_hash="7" * 64,
+        )
+        record = ActivationRecord.build(
+            release_manifest_hash="a" * 64,
+            policy=self.policy,
+            database_schema_version=1,
+            created_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            readiness=prepared,
+        )
+        current = replace(prepared, component_provenance_hash="8" * 64)
+        with self.assertRaisesRegex(
+            ValueError, "ACTIVATION_CURRENT_RUNTIME_PROFILE_CHANGED"
+        ):
+            record.validate(
+                policy=self.policy,
+                release_manifest_hash="a" * 64,
+                database_schema_version=1,
+                now=NOW,
+                already_consumed=False,
+                current_readiness=current,
+            )
+
     def test_noncanonical_account_and_non_machine_source_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "account_key"):
             readiness(self.policy, account_key="7153")

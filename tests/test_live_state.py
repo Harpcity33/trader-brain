@@ -31,6 +31,7 @@ from titan_brain.live.state import (
     LiveStateStore,
     OutOfOrderEvent,
     StateConflict,
+    UnsupportedSchema,
     object_hash,
 )
 
@@ -127,6 +128,31 @@ class ExactNumericTests(unittest.TestCase):
             ExpiringPlan(**values)
 
 
+class SchemaStartupTests(unittest.TestCase):
+    def test_unversioned_partial_database_fails_closed_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "partial.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute("CREATE TABLE interrupted_install(value TEXT)")
+            connection.commit()
+            connection.close()
+
+            with self.assertRaisesRegex(UnsupportedSchema, "partial schema"):
+                LiveStateStore(path)
+
+            connection = sqlite3.connect(path)
+            try:
+                self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 0)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall(),
+                    [("interrupted_install",)],
+                )
+            finally:
+                connection.close()
+
+
 class LiveStateTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -195,7 +221,7 @@ class LiveStateTests(unittest.TestCase):
         return snapshot
 
     def test_database_uses_required_durability_pragmas_and_schema(self):
-        self.assertEqual(self.store.schema_version, 1)
+        self.assertEqual(self.store.schema_version, 3)
         self.assertEqual(str(self.store.pragma("journal_mode")).lower(), "wal")
         self.assertEqual(self.store.pragma("synchronous"), 2)
         self.assertEqual(self.store.pragma("foreign_keys"), 1)
@@ -217,6 +243,7 @@ class LiveStateTests(unittest.TestCase):
                 "session_latches",
                 "incidents",
                 "notification_outbox",
+                "notification_worker_lease",
                 "latency_samples",
                 "audit_events",
             }.issubset(tables)

@@ -94,11 +94,12 @@ trading session. These blockers are enforced by both configuration and
 machine-collected activation evidence; there is no force or acknowledge-
 blockers path.
 
-The last attended broker audit, retained in `CAPABILITIES.json`, observed
-$912.80 cash and unleveraged buying power, no standard-equity or option
-positions, no same-day standard-equity or option orders, and $0.00 realized
-P&L. It explicitly did **not** prove whole-broker flatness because advanced
-orders were unreadable.
+The last attended broker audit, retained as redacted local evidence, observed
+nonnegative cash and unleveraged buying power with the latter retained as the
+sizing ceiling, no standard-equity or option positions, no same-day
+standard-equity or option orders, and no realized P&L for the audited day.
+Exact point-in-time balances are not committed. The audit explicitly did **not**
+prove whole-broker flatness because advanced orders were unreadable.
 
 ## Owner activation status
 

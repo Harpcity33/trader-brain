@@ -106,9 +106,18 @@ class PolicyBundle:
         blockers = list(self.config["authority"].get("blockers", []))
         execution = self.config["execution"]
         evidence = self.config["evidence"]
+        if execution.get("broker_adapter") == "supported_production_transport":
+            if not str(
+                execution.get("production_account_binding_fingerprint", "")
+            ).strip():
+                blockers.append("BROKER_EXACT_ACCOUNT_BINDING_UNAVAILABLE")
+            if not str(
+                execution.get("production_authorization_binding_id", "")
+            ).strip():
+                blockers.append("BROKER_AUTHORIZATION_BINDING_UNAVAILABLE")
         if execution.get("supported_unattended_mutation") is not True:
             blockers.append("SUPPORTED_UNATTENDED_MUTATION_NOT_ATTESTED")
-        if execution.get("per_mutation_user_confirmation_required") is True:
+        if execution.get("per_mutation_user_confirmation_required") is not False:
             blockers.append("PER_MUTATION_CONFIRMATION_STILL_REQUIRED")
         if execution.get("local_mutation_interlock_enabled") is not True:
             blockers.append("LOCAL_MUTATION_INTERLOCK_NOT_ENABLED")
@@ -118,15 +127,32 @@ class PolicyBundle:
             blockers.append("NUMERIC_DEPTH_GATE_UNRESOLVED")
         if self.config["risk"].get("limits_live_provenance_verified") is not True:
             blockers.append("RISK_LIMITS_LIVE_PROVENANCE_NOT_VERIFIED")
-        if self.config["notifications"].get("destination_bridge_configured") is not True:
+        if (
+            self.config["notifications"].get("destination_bridge_configured") is not True
+            or self.config["notifications"].get("delivery_sink") == "local_jsonl_staging"
+        ):
             blockers.append("NOTIFICATION_DESTINATION_BRIDGE_NOT_CONFIGURED")
         discovery = self.config["discovery"]
+        if (
+            self.live_entries_configured
+            and discovery.get("provider_composition_id")
+            != "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+        ):
+            blockers.append("SUPPORTED_DISCOVERY_COMPOSITION_NOT_CONFIGURED")
         if discovery.get("pipeline_configured") is not True:
             blockers.append("LIVE_DISCOVERY_PIPELINE_NOT_CONFIGURED")
         if discovery.get("instrument_evidence_provider") == "unavailable":
             blockers.append("LIVE_INSTRUMENT_EVIDENCE_PROVIDER_UNAVAILABLE")
         if discovery.get("quality_revalidation_provider") == "unavailable":
             blockers.append("LIVE_QUALITY_REVALIDATION_PROVIDER_UNAVAILABLE")
+        if discovery.get("provider_composition_id") == (
+            "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+        ):
+            binding = str(discovery.get("provider_binding_id", ""))
+            if len(binding) != 64 or any(
+                value not in "0123456789abcdef" for value in binding
+            ):
+                blockers.append("DISCOVERY_PROVIDER_BINDING_ID_MISSING_OR_INVALID")
         for field in (
             "minimum_setup_score",
             "minimum_execution_score",
@@ -180,27 +206,145 @@ class PolicyBundle:
         if not isinstance(risk.get("limits_live_provenance_verified"), bool):
             raise ValueError("risk-policy provenance gate must be boolean")
         notifications = self.config["notifications"]
-        if notifications.get("delivery_sink") != "local_jsonl_staging":
-            raise ValueError("unreviewed notification sink configured")
         if not isinstance(notifications.get("destination_bridge_configured"), bool):
             raise ValueError("notification destination bridge gate must be boolean")
-        if self.config["execution"].get("automatic_retry_unknown_submission") is not False:
-            raise ValueError("unknown submissions may never be retried automatically")
-        if self.config["execution"].get("one_account_writer_required") is not True:
-            raise ValueError("single-writer protection is mandatory")
-        if not isinstance(
-            self.config["execution"].get("local_mutation_interlock_enabled"), bool
+        notification_sink = notifications.get("delivery_sink")
+        if notification_sink == "local_jsonl_staging":
+            # Staging remains valid for a paused install but never constitutes
+            # a production destination bridge.
+            if notifications.get("destination_bridge_configured") is not False:
+                raise ValueError("local notification staging is not a destination bridge")
+        elif notification_sink == "gmail_api":
+            if notifications.get("destination_bridge_configured") is not True:
+                raise ValueError("Gmail notification route is not enabled")
+            if notifications.get("provider") != "gmail":
+                raise ValueError("Gmail notification provider identity is invalid")
+            fingerprint = str(notifications.get("destination_fingerprint", ""))
+            if len(fingerprint) != 64 or any(item not in "0123456789abcdef" for item in fingerprint):
+                raise ValueError("notification destination fingerprint is invalid")
+            route_version = str(notifications.get("route_version", ""))
+            if not route_version or len(route_version) > 128 or any(
+                item.isspace() for item in route_version
+            ):
+                raise ValueError("notification route version is invalid")
+            if notifications.get("required_assurance") not in {
+                "PROVIDER_ACCEPTED",
+                "OWNER_CONFIRMED",
+            }:
+                raise ValueError("production notification assurance is invalid")
+            if (
+                notifications.get("provider_composition_id")
+                != "titan.gmail_api.rfc2822.oauth_injected.v1"
+            ):
+                raise ValueError(
+                    "Gmail notification implementation identity is invalid"
+                )
+            authorization_binding = str(
+                notifications.get("authorization_binding_id", "")
+            )
+            if len(authorization_binding) != 64 or any(
+                item not in "0123456789abcdef" for item in authorization_binding
+            ):
+                raise ValueError(
+                    "notification authorization binding identity is invalid"
+                )
+            timeout = float(notifications.get("timeout_seconds", 0))
+            if not 0 < timeout <= 30:
+                raise ValueError("notification timeout must be in (0, 30]")
+            if any(
+                field in notifications
+                for field in ("destination", "sender_address", "access_token", "refresh_token")
+            ):
+                raise ValueError("notification secrets/addresses cannot be stored in policy")
+        else:
+            raise ValueError("unreviewed notification sink configured")
+        execution = self.config["execution"]
+        for field in (
+            "supported_unattended_mutation",
+            "per_mutation_user_confirmation_required",
+            "local_mutation_interlock_enabled",
         ):
-            raise ValueError("local mutation interlock must be boolean")
+            if not isinstance(execution.get(field), bool):
+                raise ValueError(f"execution authority gate {field} must be boolean")
+        if execution.get("automatic_retry_unknown_submission") is not False:
+            raise ValueError("unknown submissions may never be retried automatically")
+        if execution.get("one_account_writer_required") is not True:
+            raise ValueError("single-writer protection is mandatory")
+        if execution.get("broker_adapter") not in {
+            "robinhood_codex_connector",
+            "supported_production_transport",
+        }:
+            raise ValueError("unreviewed broker adapter configured")
+        if execution.get("broker_adapter") == "supported_production_transport":
+            if not str(execution.get("production_transport_id", "")).strip():
+                raise ValueError(
+                    "supported production broker requires a signed transport identity"
+                )
+            for field in (
+                "production_account_binding_fingerprint",
+                "production_authorization_binding_id",
+            ):
+                value = str(execution.get(field, ""))
+                if len(value) != 64 or any(
+                    character not in "0123456789abcdef" for character in value
+                ):
+                    raise ValueError(
+                        f"supported production broker {field} must be a nonsecret 256-bit receipt"
+                    )
+            if any(
+                forbidden in execution
+                for forbidden in (
+                    "exact_account_id",
+                    "broker_account_number",
+                    "access_token",
+                    "refresh_token",
+                    "client_secret",
+                )
+            ):
+                raise ValueError(
+                    "broker identifiers and secrets cannot be stored in signed policy"
+                )
+        discovery = self.config["discovery"]
+        if (
+            self.live_entries_configured
+            and discovery.get("provider_composition_id")
+            != "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+        ):
+            raise ValueError(
+                "live entries require the release-shipped discovery composition"
+            )
+        if discovery.get("pipeline_configured") is True and not str(
+            discovery.get("provider_composition_id", "")
+        ).strip():
+            raise ValueError(
+                "configured discovery pipeline requires a signed provider composition identity"
+            )
+        if discovery.get("provider_composition_id") == (
+            "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+        ):
+            binding = str(discovery.get("provider_binding_id", ""))
+            if len(binding) != 64 or any(
+                value not in "0123456789abcdef" for value in binding
+            ):
+                raise ValueError(
+                    "supported production discovery requires a nonsecret 256-bit provider binding"
+                )
         market_data = self.config.get("market_data")
         if not isinstance(market_data, Mapping):
             raise ValueError("full-live market-data configuration is missing")
-        if (
-            market_data.get("adapter") != "local_titan_massive_sqlite_read_only"
-            or market_data.get("producer_book_mode") != "SHADOW"
-            or market_data.get("source_is_execution_authority") is not False
-        ):
-            raise ValueError("Massive compatibility source must remain read-only shadow evidence")
+        market_adapter = market_data.get("adapter")
+        if market_data.get("source_is_execution_authority") is not False:
+            raise ValueError("Massive evidence can never grant execution authority")
+        if market_adapter == "local_titan_massive_sqlite_read_only":
+            if market_data.get("producer_book_mode") != "SHADOW":
+                raise ValueError("Massive compatibility producer must remain SHADOW")
+        elif market_adapter == "massive_rest_stream_injected_auth":
+            if market_data.get("provider") != "massive":
+                raise ValueError("production Massive provider identity is invalid")
+            if market_data.get("authorization_mode") != "runtime_injected_existing":
+                raise ValueError("production Massive authorization must be runtime-injected")
+        else:
+            raise ValueError("unreviewed Massive market-data adapter configured")
         if int(market_data.get("health_max_age_seconds", 0)) <= 0:
             raise ValueError("Massive health age must be positive")
         if int(market_data.get("candidate_max_age_seconds", 0)) <= 0:
@@ -210,7 +354,10 @@ class PolicyBundle:
         discovery = self.config.get("discovery")
         if not isinstance(discovery, Mapping):
             raise ValueError("full-live discovery configuration is missing")
-        if discovery.get("adapter") != "local_massive_full_live_pipeline":
+        if discovery.get("adapter") not in {
+            "local_massive_full_live_pipeline",
+            "massive_rest_stream_full_live_pipeline",
+        }:
             raise ValueError("unreviewed live discovery adapter configured")
         if not isinstance(discovery.get("pipeline_configured"), bool):
             raise ValueError("live discovery configuration gate must be boolean")

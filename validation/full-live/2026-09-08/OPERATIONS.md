@@ -7,7 +7,7 @@
 - **INSTALLED_PAUSED** means a verified release exists below
   `~/Library/Application Support/Titan Momentum/full-live`, its durable runtime
   identity is `PAUSED` (or has not yet been initialized), and its disabled
-  launchd plist is only staged under that subtree.
+  launchd plists are only staged under that subtree.
 - **RUNNING_RECONCILE_ONLY** means the owner has explicitly started the new
   writer in its non-entry state and it is collecting fresh readiness evidence.
 - **ACTIVE** means the one-use, release-bound activation record was consumed,
@@ -70,16 +70,47 @@ PYTHON=/absolute/path/to/python3.11-or-newer
 
 The installer verifies the sidecar archive hash, embedded manifest, complete
 file inventory, and every file digest. It installs a content-addressed release,
-updates `current`, writes `release-manifest.json`, and stages this disabled
-plist only:
+updates `current`, writes `release-manifest.json`, and stages these two disabled
+plists only:
 
 `~/Library/Application Support/Titan Momentum/full-live/launchd/com.harpcity.trader-brain-full-live.plist`
 
-It does not call `launchctl`, start a process, access Robinhood, initialize the
-state database, copy anything to `~/Library/LaunchAgents`, or modify the legacy
-`Titan Momentum` runtime. If an existing full-live state database is present,
-the installer will switch releases only when a read-only query proves
-`runtime_identity.mode = PAUSED`.
+`~/Library/Application Support/Titan Momentum/full-live/launchd/com.harpcity.trader-brain-full-live-notifications.plist`
+
+The first process is the trading coordinator. The second is the only process
+permitted to claim durable outbox rows and deliver them to the signed provider
+route. The coordinator only enqueues; it neither sends nor starts the worker.
+The two labels, argument vectors, logs, and supervision lifecycles are distinct.
+
+The installer does not call `launchctl`, start a process, access Robinhood,
+initialize a missing state database, copy anything to `~/Library/LaunchAgents`,
+or modify the legacy `Titan Momentum` runtime. If a full-live state database
+already exists, a release switch requires an exact recognized v1, v2, or v3
+schema, an intact audit chain, exactly one unarmed `PAUSED` runtime identity for
+the same account, and released writer and notification-worker leases. Under the
+same fixed account interlock and one `BEGIN IMMEDIATE` transaction, the
+installer upgrades recognized v1/v2 schemas to v3, expires all unconsumed
+prior-release activation records, rebinds the durable runtime/config/policy
+identity, increments its generation, and appends schema and release migration
+events before switching `current`. Partial, altered, or unknown schemas fail
+closed before the pointer switch.
+Prior-release control requests remain invalid because their signed binding
+contains the old release hash. The install record reports whether migration
+occurred and how many activation records it invalidated.
+
+If any proof fails, `current` is not changed. If power is lost after the SQLite
+transaction commits but before `current` and its metadata are updated, all CLI
+commands fail closed on the release/database identity mismatch; rerun the exact
+verified paused installer to finish the pointer commit. Do not edit either
+identity by hand.
+
+Both the installer and coordinator use the same fixed per-user lock directory,
+independent of `--install-root`:
+
+`~/Library/Application Support/Titan Momentum/account-writer-locks`
+
+There is no production CLI, environment, or signed-config override for this
+path. The target account's nonsecret key is hashed into the lock filename.
 
 ## First initialization and inspection
 
@@ -100,6 +131,39 @@ configuration, policy, account suffix, and database-schema hashes match
 `$INSTALL_ROOT/release-manifest.json`. A missing or mismatched value is a hard
 stop.
 
+### Exact provider-injection prerequisite
+
+The staged coordinator and independent notification worker invoke Python as
+`python -I -S -B`, so neither service loads user/site customization or an
+environment-supplied import path, and neither writes bytecode into a release.
+
+The stock `scripts/titan-full-live` launcher intentionally constructs no live
+provider clients and performs no credential discovery. It therefore remains a
+hard blocker for a signed production transport, Massive/Robinhood discovery
+composition, or Gmail route. A production-capable release must include and
+manifest-bind an owner-reviewed launcher that passes one `RuntimeComposition`
+to `titan_brain.live.cli.main`. That composition must contain:
+
+- the approved `ProductionTransport` for broker reads and mutations;
+- `SupportedDiscoveryProviderComposition`, built around
+  `MassiveRestStreamSource`, an authenticated Robinhood instrument reader, and
+  an independently recomputing quality-evidence reader sharing the exact
+  signed non-secret provider binding;
+- `GmailProviderBinding` using the existing authorized account and exact signed
+  implementation/authorization binding IDs.
+- a runtime-only control authenticator with at least 256 bits of secret entropy,
+  bound to that same signed production authorization receipt. The secret is
+  never placed in the release, configuration, command line, or control request.
+
+The executable transport, stream, candidate, instrument, quality, and
+notification components must all reside in and match the same release
+manifest. Tokens remain outside the release and are supplied only through the
+already-authorized injected clients. Until such a launcher and matching signed
+configuration are committed, rebuilt, reviewed, and installed paused,
+`doctor`, `readiness`, `serve`, and `notification-worker` fail closed. Do not
+patch the installed release or put a token in configuration, an environment
+dump, a command line, or the repository.
+
 ## Readiness and owner-controlled cutover
 
 Do not disable the existing account writer merely because package tests pass.
@@ -112,29 +176,67 @@ window. The supported sequence is:
 2. Confirm all standard equity positions/orders, option positions/orders, and
    supported advanced-order state from strictly fresh broker evidence. Any
    unknown submission or uncovered quantity blocks cutover.
-3. Test both notification layers. The command below proves only durable
-   outbox-to-local-JSONL delivery; it deliberately reports no user-destination
-   receipt. Do not put secrets or full account identifiers in the payload:
+3. Test the exact signed notification route with its independent worker. The
+   stock launcher performs no credential discovery. A reviewed production
+   release must supply a manifest-bound runtime composition that injects the
+   already-authorized provider token/client and whose implementation and
+   authorization binding IDs match signed configuration. Without that
+   injection, the worker fails closed before claiming a provider-bound row.
+
+   As an explicit owner action, copy, enable, bootstrap, and start only the
+   notification worker first. Do not start the trading coordinator here:
+
+   ```sh
+   install -m 600 \
+     "$INSTALL_ROOT/launchd/com.harpcity.trader-brain-full-live-notifications.plist" \
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-notifications.plist"
+   launchctl enable \
+     "gui/$(id -u)/com.harpcity.trader-brain-full-live-notifications"
+   launchctl bootstrap "gui/$(id -u)" \
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-notifications.plist"
+   launchctl kickstart -k \
+     "gui/$(id -u)/com.harpcity.trader-brain-full-live-notifications"
+   ```
+
+   Then enqueue the redacted route test. The command and worker must record a
+   structured provider receipt bound to the exact route ID, provider,
+   destination fingerprint, route version, event key, payload hash, and signed
+   assurance. Do not put secrets or full account identifiers in the payload:
 
    ```sh
    "$PYTHON" "$LAUNCHER" notification-test \
      --install-root "$INSTALL_ROOT" \
      --event-id "owner-readiness-2026-09-08"
    ```
-   Separately verify the configured bridge actually delivers the same redacted
-   event to the existing user destination and durably records its delivery
-   receipt. A local JSONL line alone never satisfies activation readiness.
+   Verify the configured provider actually delivers the same event to the
+   existing user destination. A `LOCAL_STAGED` receipt or local JSONL line never
+   satisfies activation readiness. The test command only enqueues; it never
+   sends synchronously. Readiness requires the independent worker's exact-route
+   lease to be unreleased, its recorded PID to be alive, its heartbeat to be no
+   more than 15 seconds old, its last cycle to have zero failures, the account
+   outbox to have zero pending or claimed rows, and the exact structured
+   provider receipt to be no more than 300 seconds old. The checked-in September
+   8 configuration intentionally uses local staging and therefore cannot pass
+   this gate.
 4. Confirm the old heartbeat/account writer has been disabled. Preserve any
    working broker-held protection; disabling a writer is not a closeout. The
    new writer must still be stopped here so the activation commands can prove
    exclusive ownership of the account lock.
+   A paused or disabled `automation.toml` is configuration evidence only. The
+   `record-legacy-retirement` command additionally requires a fresh read from
+   the Codex automation control plane proving the exact scheduler runtime ID,
+   automation ID, matching configuration hash and status, zero active
+   executions, and a query-receipt hash. This release has no supported local
+   control-plane status adapter, so the stock launcher returns
+   `SCHEDULER_RUNTIME_IDENTITY_UNAVAILABLE` and cannot record retirement. Do
+   not substitute a file, process-list inference, or hand-written receipt.
 5. Stop every account writer, then ask the installed runtime to collect a fresh
    diagnostic attestation. There is no readiness-file input: the command takes
    the kernel account lock and matching database lease, attempts an actual
    broker read, inspects the newest durable whole-broker reconciliation and
    audit chain, computes unknown and uncovered exposure, reads Massive health,
-   verifies the user-destination delivery receipt, and reads the installed
-   legacy heartbeat status itself:
+   verifies the user-destination delivery receipt, reads the installed legacy
+   heartbeat configuration, and requires independent scheduler runtime evidence:
 
    ```sh
    "$PYTHON" "$LAUNCHER" readiness --install-root "$INSTALL_ROOT"
@@ -174,9 +276,11 @@ window. The supported sequence is:
    reconciliation before atomically consuming the one-use record. It may only
    persist `PAUSED -> RECONCILING`; it cannot submit an order. If it fails, do
    not start the new writer.
-7. Immediately after successful activation, copy the staged disabled plist to
-   `~/Library/LaunchAgents` only as an explicit owner action, then enable,
-   bootstrap, and kick-start it. The plist has `Disabled=true`, no `RunAtLoad`,
+7. Immediately after successful activation, verify the independently supervised
+   notification worker is still healthy. Then copy the staged disabled trading
+   coordinator plist to `~/Library/LaunchAgents` only as an explicit owner
+   action, then enable, bootstrap, and kick-start it. The plist has
+   `Disabled=true`, no `RunAtLoad`,
    and `KeepAlive.SuccessfulExit=false` so launchd restarts an unexpected
    service failure after the owner starts it. The service has no CLI live-mode
    override.
@@ -224,6 +328,12 @@ For every operational check, capture and retain:
 An alive PID with stale reconciliation is unhealthy. An `ACTIVE` scheduler
 configuration with no healthy process is not running live.
 
+The coordinator repeats the exact-route worker lease, PID, heartbeat, failure,
+and outbox-backlog checks immediately before its entry decision on every tick.
+If that independent-delivery gate becomes unhealthy, it durably transitions to
+`PAUSE_NEW_ENTRIES`; account reconciliation, protection, exits, closeout, and
+outbox enqueueing remain available.
+
 ## Pause, closeout, and rollback
 
 Use the durable runtime controls; do not kill the process to pause risk:
@@ -241,6 +351,10 @@ Use the durable runtime controls; do not kill the process to pause risk:
 These commands do not write the live database. They create private,
 hash-bound, activation-bound control requests only after proving that the
 kernel account lock and database writer lease belong to the running service.
+`MANAGED_CLOSEOUT` additionally requires an HMAC-SHA256 generated by the
+manifest-bound runtime control authenticator; rehashing or rewriting the JSON
+is not authorization. The attended stock launcher has no such authenticator
+and therefore cannot queue autonomous closeout authority.
 Their output says `queued=true, applied=false`; wait for `status` and the audit
 chain to prove consumption. A rejected or expired request is quarantined and
 forces an active/reconciling runtime to pause new entries.
@@ -275,9 +389,13 @@ uncovered quantity, and a drained durable notification outbox may the owner:
 3. boot out and disable `com.harpcity.trader-brain-full-live`;
 4. restore the old writer if still desired and if doing so cannot create a
    second account writer;
-5. leave the full-live state database and audit/outbox evidence intact;
-6. retarget `current` only via the paused installer after it proves DB mode
-   `PAUSED`.
+5. after the durable outbox is drained or its unresolved provider state is
+   explicitly retained as incident evidence, boot out and disable
+   `com.harpcity.trader-brain-full-live-notifications`;
+6. leave the full-live state database and audit/outbox evidence intact;
+7. retarget `current` only via the paused installer after it proves the database
+   is unarmed `PAUSED`, all runtime leases are released, and the audit chain is
+   intact; review the emitted release-identity migration record.
 
 If local power/network, credentials, broker transport, storage, or data fails
 while exposure exists, broker-held protection remains the first line of defense.

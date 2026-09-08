@@ -26,6 +26,7 @@ MANIFEST_FIELDS = {
     "default_mode",
     "install_subtree",
     "launchd_template",
+    "notification_launchd_template",
     "files",
     "release_manifest_hash",
 }
@@ -125,6 +126,9 @@ def load_release_manifest(
         "default_mode": "PAUSED",
         "install_subtree": "Application Support/Titan Momentum/full-live",
         "launchd_template": "deployment/com.harpcity.trader-brain-full-live.plist.in",
+        "notification_launchd_template": (
+            "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
+        ),
     }
     for field, expected_value in semantics.items():
         if raw.get(field) != expected_value:

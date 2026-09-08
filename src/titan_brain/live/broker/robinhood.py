@@ -11,6 +11,7 @@ authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable
 
 from .base import (
@@ -20,9 +21,14 @@ from .base import (
     BrokerContractViolation,
     BrokerMutationBlocked,
     BrokerOperationResult,
+    ClientRefRecoverySource,
     ClientRefLookupResult,
     EquityOrderType,
     MarketHours,
+    OrderCoverageContract,
+    OrderFamily,
+    OrderFamilyCoverage,
+    OrderFamilyCoverageStatus,
     OrderRequest,
     ReviewReceipt,
     TimeInForce,
@@ -33,17 +39,29 @@ from .base import (
 class RobinhoodConnectorContract:
     """Audited capabilities and non-negotiable connector semantics.
 
-    These values describe the connector observed on 2026-09-07, not a promise
+    These values describe the connector observed on 2026-09-08, not a promise
     of future authentication or service availability.  A deployment must
     re-probe reads and must never infer write authority from this record.
     """
 
-    contract_version: str = "robinhood-attended-2026-09-07-v1"
+    contract_version: str = "robinhood-attended-2026-09-08-v2"
     account_masked: str = "••••7153"
     connector_context: str = "codex_model_mediated_attended"
+    server_name: str = "robinhood-trading"
+    server_version: str = "1.4.0"
     observed_window_utc: tuple[str, str] = (
-        "2026-09-07T22:51:09.819Z",
-        "2026-09-07T22:51:12.953Z",
+        "2026-09-08T01:59:24.935490Z",
+        "2026-09-08T01:59:24.935490Z",
+    )
+    server_advertised_confirmation_text: tuple[tuple[str, str], ...] = (
+        (
+            "place_equity_order",
+            "get explicit user confirmation before calling this tool",
+        ),
+        (
+            "cancel_equity_order",
+            "Always confirm with the user before calling",
+        ),
     )
     supported_equity_order_types: tuple[EquityOrderType, ...] = (
         EquityOrderType.MARKET,
@@ -81,7 +99,7 @@ class RobinhoodConnectorContract:
         "submission acknowledgement is not fill evidence",
         "a UUID ref_id may be reused only for a retry known to be transient",
         "an unknown submission must not be retried without newer broker reconciliation",
-        "the exposed read surface has no documented lookup by ref_id",
+        "the authenticated get_equity_orders output schema exposes no ref_id field",
     )
     funds_semantics: tuple[str, ...] = (
         "unleveraged_buying_power is the no-margin sizing ceiling",
@@ -100,7 +118,7 @@ class RobinhoodConnectorContract:
         "unknown",
     )
     unsupported_operations: tuple[str, ...] = (
-        "advanced-order read on the active connector surface",
+        "get_advanced_orders is not advertised by authenticated robinhood-trading v1.4.0 (it is only a configured whitelist entry)",
         "atomic bracket/OCO/OTO protection",
         "equity order replacement",
         "trailing stop",
@@ -108,11 +126,31 @@ class RobinhoodConnectorContract:
         "cancel-review endpoint",
         "streaming order/fill feed",
         "daemon authentication/login/refresh/challenge handling",
-        "order lookup by client ref_id",
+        "get_equity_orders output contains no broker-preserved client ref_id",
         "documented connector rate-limit contract",
     )
 
     def capabilities(self) -> BrokerCapabilities:
+        coverage = OrderCoverageContract(
+            contract_version="robinhood-attended-order-coverage-unproven-v2",
+            evidence_observed_at=datetime(
+                2026, 9, 8, 1, 59, 24, 935490, tzinfo=timezone.utc
+            ),
+            families=tuple(
+                OrderFamilyCoverage(
+                    family=family,
+                    status=OrderFamilyCoverageStatus.UNKNOWN,
+                    evidence_id=f"{self.contract_version}:{family.value}:not-proven",
+                    broker_authoritative=False,
+                    all_pages_consumed=False,
+                    includes_working_orders_across_dates=False,
+                )
+                for family in OrderFamily
+            ),
+            client_ref_recovery_source=ClientRefRecoverySource.UNAVAILABLE,
+            broker_preserves_client_ref=False,
+            negative_client_ref_results_authoritative=False,
+        )
         return BrokerCapabilities(
             connector="robinhood-connected-tool",
             account_masked=self.account_masked,
@@ -139,11 +177,15 @@ class RobinhoodConnectorContract:
             supported_order_types=self.supported_equity_order_types,
             supported_market_hours=self.supported_market_hours,
             supported_time_in_force=self.supported_time_in_force,
+            order_coverage=coverage,
             unsupported_operations=self.unsupported_operations,
             notes=(
                 "Successful reads prove authentication only at their evidence timestamp.",
                 "Connector tools remain attended/model-mediated and are not callable by the production daemon.",
                 "The connector review response is not a broker-bound autonomous execution token.",
+                "Authenticated server inventory v1.4.0 advertised 44 tools and omitted get_advanced_orders.",
+                "Server description for place_equity_order says: get explicit user confirmation before calling this tool.",
+                "Server description for cancel_equity_order says: Always confirm with the user before calling.",
             ),
         )
 

@@ -89,10 +89,24 @@ def enabled_policy() -> PolicyBundle:
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
-    config["notifications"]["destination_bridge_configured"] = True
+    config["notifications"].update(
+        {
+            "delivery_sink": "gmail_api",
+            "destination_bridge_configured": True,
+            "provider": "gmail",
+            "destination_fingerprint": "f" * 64,
+            "route_version": "synthetic-test-v1",
+            "required_assurance": "PROVIDER_ACCEPTED",
+            "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+            "authorization_binding_id": "d" * 64,
+            "timeout_seconds": 5,
+        }
+    )
     config["discovery"].update(
         {
             "pipeline_configured": True,
+            "provider_composition_id": "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "provider_binding_id": "e" * 64,
             "instrument_evidence_provider": "synthetic_test_only",
             "quality_revalidation_provider": "synthetic_test_only",
             "minimum_setup_score": 70,
@@ -350,6 +364,7 @@ class AckWithoutOrderBroker(FakeBrokerClient):
             operation="place_equity_order",
             status=OperationStatus.ACKNOWLEDGED,
             observed_at=self._now(),
+            received_at=self._now(),
             accepted=True,
             message="accepted but no normalized order evidence",
             order=None,

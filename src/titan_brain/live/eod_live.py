@@ -41,7 +41,8 @@ def build_eod_evidence(
     if runtime is None or runtime["account_key"] != account_key:
         raise ValueError("runtime state is not bound to the requested account")
     broker_rows = store.rows(
-        "SELECT * FROM broker_snapshots WHERE account_key=? ORDER BY received_at DESC LIMIT 1",
+        "SELECT * FROM broker_snapshots WHERE account_key=? "
+        "ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1",
         (account_key,),
     )
     latest = dict(broker_rows[0]) if broker_rows else None
@@ -132,7 +133,7 @@ def build_eod_evidence(
         latest
         and timedelta(0)
         <= generated_at.astimezone(timezone.utc)
-        - datetime.fromisoformat(str(latest["received_at"])).astimezone(timezone.utc)
+        - datetime.fromisoformat(str(latest["observed_at"])).astimezone(timezone.utc)
         <= max_snapshot_age
     )
     broker_scope_flat = bool(

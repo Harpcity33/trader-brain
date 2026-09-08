@@ -68,8 +68,18 @@ def main() -> int:
         fail("options live-core isolation language missing")
 
     prohibited = {
-        "full_broker_account_number": re.compile("406" + "757" + "153"),
-        "stale_confirmation_code": re.compile(r"(?<!\d)" + "609" + "160" + r"(?!\d)"),
+        # Match any unmasked numeric account identifier ending in the approved
+        # last four.  Do not commit the exact full identifier, even split
+        # across string literals, merely to search for it.
+        "unmasked_target_broker_account_number": re.compile(
+            r"(?<!\d)\d{5,20}7153(?!\d)"
+        ),
+        # Detect a committed six-digit confirmation secret by its assignment
+        # context without embedding any real or stale secret in the validator.
+        "confirmation_code_assignment": re.compile(
+            r"(?i)\b(?:confirmation|verification|otp)[_-]?(?:code|token)?\b"
+            r"\s*[:=]\s*[\"']\d{6}[\"']"
+        ),
         "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
         "github_token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]+"),
     }
@@ -107,5 +117,15 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:
-        print(json.dumps({"status": "FAIL", "error": str(exc)}), file=sys.stderr)
-        raise
+        print(
+            json.dumps(
+                {
+                    "status": "FAIL",
+                    "error_type": type(exc).__name__,
+                    "error": "REPOSITORY_VALIDATION_FAILED",
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None

@@ -89,6 +89,165 @@ class OperationStatus(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class OrderFamily(str, Enum):
+    """Every broker order family that can reserve cash/shares or alter exposure."""
+
+    STANDARD_EQUITY = "standard_equity"
+    ADVANCED_EQUITY = "advanced_equity"
+    OPTION = "option"
+
+
+class OrderFamilyCoverageStatus(str, Enum):
+    COMPLETE_DEDICATED = "complete_dedicated"
+    COMPLETE_GENERAL = "complete_general"
+    NOT_APPLICABLE = "not_applicable"
+    INCOMPLETE = "incomplete"
+    UNKNOWN = "unknown"
+
+
+class ClientRefRecoverySource(str, Enum):
+    DEDICATED_LOOKUP = "dedicated_lookup"
+    EXHAUSTIVE_ORDER_HISTORY = "exhaustive_order_history"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class OrderFamilyCoverage:
+    """Broker-backed proof for one order family, independent of endpoint name."""
+
+    family: OrderFamily
+    status: OrderFamilyCoverageStatus
+    evidence_id: str
+    broker_authoritative: bool
+    all_pages_consumed: bool
+    includes_working_orders_across_dates: bool
+    includes_parent_child_conditional: bool = False
+    account_family_disabled: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "family", _enum(self.family, OrderFamily, "order family"))
+        object.__setattr__(
+            self,
+            "status",
+            _enum(self.status, OrderFamilyCoverageStatus, "coverage status"),
+        )
+        object.__setattr__(self, "evidence_id", _required(self.evidence_id, "evidence_id"))
+        for name in (
+            "broker_authoritative",
+            "all_pages_consumed",
+            "includes_working_orders_across_dates",
+            "includes_parent_child_conditional",
+            "account_family_disabled",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+
+        complete = self.status in {
+            OrderFamilyCoverageStatus.COMPLETE_DEDICATED,
+            OrderFamilyCoverageStatus.COMPLETE_GENERAL,
+        }
+        if complete and not all(
+            (
+                self.broker_authoritative,
+                self.all_pages_consumed,
+                self.includes_working_orders_across_dates,
+            )
+        ):
+            raise ValueError("complete order-family coverage requires authoritative all-page history")
+        if complete and self.family is OrderFamily.ADVANCED_EQUITY and not self.includes_parent_child_conditional:
+            raise ValueError("advanced-equity coverage must include parent/child/conditional records")
+        if self.status is OrderFamilyCoverageStatus.NOT_APPLICABLE and not all(
+            (self.broker_authoritative, self.account_family_disabled)
+        ):
+            raise ValueError("not-applicable coverage requires broker proof that the family is disabled")
+        if self.account_family_disabled and self.status is not OrderFamilyCoverageStatus.NOT_APPLICABLE:
+            raise ValueError("account_family_disabled is valid only for not-applicable coverage")
+
+    @property
+    def proves_complete(self) -> bool:
+        return self.status in {
+            OrderFamilyCoverageStatus.COMPLETE_DEDICATED,
+            OrderFamilyCoverageStatus.COMPLETE_GENERAL,
+            OrderFamilyCoverageStatus.NOT_APPLICABLE,
+        }
+
+
+@dataclass(frozen=True)
+class OrderCoverageContract:
+    """Exhaustive, provenance-bearing order visibility and ref-recovery contract."""
+
+    contract_version: str
+    evidence_observed_at: datetime
+    families: tuple[OrderFamilyCoverage, ...]
+    client_ref_recovery_source: ClientRefRecoverySource
+    broker_preserves_client_ref: bool
+    negative_client_ref_results_authoritative: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "contract_version", _required(self.contract_version, "contract_version")
+        )
+        object.__setattr__(
+            self,
+            "evidence_observed_at",
+            _utc(self.evidence_observed_at, "evidence_observed_at"),
+        )
+        families = tuple(self.families)
+        if any(not isinstance(item, OrderFamilyCoverage) for item in families):
+            raise ValueError("families must contain OrderFamilyCoverage records")
+        if {item.family for item in families} != set(OrderFamily) or len(families) != len(OrderFamily):
+            raise ValueError("coverage contract must classify every order family exactly once")
+        object.__setattr__(self, "families", families)
+        object.__setattr__(
+            self,
+            "client_ref_recovery_source",
+            _enum(
+                self.client_ref_recovery_source,
+                ClientRefRecoverySource,
+                "client-ref recovery source",
+            ),
+        )
+        for name in (
+            "broker_preserves_client_ref",
+            "negative_client_ref_results_authoritative",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        if self.client_ref_recovery_source is ClientRefRecoverySource.UNAVAILABLE:
+            if self.broker_preserves_client_ref or self.negative_client_ref_results_authoritative:
+                raise ValueError("unavailable client-ref recovery cannot claim positive guarantees")
+        elif not all(
+            (
+                self.broker_preserves_client_ref,
+                self.negative_client_ref_results_authoritative,
+            )
+        ):
+            raise ValueError("client-ref recovery requires preserved IDs and authoritative negatives")
+        if (
+            self.client_ref_recovery_source is ClientRefRecoverySource.EXHAUSTIVE_ORDER_HISTORY
+            and not all(
+                self.family_complete(family)
+                for family in (OrderFamily.STANDARD_EQUITY, OrderFamily.ADVANCED_EQUITY)
+            )
+        ):
+            raise ValueError("history-based client-ref recovery requires complete equity-order families")
+
+    def family(self, family: OrderFamily) -> OrderFamilyCoverage:
+        normalized = _enum(family, OrderFamily, "order family")
+        return next(item for item in self.families if item.family is normalized)
+
+    def family_complete(self, family: OrderFamily) -> bool:
+        return self.family(family).proves_complete
+
+    @property
+    def proves_whole_account_order_coverage(self) -> bool:
+        return all(item.proves_complete for item in self.families)
+
+    @property
+    def supports_exact_client_ref_recovery(self) -> bool:
+        return self.client_ref_recovery_source is not ClientRefRecoverySource.UNAVAILABLE
+
+
 @dataclass(frozen=True)
 class BrokerCapabilities:
     """Connector contract plus properties of the configured runtime path.
@@ -123,6 +282,7 @@ class BrokerCapabilities:
     supported_order_types: tuple[EquityOrderType, ...]
     supported_market_hours: tuple[MarketHours, ...]
     supported_time_in_force: tuple[TimeInForce, ...]
+    order_coverage: OrderCoverageContract
     unsupported_operations: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
 
@@ -184,6 +344,10 @@ class BrokerCapabilities:
         )
         object.__setattr__(self, "unsupported_operations", tuple(self.unsupported_operations))
         object.__setattr__(self, "notes", tuple(self.notes))
+        if not isinstance(self.order_coverage, OrderCoverageContract):
+            raise ValueError("order_coverage must be an OrderCoverageContract")
+        if self.supports_ref_id_lookup != self.order_coverage.supports_exact_client_ref_recovery:
+            raise ValueError("client-ref capability must match its evidence-backed coverage contract")
 
     @property
     def can_prove_whole_broker_reconciliation(self) -> bool:
@@ -193,8 +357,7 @@ class BrokerCapabilities:
                 self.supports_equity_position_read,
                 self.supports_equity_order_read,
                 self.supports_option_position_read,
-                self.supports_option_order_read,
-                self.supports_advanced_order_read,
+                self.order_coverage.proves_whole_account_order_coverage,
             )
         )
 
@@ -654,6 +817,7 @@ class BrokerOperationResult:
     operation: str
     status: OperationStatus
     observed_at: datetime
+    received_at: datetime
     accepted: bool | None
     message: str
     order: OrderSnapshot | None = None
@@ -665,7 +829,12 @@ class BrokerOperationResult:
             "status",
             _enum(self.status, OperationStatus, "operation status"),
         )
-        object.__setattr__(self, "observed_at", _utc(self.observed_at, "observed_at"))
+        observed_at = _utc(self.observed_at, "observed_at")
+        received_at = _utc(self.received_at, "received_at")
+        if received_at < observed_at:
+            raise ValueError("operation receipt cannot precede provider observation")
+        object.__setattr__(self, "observed_at", observed_at)
+        object.__setattr__(self, "received_at", received_at)
         if self.accepted is not None and not isinstance(self.accepted, bool):
             raise ValueError("accepted must be boolean or None")
         object.__setattr__(self, "message", str(self.message))
@@ -673,6 +842,8 @@ class BrokerOperationResult:
             raise ValueError("an unknown result cannot claim accepted or rejected")
         if self.order is not None and not isinstance(self.order, OrderSnapshot):
             raise ValueError("order must be an OrderSnapshot or None")
+        if self.order is not None and self.order.received_at > received_at:
+            raise ValueError("order receipt cannot follow its operation receipt")
 
 
 @dataclass(frozen=True)
@@ -684,16 +855,22 @@ class ClientRefLookupResult:
     found_orders: tuple[OrderSnapshot, ...]
     confirmed_absent_client_refs: tuple[str, ...]
     observed_at: datetime
+    received_at: datetime
     complete: bool
 
     def __post_init__(self) -> None:
-        account = _required(self.account_masked, "account_masked")
+        account = _account_mask(self.account_masked)
         requested = tuple(_required(item, "requested_client_ref") for item in self.requested_client_refs)
         absent = tuple(
             _required(item, "confirmed_absent_client_ref")
             for item in self.confirmed_absent_client_refs
         )
         found = tuple(self.found_orders)
+        if any(
+            not isinstance(order, OrderSnapshot) or order.account_masked != account
+            for order in found
+        ):
+            raise ValueError("found orders must belong to lookup account")
         if len(set(requested)) != len(requested):
             raise ValueError("requested client refs must be unique")
         if len(set(absent)) != len(absent) or not set(absent).issubset(requested):
@@ -713,7 +890,14 @@ class ClientRefLookupResult:
         object.__setattr__(self, "requested_client_refs", requested)
         object.__setattr__(self, "found_orders", found)
         object.__setattr__(self, "confirmed_absent_client_refs", absent)
-        object.__setattr__(self, "observed_at", _utc(self.observed_at, "observed_at"))
+        observed = _utc(self.observed_at, "observed_at")
+        received = _utc(self.received_at, "received_at")
+        if received < observed:
+            raise ValueError("lookup receipt cannot precede provider observation")
+        if any(order.received_at > received for order in found):
+            raise ValueError("found order receipt cannot follow lookup receipt")
+        object.__setattr__(self, "observed_at", observed)
+        object.__setattr__(self, "received_at", received)
 
 
 class BrokerError(RuntimeError):
@@ -800,13 +984,18 @@ __all__ = [
     "BrokerOrderState",
     "BrokerSide",
     "BrokerUnknownSubmission",
+    "ClientRefRecoverySource",
     "ClientRefLookupResult",
     "EquityOrderType",
     "FillSnapshot",
     "FundsSnapshot",
     "MarketHours",
     "OperationStatus",
+    "OrderCoverageContract",
     "OrderCheck",
+    "OrderFamily",
+    "OrderFamilyCoverage",
+    "OrderFamilyCoverageStatus",
     "OrderRequest",
     "OrderSnapshot",
     "PositionSnapshot",

@@ -174,6 +174,13 @@ def stage_canonical_activation(
         quote_age_seconds=1.0,
         completed_bar_age_seconds=1.0,
         probe_errors=(),
+        probe_started_at=created - timedelta(milliseconds=100),
+        probe_completed_at=created,
+        probe_elapsed_monotonic_seconds=0.1,
+        probe_clock_stable=True,
+        broker_account_binding_fingerprint="a" * 64,
+        broker_authorization_binding_id="b" * 64,
+        component_provenance_hash="c" * 64,
     )
     provisional = ActivationRecord(
         activation_id="0" * 64,

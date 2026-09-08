@@ -31,6 +31,8 @@ FIXED_RELEASE_PATHS = (
     "ARCHITECTURE.md",
     "CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md",
     "scripts/titan-full-live",
+    "deployment/com.harpcity.trader-brain-full-live.plist.in",
+    "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
     "validation/full-live/2026-09-08/OPERATIONS.md",
 )
 
@@ -300,6 +302,9 @@ def build_manifest(
         "default_mode": "PAUSED",
         "install_subtree": "Application Support/Titan Momentum/full-live",
         "launchd_template": "deployment/com.harpcity.trader-brain-full-live.plist.in",
+        "notification_launchd_template": (
+            "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
+        ),
         "files": files,
     }
     manifest_hash = sha256_bytes(canonical_json(descriptor))

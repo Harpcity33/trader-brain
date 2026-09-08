@@ -167,6 +167,30 @@ class BrokerBoundaryTests(unittest.TestCase):
         self.assertFalse(capabilities.supports_unattended_writes)
         self.assertFalse(capabilities.supports_advanced_order_read)
         self.assertFalse(capabilities.can_prove_whole_broker_reconciliation)
+        self.assertEqual(contract.server_version, "1.4.0")
+        self.assertIn(
+            (
+                "place_equity_order",
+                "get explicit user confirmation before calling this tool",
+            ),
+            contract.server_advertised_confirmation_text,
+        )
+        self.assertIn(
+            ("cancel_equity_order", "Always confirm with the user before calling"),
+            contract.server_advertised_confirmation_text,
+        )
+        self.assertTrue(
+            any(
+                "get_advanced_orders is not advertised" in item
+                for item in contract.unsupported_operations
+            )
+        )
+        self.assertTrue(
+            any(
+                "output contains no broker-preserved client ref_id" in item
+                for item in contract.unsupported_operations
+            )
+        )
 
     def test_robinhood_adapter_blocks_review_place_and_cancel(self) -> None:
         adapter = RobinhoodBrokerAdapter()
@@ -198,11 +222,11 @@ class BrokerBoundaryTests(unittest.TestCase):
             account_state="active",
             account_type="individual/limited_margin/self_directed",
             funds=FundsSnapshot(
-                total_value="912.80",
-                cash="912.80",
-                buying_power="912.8000",
-                unleveraged_buying_power="912.8000",
-                unsettled_funds="602.9300",
+                total_value="1000.00",
+                cash="1000.00",
+                buying_power="1000.0000",
+                unleveraged_buying_power="1000.0000",
+                unsettled_funds="250.0000",
                 unsettled_funds_is_order_gating=False,
             ),
             equity_positions=(),
@@ -233,16 +257,17 @@ class BrokerBoundaryTests(unittest.TestCase):
         )
         raw = path.read_text(encoding="utf-8")
         document = json.loads(raw)
-        self.assertEqual(document["account_masked"], "••••7153")
-        self.assertEqual(
-            document["evidence"]["auth"]["assertion_scope"], "point_in_time_only"
-        )
-        self.assertFalse(document["evidence"]["auth"]["ongoing_auth_guaranteed"])
-        self.assertFalse(
-            document["evidence"]["positions_and_orders"]["whole_broker_flatness_proven"]
+        self.assertEqual(document["account_masked"], "ending-7153")
+        self.assertTrue(
+            document["authenticated_read_only_account_evidence"]["point_in_time_only"]
         )
         self.assertFalse(
-            document["connector"]["production_unattended_mutations_supported"]
+            document["authenticated_read_only_account_evidence"]
+            ["positions_and_orders"]["whole_broker_flatness_proven"]
+        )
+        self.assertFalse(
+            document["current_authenticated_connector_contract"]
+            ["safe_for_unattended_stock_launcher"]
         )
         self.assertNotIn("account_number", raw.lower())
 

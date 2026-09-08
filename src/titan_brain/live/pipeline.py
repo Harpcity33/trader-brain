@@ -40,7 +40,13 @@ from .broker import AccountSnapshot, BrokerClient, BrokerSide
 from .authority import MutationAuthority
 from .execution import EntryExecutionCoordinator, ExecutionOutcome, ExecutionStatus
 from .latency import LatencyRecorder, LatencySpan
-from .market_data import CompletedBar, EvidenceDecision, MarketDataCache, Quote
+from .market_data import (
+    CompletedBar,
+    EvidenceDecision,
+    MarketDataCache,
+    MarketSessionState,
+    Quote,
+)
 from .massive_adapter import MassiveFeedHealth, PreparedStructure, TradabilityProvider
 from .money import decimal_value
 from .plans import ExpiringPlan
@@ -77,6 +83,7 @@ REQUIRED_HARD_GATE_FACTS = frozenset(
 
 class PipelineStatus(str, Enum):
     NO_TRADE = "NO_TRADE"
+    WAITING_FOR_SESSION = "WAITING_FOR_SESSION"
     BLOCKED = "BLOCKED"
     NOT_SELECTED = "NOT_SELECTED"
     ACKNOWLEDGED = "ACKNOWLEDGED"
@@ -145,6 +152,25 @@ class InstrumentEvidence:
     robinhood_tradable: bool
     regular_hours_eligible: bool
 
+    def __post_init__(self) -> None:
+        symbol = self.symbol.strip().upper()
+        if not symbol or not symbol.replace(".", "").replace("-", "").isalnum():
+            raise ValueError("instrument evidence symbol is invalid")
+        object.__setattr__(self, "symbol", symbol)
+        object.__setattr__(
+            self, "observed_at", _aware_utc(self.observed_at, "instrument.observed_at")
+        )
+        for field in ("evidence_id", "instrument_id", "source", "asset_type"):
+            if not str(getattr(self, field)).strip():
+                raise ValueError(f"instrument {field} is required")
+        for field in (
+            "exchange_listed",
+            "robinhood_tradable",
+            "regular_hours_eligible",
+        ):
+            if not isinstance(getattr(self, field), bool):
+                raise ValueError(f"instrument {field} must be boolean")
+
 
 @dataclass(frozen=True)
 class LiveValidationEvidence:
@@ -169,6 +195,86 @@ class InstrumentEvidenceProvider(Protocol):
     def get_instrument_evidence(
         self, symbol: str, *, now: datetime
     ) -> InstrumentEvidence | None: ...
+
+
+class RobinhoodInstrumentRecordReader(Protocol):
+    """Injected authenticated reader; this module never handles credentials."""
+
+    def get_equity_instrument(
+        self,
+        symbol: str,
+        *,
+        as_of: datetime,
+        timeout_seconds: float,
+    ) -> Mapping[str, Any]: ...
+
+
+class RobinhoodInstrumentEvidenceProvider:
+    """Strict normalized Robinhood instrument/tradability evidence adapter.
+
+    Every eligibility boolean must be explicit in the injected broker record;
+    the adapter never derives tradability from Massive, a symbol format, or a
+    missing response.  Provider/auth failures become missing evidence and are
+    therefore fail-closed at the pipeline gate.
+    """
+
+    REQUIRED_FIELDS = frozenset(
+        {
+            "evidence_id",
+            "symbol",
+            "instrument_id",
+            "observed_at",
+            "source",
+            "asset_type",
+            "exchange_listed",
+            "robinhood_tradable",
+            "regular_hours_eligible",
+        }
+    )
+
+    def __init__(
+        self,
+        reader: RobinhoodInstrumentRecordReader,
+        *,
+        timeout_seconds: float = 3.0,
+    ) -> None:
+        if not 0 < float(timeout_seconds) <= 30:
+            raise ValueError("instrument timeout must be in (0, 30]")
+        self.reader = reader
+        self.timeout_seconds = float(timeout_seconds)
+
+    def get_instrument_evidence(
+        self, symbol: str, *, now: datetime
+    ) -> InstrumentEvidence | None:
+        current = _aware_utc(now, "instrument.now")
+        normalized = str(symbol).strip().upper()
+        try:
+            raw = self.reader.get_equity_instrument(
+                normalized,
+                as_of=current,
+                timeout_seconds=self.timeout_seconds,
+            )
+            if not isinstance(raw, Mapping) or not self.REQUIRED_FIELDS.issubset(raw):
+                return None
+            observed = raw["observed_at"]
+            if isinstance(observed, str):
+                observed = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+            evidence = InstrumentEvidence(
+                evidence_id=str(raw["evidence_id"]),
+                symbol=str(raw["symbol"]),
+                instrument_id=str(raw["instrument_id"]),
+                observed_at=observed,
+                source=str(raw["source"]),
+                asset_type=str(raw["asset_type"]),
+                exchange_listed=raw["exchange_listed"],
+                robinhood_tradable=raw["robinhood_tradable"],
+                regular_hours_eligible=raw["regular_hours_eligible"],
+            )
+            if evidence.symbol != normalized or not evidence.source.startswith("robinhood"):
+                return None
+            return evidence
+        except Exception:
+            return None
 
 
 class QualityEvidenceProvider(Protocol):
@@ -334,7 +440,7 @@ def build_account_risk_snapshot(
         failures.append("OPTION_ORDER_PRESENT_OUTSIDE_EQUITY_SCOPE")
     if any(position.is_fractional for position in broker_snapshot.equity_positions):
         failures.append("FRACTIONAL_POSITION_PRESENT_OUTSIDE_LIVE_SCOPE")
-    snapshot_age = (current - broker_snapshot.received_at).total_seconds()
+    snapshot_age = (current - broker_snapshot.observed_at).total_seconds()
     maximum_age = int(policy.config["evidence"]["broker_snapshot_max_age_seconds"])
     if snapshot_age < -1 or snapshot_age > maximum_age:
         failures.append("BROKER_RISK_SNAPSHOT_STALE")
@@ -758,7 +864,7 @@ class FullLiveEntryPipeline:
                 broker_snapshot.account_type,
             )
         except ValueError as exc:
-            failures.append(f"ACCOUNT_POLICY_INVALID:{exc}")
+            failures.append("ACCOUNT_POLICY_INVALID")
         return _unique(failures)
 
     def _score_candidate(
@@ -781,7 +887,7 @@ class FullLiveEntryPipeline:
             try:
                 failures.extend(self._instrument_failures(instrument, structure, now))
             except (AttributeError, TypeError, ValueError) as exc:
-                failures.append(f"INSTRUMENT_EVIDENCE_INVALID:{exc}")
+                failures.append("INSTRUMENT_EVIDENCE_INVALID")
         try:
             validation = self.quality_evidence.revalidate_structure(
                 structure, now=now
@@ -794,18 +900,18 @@ class FullLiveEntryPipeline:
             try:
                 failures.extend(self._validation_failures(validation, structure, now))
             except (AttributeError, TypeError, ValueError) as exc:
-                failures.append(f"LIVE_REVALIDATION_INVALID:{exc}")
+                failures.append("LIVE_REVALIDATION_INVALID")
             try:
                 setup = score_setup(validation.setup_components)
             except (TypeError, ValueError) as exc:
-                failures.append(f"SETUP_SCORE_COMPONENTS_INCOMPLETE_OR_INVALID:{exc}")
+                failures.append("SETUP_SCORE_COMPONENTS_INCOMPLETE_OR_INVALID")
             try:
                 execution = score_execution(
                     validation.execution_components,
                     instrument_kind="equity",
                 )
             except (TypeError, ValueError) as exc:
-                failures.append(f"EXECUTION_SCORE_COMPONENTS_INCOMPLETE_OR_INVALID:{exc}")
+                failures.append("EXECUTION_SCORE_COMPONENTS_INCOMPLETE_OR_INVALID")
             if setup is not None and setup.score < self.thresholds.minimum_setup_score:
                 failures.append("SETUP_SCORE_BELOW_MINIMUM")
             if (
@@ -904,7 +1010,7 @@ class FullLiveEntryPipeline:
             if reserve <= 0:
                 failures.append("POSITIVE_EXECUTION_RESERVE_REQUIRED")
         except ValueError as exc:
-            failures.append(f"EXECUTION_RESERVE_INVALID:{exc}")
+            failures.append("EXECUTION_RESERVE_INVALID")
         supplied = set(evidence.hard_gate_facts)
         if supplied != REQUIRED_HARD_GATE_FACTS:
             missing = sorted(REQUIRED_HARD_GATE_FACTS - supplied)
@@ -1086,7 +1192,7 @@ class FullLiveEntryPipeline:
         try:
             plan.validate(self.policy, now)
         except (TypeError, ValueError) as exc:
-            failures.append(f"PLAN_INVALID:{exc}")
+            failures.append("PLAN_INVALID")
         return plan, risk, market, _unique(failures)
 
     def _size_plan(
@@ -1482,6 +1588,80 @@ class FullLiveDiscoveryExecutor:
             ),
         )
 
+    def final_entry_evidence_failures(
+        self, *, plan: object, request: object, now: datetime
+    ) -> tuple[str, ...]:
+        """Recheck market/tradability after the final account refresh.
+
+        The earlier discovery pass cannot authorize a mutation after a slow
+        broker review.  This hook is called by the mutation authority only at
+        BEFORE_PLACE and consumes the same release-bound source/provider and
+        cached exact plan evidence at a newly sampled time.
+        """
+
+        current = _aware_utc(now, "final entry market recheck time")
+        if not isinstance(plan, ExpiringPlan):
+            return ("FINAL_ENTRY_PLAN_NOT_NORMALIZED",)
+        if (
+            getattr(request, "symbol", None) != plan.symbol
+            or getattr(request, "quantity", None) != plan.quantity
+            or getattr(request, "limit_price", None) != plan.entry_limit
+        ):
+            return ("FINAL_ENTRY_REQUEST_PLAN_MISMATCH",)
+        failures: list[str] = []
+        try:
+            health = self.source.health(now=current)
+        except Exception as exc:
+            return (f"FINAL_MARKET_HEALTH_FAILED:{type(exc).__name__}",)
+        try:
+            session = health.session_state
+            if not isinstance(session, MarketSessionState):
+                session = MarketSessionState(str(session))
+        except (AttributeError, ValueError):
+            failures.append("FINAL_MARKET_SESSION_STATE_INVALID")
+            session = MarketSessionState.WAITING_FOR_SESSION
+        if getattr(health, "service_healthy", False) is not True:
+            failures.append("FINAL_MARKET_SERVICE_UNHEALTHY")
+        if session is not MarketSessionState.ENTRY_ELIGIBLE:
+            failures.append("FINAL_MARKET_SESSION_NOT_ENTRY_ELIGIBLE")
+        if getattr(health, "entry_evidence_ready", False) is not True:
+            failures.append("FINAL_MARKET_EVIDENCE_NOT_READY")
+        failures.extend(str(item) for item in getattr(health, "blockers", ()))
+        failures.extend(
+            str(item) for item in getattr(health, "entry_blockers", ())
+        )
+
+        decision = self.pipeline._market_decision(plan, current)
+        failures.extend(decision.failures)
+        instrument = self.pipeline.instrument_evidence.get_instrument_evidence(
+            plan.symbol, now=current
+        )
+        if instrument is None:
+            failures.append("FINAL_ROBINHOOD_TRADABILITY_EVIDENCE_MISSING")
+        else:
+            age = (current - _aware_utc(
+                instrument.observed_at, "final instrument observed_at"
+            )).total_seconds()
+            if (
+                instrument.symbol.strip().upper() != plan.symbol
+                or instrument.instrument_id != plan.instrument_id
+                or not instrument.evidence_id
+                or not instrument.source
+            ):
+                failures.append("FINAL_INSTRUMENT_IDENTITY_MISMATCH")
+            if age < -1 or age > int(
+                self.policy.config["evidence"]["quote_max_age_seconds"]
+            ):
+                failures.append("FINAL_INSTRUMENT_EVIDENCE_STALE_OR_FUTURE")
+            if (
+                instrument.asset_type != "stock"
+                or instrument.exchange_listed is not True
+                or instrument.robinhood_tradable is not True
+                or instrument.regular_hours_eligible is not True
+            ):
+                failures.append("FINAL_ROBINHOOD_TRADABILITY_DENIED")
+        return _unique(failures)
+
     def execute(
         self, *, snapshot: AccountSnapshot, now: datetime
     ) -> tuple[str, ...]:
@@ -1504,8 +1684,34 @@ class FullLiveDiscoveryExecutor:
             return (
                 self._blocked((f"MASSIVE_HEALTH_FAILED:{type(exc).__name__}",)),
             )
-        if health.blockers:
+        service_healthy = bool(
+            getattr(health, "service_healthy", not bool(health.blockers))
+        )
+        if not service_healthy:
             return (self._blocked(tuple(str(item) for item in health.blockers)),)
+        session_state = getattr(
+            health, "session_state", MarketSessionState.ENTRY_ELIGIBLE
+        )
+        try:
+            if not isinstance(session_state, MarketSessionState):
+                session_state = MarketSessionState(str(session_state))
+        except ValueError:
+            return (self._blocked(("MARKET_SESSION_STATE_INVALID",)),)
+        if session_state is MarketSessionState.WAITING_FOR_SESSION:
+            return ("DISCOVERY:WAITING_FOR_SESSION",)
+        entry_blockers = tuple(
+            str(item) for item in getattr(health, "entry_blockers", ())
+        )
+        if health.blockers or entry_blockers or getattr(
+            health, "entry_evidence_ready", True
+        ) is not True:
+            return (
+                self._blocked(
+                    tuple(str(item) for item in health.blockers)
+                    + entry_blockers
+                    or ("MARKET_ENTRY_EVIDENCE_NOT_READY",)
+                ),
+            )
 
         try:
             structures = self.source.prepared_structures(
@@ -1612,7 +1818,7 @@ class FullLiveDiscoveryExecutor:
                 (),
             )
         except (TypeError, ValueError) as exc:
-            return None, (f"CURRENT_SESSION_LATCH_INVALID:{exc}",)
+            return None, ("CURRENT_SESSION_LATCH_INVALID",)
 
     def _session_start(self, now: datetime) -> datetime:
         zone = ZoneInfo(str(self.policy.config["sessions"]["timezone"]))
@@ -1646,5 +1852,7 @@ __all__ = [
     "PreparedStructureSource",
     "QualityEvidenceProvider",
     "REQUIRED_HARD_GATE_FACTS",
+    "RobinhoodInstrumentEvidenceProvider",
+    "RobinhoodInstrumentRecordReader",
     "build_account_risk_snapshot",
 ]

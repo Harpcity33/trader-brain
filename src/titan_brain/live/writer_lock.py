@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import socket
 import threading
 from typing import Any
@@ -28,17 +29,76 @@ class WriterLockBusy(WriterLockError):
 
 _PROCESS_GUARD = threading.RLock()
 _PROCESS_HELD_PATHS: set[Path] = set()
+_USER_LOCK_RELATIVE_PATH = Path(
+    "Library/Application Support/Titan Momentum/account-writer-locks"
+)
 
 
-def _account_fingerprint(account_key: str) -> str:
+def user_account_writer_lock_directory() -> Path:
+    """Return the one machine-user lock directory used by every release.
+
+    The location deliberately does not depend on an install root, release ID,
+    credential, or runtime configuration.  Production callers have no CLI or
+    environment override for this path; tests replace this function in-process
+    so they never touch a real user's lock directory.
+    """
+
+    try:
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
+    except (KeyError, OSError) as exc:
+        raise WriterLockError(
+            "cannot resolve the operating-system user's writer-lock home"
+        ) from exc
+    if home == home.parent:
+        raise WriterLockError("cannot establish a private user home for writer lock")
+    return home / _USER_LOCK_RELATIVE_PATH
+
+
+def account_writer_fingerprint(
+    account_key: str,
+    *,
+    broker_account_binding_fingerprint: str | None = None,
+    authorization_binding_id: str | None = None,
+) -> str:
+    """Return the account-global lock namespace.
+
+    Production binding receipts are validated and persisted as holder
+    metadata, but they must never partition the kernel lock.  Authorization
+    rotation (or two credentials for the same account) still represents one
+    broker writer and therefore has to contend on the same inode as the
+    attended path and the installer interlock.
+    """
+
     normalized = str(account_key).strip()
     if not normalized:
         raise ValueError("account_key is required")
+    if (broker_account_binding_fingerprint is None) != (
+        authorization_binding_id is None
+    ):
+        raise ValueError(
+            "broker account and authorization bindings must be supplied together"
+        )
+    if broker_account_binding_fingerprint is not None:
+        account_binding = str(broker_account_binding_fingerprint)
+        authorization_binding = str(authorization_binding_id)
+        for value, field in (
+            (account_binding, "broker_account_binding_fingerprint"),
+            (authorization_binding, "authorization_binding_id"),
+        ):
+            if len(value) != 64 or any(
+                character not in "0123456789abcdef" for character in value
+            ):
+                raise ValueError(f"{field} must be a nonsecret 256-bit receipt")
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 class AccountWriterLock:
-    """Exclusive advisory lock for one account and local runtime directory."""
+    """Exclusive advisory lock for one account in a caller-selected directory.
+
+    Production callers must pass :func:`user_account_writer_lock_directory`.
+    Accepting a directory here keeps the primitive independently testable; it
+    does not create a production path override.
+    """
 
     def __init__(
         self,
@@ -46,9 +106,17 @@ class AccountWriterLock:
         account_key: str,
         *,
         owner_id: str | None = None,
+        broker_account_binding_fingerprint: str | None = None,
+        authorization_binding_id: str | None = None,
     ) -> None:
         self.directory = Path(directory).resolve()
-        self.account_fingerprint = _account_fingerprint(account_key)
+        self.broker_account_binding_fingerprint = broker_account_binding_fingerprint
+        self.authorization_binding_id = authorization_binding_id
+        self.account_fingerprint = account_writer_fingerprint(
+            account_key,
+            broker_account_binding_fingerprint=broker_account_binding_fingerprint,
+            authorization_binding_id=authorization_binding_id,
+        )
         self.owner_id = str(owner_id or uuid4())
         if not self.owner_id.strip():
             raise ValueError("owner_id is required")
@@ -89,6 +157,8 @@ class AccountWriterLock:
                 metadata = {
                     "schema_version": 1,
                     "account_fingerprint": self.account_fingerprint,
+                    "broker_account_binding_fingerprint": self.broker_account_binding_fingerprint,
+                    "authorization_binding_id": self.authorization_binding_id,
                     "owner_id": self.owner_id,
                     "pid": os.getpid(),
                     "hostname": socket.gethostname(),
@@ -149,4 +219,10 @@ class AccountWriterLock:
         self.release()
 
 
-__all__ = ["AccountWriterLock", "WriterLockBusy", "WriterLockError"]
+__all__ = [
+    "AccountWriterLock",
+    "WriterLockBusy",
+    "WriterLockError",
+    "account_writer_fingerprint",
+    "user_account_writer_lock_directory",
+]

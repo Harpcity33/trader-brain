@@ -27,6 +27,7 @@ from .broker import (
     EquityOrderType,
     MarketHours,
     OperationStatus,
+    OrderFamily,
     OrderRequest,
     OrderSnapshot,
     ReviewReceipt,
@@ -282,7 +283,7 @@ class EntryExecutionCoordinator:
                 risk_reserved=False,
                 replay=False,
                 message="invalid order request was rejected before durable state or broker access",
-                failure_codes=(f"ORDER_REQUEST_INVALID:{exc}",),
+                failure_codes=("ORDER_REQUEST_INVALID",),
             )
         existing = self.state.row("order_intents", "intent_id", intent_id)
         if existing is not None:
@@ -380,7 +381,7 @@ class EntryExecutionCoordinator:
                 risk_reserved=False,
                 replay=False,
                 message="durable aggregate validation failed before broker review",
-                failure_codes=(f"DURABLE_AGGREGATE_INVALID:{exc}",),
+                failure_codes=("DURABLE_AGGREGATE_INVALID",),
             )
         durable_span = _start_latency(
             self.latency,
@@ -405,7 +406,7 @@ class EntryExecutionCoordinator:
                 risk_reserved=False,
                 replay=False,
                 message="durable aggregate validation failed before broker review",
-                failure_codes=(f"DURABLE_AGGREGATE_INVALID:{exc}",),
+                failure_codes=("DURABLE_AGGREGATE_INVALID",),
             )
         _finish_latency(
             self.latency,
@@ -576,7 +577,7 @@ class EntryExecutionCoordinator:
                 client_ref_id=request.client_ref_id,
                 occurred_at=self._now(),
                 code=exc.code,
-                message=str(exc),
+                message=f"{exc.code}: broker acceptance cannot be determined",
                 replay=False,
             )
         except BrokerError as exc:
@@ -588,7 +589,7 @@ class EntryExecutionCoordinator:
                     client_ref_id=request.client_ref_id,
                     occurred_at=self._now(),
                     code=exc.code,
-                    message=str(exc),
+                    message=f"{exc.code}: broker acceptance cannot be determined",
                     replay=False,
                 )
             failed_at = self._now()
@@ -727,7 +728,7 @@ class EntryExecutionCoordinator:
         try:
             plan.validate(self.policy, now)
         except (TypeError, ValueError) as exc:
-            failures.append(f"PLAN_INVALID:{exc}")
+            failures.append("PLAN_INVALID")
 
         if not self.policy.live_entries_configured:
             failures.append("LIVE_ENTRIES_DISABLED_IN_SIGNED_CONFIG")
@@ -773,7 +774,7 @@ class EntryExecutionCoordinator:
             ):
                 failures.append("CAUSAL_BAR_EVENT_NOT_BOUND_TO_PLAN")
         except (KeyError, TypeError, ValueError) as exc:
-            failures.append(f"MARKET_EVIDENCE_INVALID:{exc}")
+            failures.append("MARKET_EVIDENCE_INVALID")
         return tuple(dict.fromkeys(failures)), evidence
 
     def _market_evidence(self, plan: ExpiringPlan, now: datetime) -> EvidenceDecision:
@@ -819,7 +820,9 @@ class EntryExecutionCoordinator:
         failures = [code for passed, code in checks if not passed]
         if (
             self.policy.config["evidence"].get("require_advanced_order_reconciliation") is True
-            and not capabilities.supports_advanced_order_read
+            and not capabilities.order_coverage.family_complete(
+                OrderFamily.ADVANCED_EQUITY
+            )
         ):
             failures.append("ADVANCED_ORDER_READ_UNSUPPORTED")
         return tuple(failures)
@@ -1664,7 +1667,7 @@ class SafetyExecutionCoordinator:
                 client_ref_id=client_ref_id,
                 occurred_at=self._now(),
                 code=exc.code,
-                message=str(exc),
+                message=f"{exc.code}: broker acceptance cannot be determined",
                 replay=False,
             )
         except BrokerError as exc:
@@ -1676,7 +1679,7 @@ class SafetyExecutionCoordinator:
                     client_ref_id=client_ref_id,
                     occurred_at=self._now(),
                     code=exc.code,
-                    message=str(exc),
+                    message=f"{exc.code}: broker acceptance cannot be determined",
                     replay=False,
                 )
             self.state.transition_intent(
@@ -1830,7 +1833,9 @@ class SafetyExecutionCoordinator:
             "target_broker_order_id": target.broker_order_id,
             "target_owner_intent_id": owner_intent_id,
             "target_client_ref_id": target.client_ref_id,
-            "target_evidence_floor_at": target.received_at.isoformat(),
+            # Provider update time is the cancel causality floor. A later
+            # local receipt of unchanged broker facts is telemetry only.
+            "target_evidence_floor_at": target.broker_updated_at.isoformat(),
             "client_ref_id": client_ref_id,
         }
         intent = OrderIntent(
@@ -1865,7 +1870,7 @@ class SafetyExecutionCoordinator:
             metadata={"inserted": inserted},
         )
         submitting_at = self._now()
-        authority_failures = self._authority_failures(
+        authority_failures, authority_snapshot = self._authority_result(
             snapshot=broker_snapshot,
             operation=MutationOperation.CANCEL,
             phase=MutationPhase.BEFORE_CANCEL,
@@ -1885,6 +1890,24 @@ class SafetyExecutionCoordinator:
                 replay=not inserted,
                 broker_order_id=target.broker_order_id,
             )
+        if authority_snapshot is not None:
+            refreshed_targets = tuple(
+                order
+                for order in authority_snapshot.equity_orders
+                if order.broker_order_id == target.broker_order_id
+            )
+            if len(refreshed_targets) != 1:
+                return self._blocked(
+                    plan_id=normalized_plan,
+                    kind=kind,
+                    intent_id=intent_id,
+                    client_ref_id=client_ref_id,
+                    message="final broker snapshot did not carry one exact cancel target",
+                    failures=("CANCEL_TARGET_NOT_CURRENT_AND_ACTIVE",),
+                    replay=not inserted,
+                    broker_order_id=target.broker_order_id,
+                )
+            target = refreshed_targets[0]
         self.state.transition_intent(
             intent_id,
             IntentState.SUBMITTING,
@@ -1915,7 +1938,7 @@ class SafetyExecutionCoordinator:
                 client_ref_id=client_ref_id,
                 occurred_at=self._now(),
                 code=exc.code,
-                message=str(exc),
+                message=f"{exc.code}: broker acceptance cannot be determined",
                 replay=False,
                 broker_order_id=target.broker_order_id,
             )
@@ -1928,7 +1951,7 @@ class SafetyExecutionCoordinator:
                     client_ref_id=client_ref_id,
                     occurred_at=self._now(),
                     code=exc.code,
-                    message=str(exc),
+                    message=f"{exc.code}: broker acceptance cannot be determined",
                     replay=False,
                     broker_order_id=target.broker_order_id,
                 )
@@ -1992,7 +2015,7 @@ class SafetyExecutionCoordinator:
             datetime.fromisoformat(str(order_tuple["target_evidence_floor_at"])),
             "target evidence floor",
         )
-        if order.received_at <= floor:
+        if order.broker_updated_at <= floor:
             return SafetyExecutionOutcome(
                 status=ExecutionStatus.UNKNOWN,
                 plan_id=str(row["plan_id"]),
@@ -2173,7 +2196,7 @@ class SafetyExecutionCoordinator:
                     time_in_force=request.time_in_force.value,
                 )
             except (TypeError, ValueError) as exc:
-                failures.append(f"PROTECTION_TUPLE_INVALID:{exc}")
+                failures.append("PROTECTION_TUPLE_INVALID")
         failures.extend(self._policy_unattended_failures())
         try:
             failures.extend(self._order_capability_failures(self.broker.capabilities, request))
@@ -2203,7 +2226,7 @@ class SafetyExecutionCoordinator:
             failures.append("CANCEL_TARGET_SYMBOL_MISMATCH")
         if target.state.terminal:
             failures.append("CANCEL_TARGET_ALREADY_TERMINAL")
-        age = (now - target.received_at).total_seconds()
+        age = (now - target.broker_updated_at).total_seconds()
         max_age = int(self.policy.config["evidence"]["broker_snapshot_max_age_seconds"])
         if age < -1 or age > max_age:
             failures.append("CANCEL_TARGET_EVIDENCE_STALE_OR_FUTURE")
@@ -2247,7 +2270,7 @@ class SafetyExecutionCoordinator:
                         self, target, expected
                     )
                 except (TypeError, ValueError, KeyError) as exc:
-                    failures.append(f"CANCEL_TARGET_IDENTITY_MISMATCH:{exc}")
+                    failures.append("CANCEL_TARGET_IDENTITY_MISMATCH")
         failures.extend(self._policy_unattended_failures())
         try:
             failures.extend(self._cancel_capability_failures(self.broker.capabilities))
@@ -2295,7 +2318,9 @@ class SafetyExecutionCoordinator:
         if (
             self.policy.config["evidence"].get("require_advanced_order_reconciliation")
             is True
-            and not capabilities.supports_advanced_order_read
+            and not capabilities.order_coverage.family_complete(
+                OrderFamily.ADVANCED_EQUITY
+            )
         ):
             failures.append("ADVANCED_ORDER_READ_UNSUPPORTED")
         return tuple(failures)
@@ -2316,7 +2341,9 @@ class SafetyExecutionCoordinator:
         if (
             self.policy.config["evidence"].get("require_advanced_order_reconciliation")
             is True
-            and not capabilities.supports_advanced_order_read
+            and not capabilities.order_coverage.family_complete(
+                OrderFamily.ADVANCED_EQUITY
+            )
         ):
             failures.append("ADVANCED_ORDER_READ_UNSUPPORTED")
         return tuple(failures)
@@ -2968,8 +2995,36 @@ class SafetyExecutionCoordinator:
         plan: object | None = None,
         risk_decision: object | None = None,
     ) -> tuple[str, ...]:
+        failures, _ = self._authority_result(
+            snapshot=snapshot,
+            operation=operation,
+            phase=phase,
+            now=now,
+            plan_id=plan_id,
+            kind=kind,
+            request=request,
+            target=target,
+            plan=plan,
+            risk_decision=risk_decision,
+        )
+        return failures
+
+    def _authority_result(
+        self,
+        *,
+        snapshot: AccountSnapshot | None,
+        operation: MutationOperation,
+        phase: MutationPhase,
+        now: datetime,
+        plan_id: str,
+        kind: IntentKind,
+        request: OrderRequest | None = None,
+        target: OrderSnapshot | None = None,
+        plan: object | None = None,
+        risk_decision: object | None = None,
+    ) -> tuple[tuple[str, ...], AccountSnapshot | None]:
         try:
-            self.authority.require_mutation_authority(
+            result = self.authority.require_mutation_authority(
                 snapshot=snapshot,
                 operation=operation,
                 phase=phase,
@@ -2981,11 +3036,14 @@ class SafetyExecutionCoordinator:
                 plan=plan,
                 risk_decision=risk_decision,
             )
-            return ()
+            return (), result if isinstance(result, AccountSnapshot) else None
         except MutationAuthorityDenied as exc:
-            return exc.failure_codes
+            return exc.failure_codes, None
         except Exception as exc:
-            return (f"MUTATION_AUTHORITY_CAPABILITY_FAILED:{type(exc).__name__}",)
+            return (
+                (f"MUTATION_AUTHORITY_CAPABILITY_FAILED:{type(exc).__name__}",),
+                None,
+            )
 
     @staticmethod
     def _aware(value: datetime, field: str) -> datetime:

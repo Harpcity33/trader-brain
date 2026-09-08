@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import pwd
 import subprocess
 import sys
 import tempfile
 import unittest
 
-from titan_brain.live.writer_lock import AccountWriterLock, WriterLockBusy
+from titan_brain.live.writer_lock import (
+    AccountWriterLock,
+    WriterLockBusy,
+    user_account_writer_lock_directory,
+)
 
 
 class AccountWriterLockTests(unittest.TestCase):
@@ -16,6 +22,22 @@ class AccountWriterLockTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_production_lock_root_ignores_home_environment_override(self):
+        expected_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
+        prior = os.environ.get("HOME")
+        try:
+            os.environ["HOME"] = str(Path(self.temporary.name) / "attacker-home")
+            self.assertEqual(
+                user_account_writer_lock_directory(),
+                expected_home
+                / "Library/Application Support/Titan Momentum/account-writer-locks",
+            )
+        finally:
+            if prior is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = prior
 
     def test_same_account_has_exactly_one_local_owner(self):
         first = AccountWriterLock(self.directory, "ending-7153", owner_id="owner-one")
@@ -41,6 +63,35 @@ class AccountWriterLockTests(unittest.TestCase):
             self.assertTrue(first.held)
             self.assertTrue(second.held)
             self.assertNotEqual(first.path, second.path)
+
+    def test_authorization_rotation_cannot_partition_account_lock(self):
+        first = AccountWriterLock(
+            self.directory,
+            "ending-7153",
+            owner_id="old-authorization",
+            broker_account_binding_fingerprint="a" * 64,
+            authorization_binding_id="b" * 64,
+        )
+        rotated = AccountWriterLock(
+            self.directory,
+            "ending-7153",
+            owner_id="rotated-authorization",
+            broker_account_binding_fingerprint="a" * 64,
+            authorization_binding_id="c" * 64,
+        )
+        attended_or_installer = AccountWriterLock(
+            self.directory, "ending-7153", owner_id="installer"
+        )
+        self.assertEqual(first.path, rotated.path)
+        self.assertEqual(first.path, attended_or_installer.path)
+        first.acquire()
+        try:
+            with self.assertRaises(WriterLockBusy):
+                rotated.acquire()
+            with self.assertRaises(WriterLockBusy):
+                attended_or_installer.acquire()
+        finally:
+            first.release()
 
     def test_kernel_lock_blocks_a_separate_process(self):
         lock = AccountWriterLock(self.directory, "ending-7153")

@@ -18,6 +18,11 @@ from titan_brain.live.broker import (
     FundsSnapshot,
     MarketHours,
     OperationStatus,
+    ClientRefRecoverySource,
+    OrderCoverageContract,
+    OrderFamily,
+    OrderFamilyCoverage,
+    OrderFamilyCoverageStatus,
     OrderSnapshot,
     PositionSnapshot,
     FakeBrokerClient,
@@ -52,6 +57,7 @@ from titan_brain.live.protection import (
 from titan_brain.live.reconcile import (
     ActivityOwner,
     AuthoritativeReconciler,
+    ReconciliationConflict,
     ReconciliationPhase,
     UnknownResolutionState,
     ingest_local_order,
@@ -71,6 +77,31 @@ HASH_C = "c" * 64
 
 
 def capabilities(*, ref_lookup: bool = True) -> BrokerCapabilities:
+    coverage = OrderCoverageContract(
+        contract_version="test-order-coverage-v1",
+        evidence_observed_at=NOW,
+        families=tuple(
+            OrderFamilyCoverage(
+                family=family,
+                status=OrderFamilyCoverageStatus.COMPLETE_GENERAL,
+                evidence_id=f"test:{family.value}",
+                broker_authoritative=True,
+                all_pages_consumed=True,
+                includes_working_orders_across_dates=True,
+                includes_parent_child_conditional=(
+                    family is OrderFamily.ADVANCED_EQUITY
+                ),
+            )
+            for family in OrderFamily
+        ),
+        client_ref_recovery_source=(
+            ClientRefRecoverySource.DEDICATED_LOOKUP
+            if ref_lookup
+            else ClientRefRecoverySource.UNAVAILABLE
+        ),
+        broker_preserves_client_ref=ref_lookup,
+        negative_client_ref_results_authoritative=ref_lookup,
+    )
     return BrokerCapabilities(
         connector="test",
         account_masked=ACCOUNT_MASKED,
@@ -97,6 +128,7 @@ def capabilities(*, ref_lookup: bool = True) -> BrokerCapabilities:
         supported_order_types=tuple(EquityOrderType),
         supported_market_hours=tuple(MarketHours),
         supported_time_in_force=tuple(TimeInForce),
+        order_coverage=coverage,
     )
 
 
@@ -213,7 +245,9 @@ class StoreFixture(unittest.TestCase):
         self.store.close()
         self.temporary.cleanup()
 
-    def prepare_intent(self, *, unknown: bool = False) -> tuple[ExpiringPlan, OrderIntent]:
+    def prepare_intent(
+        self, *, unknown: bool = False, kind: IntentKind = IntentKind.ENTRY
+    ) -> tuple[ExpiringPlan, OrderIntent]:
         plan = ExpiringPlan(
             plan_id="plan-1",
             account_key=ACCOUNT_KEY,
@@ -243,24 +277,58 @@ class StoreFixture(unittest.TestCase):
             created_at=NOW + timedelta(seconds=2),
         )
         tuple_value = {
+            "account_key": ACCOUNT_KEY,
+            "account_masked": ACCOUNT_MASKED,
             "symbol": "TEST",
             "side": "buy",
+            "order_type": "limit",
             "quantity": 5,
+            "market_hours": "regular_hours",
+            "time_in_force": "gfd",
             "limit_price": "10.00",
+            "stop_price": None,
+            "client_ref_id": None,
         }
+        client_ref = str(uuid4())
+        tuple_value["client_ref_id"] = client_ref
         intent = OrderIntent(
             intent_id="intent-1",
             plan_id=plan.plan_id,
-            reservation_id=reservation.reservation_id,
+            reservation_id=(
+                reservation.reservation_id if kind is IntentKind.ENTRY else None
+            ),
             account_key=ACCOUNT_KEY,
-            kind=IntentKind.ENTRY,
-            client_ref=str(uuid4()),
+            kind=kind,
+            client_ref=client_ref,
             order_tuple=tuple_value,
             tuple_hash=object_hash(tuple_value),
             created_at=NOW + timedelta(seconds=3),
             acknowledgement_deadline_at=NOW + timedelta(seconds=13),
         )
-        self.store.prepare_submission(plan=plan, reservation=reservation, intent=intent)
+        if kind is IntentKind.ENTRY:
+            self.store.prepare_submission(
+                plan=plan, reservation=reservation, intent=intent
+            )
+        else:
+            seed_tuple = dict(tuple_value)
+            seed_ref = str(uuid4())
+            seed_tuple["client_ref_id"] = seed_ref
+            seed = OrderIntent(
+                intent_id="seed-entry-intent",
+                plan_id=plan.plan_id,
+                reservation_id=reservation.reservation_id,
+                account_key=ACCOUNT_KEY,
+                kind=IntentKind.ENTRY,
+                client_ref=seed_ref,
+                order_tuple=seed_tuple,
+                tuple_hash=object_hash(seed_tuple),
+                created_at=NOW + timedelta(seconds=3),
+                acknowledgement_deadline_at=NOW + timedelta(seconds=13),
+            )
+            self.store.prepare_submission(
+                plan=plan, reservation=reservation, intent=seed
+            )
+            self.store.prepare_safety_intent(intent)
         self.store.transition_intent(
             intent.intent_id,
             IntentState.SUBMITTING,
@@ -276,6 +344,29 @@ class StoreFixture(unittest.TestCase):
 
 
 class ReconciliationTests(StoreFixture):
+    def test_recovered_client_ref_must_match_entire_durable_order_tuple(self) -> None:
+        _, intent = self.prepare_intent(unknown=True)
+        mismatched = replace(
+            order_snapshot(
+                order_id="wrong-symbol",
+                state=BrokerOrderState.CONFIRMED,
+                client_ref=intent.client_ref,
+                updated_at=NOW + timedelta(seconds=6),
+            ),
+            symbol="OTHER",
+        )
+        with self.assertRaisesRegex(
+            ReconciliationConflict, "different immutable order tuple"
+        ):
+            resolve_unknown_intent(
+                self.store,
+                intent_id=intent.intent_id,
+                snapshot=account_snapshot(
+                    received_at=NOW + timedelta(seconds=6), orders=(mismatched,)
+                ),
+                capabilities=capabilities(),
+            )
+
     def test_account_risk_evidence_defaults_fail_closed_but_fake_is_explicit(self) -> None:
         incomplete = account_snapshot(risk_complete=False)
         self.assertFalse(incomplete.daily_realized_pnl_ready)
@@ -430,6 +521,43 @@ class ReconciliationTests(StoreFixture):
         self.assertEqual(resolved.state, UnknownResolutionState.CONFIRMED_ABSENT)
         self.assertFalse(resolved.retry_same_intent_allowed)
 
+    def test_unknown_cancel_is_not_resolved_by_equity_client_ref_absence(self) -> None:
+        _, intent = self.prepare_intent(unknown=True, kind=IntentKind.CANCEL)
+        resolution = resolve_unknown_intent(
+            self.store,
+            intent_id=intent.intent_id,
+            snapshot=account_snapshot(received_at=NOW + timedelta(seconds=6)),
+            capabilities=capabilities(),
+            confirmed_absent_client_refs=(intent.client_ref,),
+        )
+        self.assertEqual(resolution.state, UnknownResolutionState.UNRESOLVED)
+        self.assertIn("exact target-order evidence", resolution.reason)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.UNKNOWN.value,
+        )
+
+    def test_slow_snapshot_receipt_does_not_freshen_unknown_resolution(self) -> None:
+        _, intent = self.prepare_intent(unknown=True)
+        snapshot = replace(
+            account_snapshot(received_at=NOW + timedelta(seconds=10)),
+            observed_at=NOW + timedelta(seconds=4),
+        )
+        resolution = resolve_unknown_intent(
+            self.store,
+            intent_id=intent.intent_id,
+            snapshot=snapshot,
+            capabilities=capabilities(),
+            confirmed_absent_client_refs=(intent.client_ref,),
+        )
+        self.assertEqual(
+            resolution.state, UnknownResolutionState.WAITING_FOR_NEWER_EVIDENCE
+        )
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.UNKNOWN.value,
+        )
+
     def test_continuous_reconciler_blocks_out_of_order_snapshot(self) -> None:
         reconciler = AuthoritativeReconciler(
             account_masked=ACCOUNT_MASKED, account_key=ACCOUNT_KEY
@@ -476,7 +604,7 @@ class ReconciliationTests(StoreFixture):
             IntentState.UNKNOWN.value,
         )
 
-    def test_startup_blocks_a_submitting_intent_until_broker_evidence_arrives(self) -> None:
+    def test_startup_durably_recovers_crash_left_submitting_then_requires_newer_negative(self) -> None:
         _, intent = self.prepare_intent(unknown=False)
         reconciler = AuthoritativeReconciler(
             account_masked=ACCOUNT_MASKED, account_key=ACCOUNT_KEY
@@ -487,10 +615,72 @@ class ReconciliationTests(StoreFixture):
             capabilities=capabilities(),
             now=NOW + timedelta(seconds=6),
             phase=ReconciliationPhase.STARTUP,
+            confirmed_absent_client_refs=(intent.client_ref,),
         )
         self.assertFalse(report.entries_allowed)
         self.assertIn(intent.intent_id, report.unknown_intent_ids)
         self.assertIn("UNKNOWN_LOCAL_INTENT", report.blockers)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.UNKNOWN.value,
+        )
+        self.assertEqual(
+            report.unknown_resolutions[0].state,
+            UnknownResolutionState.WAITING_FOR_NEWER_EVIDENCE,
+        )
+
+        resolved = reconciler.reconcile_snapshot(
+            self.store,
+            snapshot=account_snapshot(received_at=NOW + timedelta(seconds=7)),
+            capabilities=capabilities(),
+            now=NOW + timedelta(seconds=7),
+            confirmed_absent_client_refs=(intent.client_ref,),
+        )
+        self.assertTrue(resolved.entries_allowed)
+        self.assertEqual(resolved.unknown_intent_ids, ())
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.RECONCILED.value,
+        )
+
+    def test_submitting_is_not_reclassified_by_incomplete_or_nonnewer_negative(self) -> None:
+        _, intent = self.prepare_intent(unknown=False)
+        reconciler = AuthoritativeReconciler(
+            account_masked=ACCOUNT_MASKED, account_key=ACCOUNT_KEY
+        )
+        incomplete = replace(
+            account_snapshot(received_at=NOW + timedelta(seconds=6)),
+            standard_equity_orders_complete=False,
+        )
+        report = reconciler.reconcile_snapshot(
+            self.store,
+            snapshot=incomplete,
+            capabilities=capabilities(),
+            now=NOW + timedelta(seconds=6),
+            confirmed_absent_client_refs=(intent.client_ref,),
+        )
+        self.assertIn("STANDARD_ORDERS_INCOMPLETE", report.blockers)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.SUBMITTING.value,
+        )
+
+        fresh_reconciler = AuthoritativeReconciler(
+            account_masked=ACCOUNT_MASKED, account_key=ACCOUNT_KEY
+        )
+        same_boundary = account_snapshot(received_at=NOW + timedelta(seconds=4))
+        report = fresh_reconciler.reconcile_snapshot(
+            self.store,
+            snapshot=same_boundary,
+            capabilities=capabilities(),
+            now=NOW + timedelta(seconds=4),
+            confirmed_absent_client_refs=(intent.client_ref,),
+        )
+        self.assertIn("UNKNOWN_LOCAL_INTENT", report.blockers)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.SUBMITTING.value,
+        )
 
 
 class FillProtectionTests(StoreFixture):
@@ -662,6 +852,7 @@ class ExitLifecycleTests(unittest.TestCase):
             operation="cancel_equity_order",
             status=OperationStatus.PENDING_CANCEL,
             observed_at=NOW,
+            received_at=NOW,
             accepted=True,
             message="accepted",
             order=pending,
@@ -693,6 +884,7 @@ class ExitLifecycleTests(unittest.TestCase):
             operation="cancel_equity_order",
             status=OperationStatus.REJECTED,
             observed_at=NOW + timedelta(seconds=1),
+            received_at=NOW + timedelta(seconds=1),
             accepted=False,
             message="fill race",
             order=raced,
@@ -713,6 +905,7 @@ class ExitLifecycleTests(unittest.TestCase):
                 operation="cancel_equity_order",
                 status=OperationStatus.CANCELLED,
                 observed_at=NOW + timedelta(seconds=2),
+                received_at=NOW + timedelta(seconds=2),
                 accepted=True,
                 message="settled",
                 order=terminal,

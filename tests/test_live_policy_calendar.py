@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -24,6 +26,28 @@ class PolicyCalendarTests(unittest.TestCase):
         self.assertIn("PER_MUTATION_CONFIRMATION_STILL_REQUIRED", self.policy.activation_blockers)
         with self.assertRaisesRegex(ValueError, "LIVE_ENTRIES_DISABLED"):
             self.policy.require_activation_ready()
+
+    def test_execution_authority_booleans_cannot_be_missing_or_null(self) -> None:
+        for field in (
+            "supported_unattended_mutation",
+            "per_mutation_user_confirmation_required",
+            "local_mutation_interlock_enabled",
+        ):
+            for missing in (True, False):
+                with self.subTest(field=field, missing=missing):
+                    config = copy.deepcopy(self.policy.config)
+                    if missing:
+                        config["execution"].pop(field)
+                    else:
+                        config["execution"][field] = None
+                    candidate = replace(self.policy, config=config)
+                    with self.assertRaisesRegex(ValueError, "must be boolean"):
+                        candidate.validate()
+                    if field == "per_mutation_user_confirmation_required":
+                        self.assertIn(
+                            "PER_MUTATION_CONFIRMATION_STILL_REQUIRED",
+                            candidate.activation_blockers,
+                        )
 
     def test_account_mismatch_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "account"):
@@ -68,6 +92,28 @@ class PolicyCalendarTests(unittest.TestCase):
                 order_type="stop_market",
                 time_in_force="gtc",
             )
+
+    def test_signed_gmail_route_allows_only_non_secret_provenance(self) -> None:
+        config = copy.deepcopy(self.policy.config)
+        config["notifications"] = {
+            "durable_outbox_required": True,
+            "delivery_sink": "gmail_api",
+            "intended_destination": "owner-approved-existing-gmail-route",
+            "destination_bridge_configured": True,
+            "suppress_scan_chatter": True,
+            "redact_account_to_last4": True,
+            "provider": "gmail",
+            "destination_fingerprint": "f" * 64,
+            "route_version": "owner-signed-v1",
+            "required_assurance": "OWNER_CONFIRMED",
+            "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+            "authorization_binding_id": "d" * 64,
+            "timeout_seconds": 5,
+        }
+        replace(self.policy, config=config).validate()
+        config["notifications"]["destination"] = "must-not-live-in-policy@example.invalid"
+        with self.assertRaisesRegex(ValueError, "cannot be stored"):
+            replace(self.policy, config=config).validate()
 
     def test_holiday_early_close_and_dst_are_explicit(self) -> None:
         calendar = ExchangeCalendar.from_json(ROOT / "config/nyse_calendar_2026.json")

@@ -47,7 +47,11 @@ from titan_brain.live.reconcile import (
     AuthoritativeReconciler,
     ReconciliationPhase,
 )
-from titan_brain.live.service import FullLiveService, build_local_outbox
+from titan_brain.live.service import (
+    FullLiveService,
+    build_enqueue_only_outbox,
+    build_local_outbox,
+)
 from titan_brain.live.state import LiveStateStore
 from titan_brain.live.writer_lock import AccountWriterLock, WriterLockBusy
 
@@ -171,10 +175,24 @@ def synthetic_enabled_policy() -> PolicyBundle:
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
-    config["notifications"]["destination_bridge_configured"] = True
+    config["notifications"].update(
+        {
+            "delivery_sink": "gmail_api",
+            "destination_bridge_configured": True,
+            "provider": "gmail",
+            "destination_fingerprint": "f" * 64,
+            "route_version": "synthetic-test-v1",
+            "required_assurance": "PROVIDER_ACCEPTED",
+            "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+            "authorization_binding_id": "d" * 64,
+            "timeout_seconds": 5,
+        }
+    )
     config["discovery"].update(
         {
             "pipeline_configured": True,
+            "provider_composition_id": "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "provider_binding_id": "e" * 64,
             "instrument_evidence_provider": "synthetic_test_only",
             "quality_revalidation_provider": "synthetic_test_only",
             "minimum_setup_score": 70,
@@ -519,7 +537,7 @@ class FullLiveFailureMatrixTests(unittest.TestCase):
             outbox = store.row("notification_outbox", "message_id", message_id)
             self.assertEqual(outbox["state"], "PENDING")
             self.assertEqual(outbox["attempt_count"], 1)
-            self.assertIn("synthetic fsync failure", outbox["last_error"])
+            self.assertEqual(outbox["last_error"], "NOTIFICATION_PROVIDER_OSERROR")
             self.assertIsNone(outbox["delivered_at"])
 
     def test_notification_failure_retries_after_backoff_and_dedupes_delivery(self) -> None:
@@ -583,6 +601,34 @@ class FullLiveFailureMatrixTests(unittest.TestCase):
             self.assertEqual(
                 [call[0] for call in broker.calls], [FakeBrokerClient.SNAPSHOT]
             )
+
+    def test_active_service_blocks_discovery_without_independent_worker_route(self) -> None:
+        now = datetime(2026, 9, 8, 14, 0, tzinfo=UTC)
+        with LiveStateStore(self.temp / "notification-health.sqlite3") as store:
+            arm_runtime(store, now)
+            actions = SyntheticLifecycleActions(store=store)
+            service = FullLiveService(
+                policy=synthetic_enabled_policy(),
+                state=store,
+                broker=FakeBrokerClient(
+                    initial_snapshot=snapshot_at(now), clock=lambda: now
+                ),
+                notifications=build_enqueue_only_outbox(store, ACCOUNT_KEY),
+                actions=actions,
+                clock=lambda: now,
+            )
+            result = service.run_once()
+            self.assertIn(
+                "NOTIFICATION_WORKER_ROUTE_UNCONFIGURED",
+                result.reconciliation_blockers,
+            )
+            self.assertIn(
+                "BLOCK_DISCOVERY_NOTIFICATION_WORKER_UNHEALTHY",
+                result.actions,
+            )
+            self.assertFalse(result.entries_considered)
+            self.assertNotIn("discover", actions.calls)
+            self.assertEqual(result.mode_after, "PAUSE_NEW_ENTRIES")
 
     def test_market_halt_is_a_hard_entry_gate(self) -> None:
         now = datetime(2026, 9, 8, 10, 1, tzinfo=ET)

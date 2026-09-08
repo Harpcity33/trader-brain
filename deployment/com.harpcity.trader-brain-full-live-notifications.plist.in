@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.harpcity.trader-brain-full-live</string>
+  <string>com.harpcity.trader-brain-full-live-notifications</string>
   <key>Disabled</key>
   <true/>
   <key>KeepAlive</key>
@@ -22,7 +22,7 @@
     <string>-S</string>
     <string>-B</string>
     <string>__LAUNCHER__</string>
-    <string>serve</string>
+    <string>notification-worker</string>
     <string>--install-root</string>
     <string>__INSTALL_ROOT__</string>
   </array>

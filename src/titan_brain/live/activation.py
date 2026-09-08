@@ -161,6 +161,16 @@ class ReadinessEvidence:
     quote_age_seconds: float | None
     completed_bar_age_seconds: float | None
     probe_errors: tuple[str, ...]
+    # Added as optional fields so a readiness record produced before the
+    # clock-safe probe existed retains its exact canonical payload/hash.  New
+    # machine probes always populate all four fields together.
+    probe_started_at: datetime | None = None
+    probe_completed_at: datetime | None = None
+    probe_elapsed_monotonic_seconds: float | None = None
+    probe_clock_stable: bool | None = None
+    broker_account_binding_fingerprint: str | None = None
+    broker_authorization_binding_id: str | None = None
+    component_provenance_hash: str | None = None
     schema_version: str = READINESS_SCHEMA
 
     def __post_init__(self) -> None:
@@ -169,6 +179,8 @@ class ReadinessEvidence:
             "broker_snapshot_received_at",
             "durable_snapshot_received_at",
             "notification_delivered_at",
+            "probe_started_at",
+            "probe_completed_at",
         ):
             object.__setattr__(self, field, _optional_aware(getattr(self, field), field))
         if self.schema_version != READINESS_SCHEMA:
@@ -230,8 +242,42 @@ class ReadinessEvidence:
             "durable_snapshot_age_seconds",
             "quote_age_seconds",
             "completed_bar_age_seconds",
+            "probe_elapsed_monotonic_seconds",
         ):
             object.__setattr__(self, field, _optional_age(getattr(self, field), field))
+        timing = (
+            self.probe_started_at,
+            self.probe_completed_at,
+            self.probe_elapsed_monotonic_seconds,
+            self.probe_clock_stable,
+        )
+        if any(value is not None for value in timing) and any(
+            value is None for value in timing
+        ):
+            raise ValueError("readiness probe timing fields must be populated together")
+        if self.probe_clock_stable is not None:
+            _strict_bool(self.probe_clock_stable, "probe_clock_stable")
+            if self.probe_elapsed_monotonic_seconds is None or self.probe_elapsed_monotonic_seconds < 0:
+                raise ValueError("probe_elapsed_monotonic_seconds must be nonnegative")
+            if self.probe_completed_at != self.collected_at:
+                raise ValueError("collected_at must equal probe_completed_at")
+        production_bindings = (
+            self.broker_account_binding_fingerprint,
+            self.broker_authorization_binding_id,
+            self.component_provenance_hash,
+        )
+        if any(value is not None for value in production_bindings) and any(
+            value is None for value in production_bindings
+        ):
+            raise ValueError("production readiness bindings must be populated together")
+        for field in (
+            "broker_account_binding_fingerprint",
+            "broker_authorization_binding_id",
+            "component_provenance_hash",
+        ):
+            value = getattr(self, field)
+            if value is not None and not _SHA256.fullmatch(str(value)):
+                raise ValueError(f"{field} must be lowercase SHA-256 or null")
         for field in (
             "broker_connector",
             "legacy_heartbeat_id",
@@ -285,6 +331,18 @@ class ReadinessEvidence:
             raise ValueError("readiness evidence identity does not bind the installed runtime")
         if self.broker_account_last4 not in (None, policy.account_last4):
             raise ValueError("readiness evidence crosses broker accounts")
+        execution = policy.config["execution"]
+        if execution.get("broker_adapter") == "supported_production_transport":
+            if (
+                self.broker_account_binding_fingerprint
+                != execution.get("production_account_binding_fingerprint")
+                or self.broker_authorization_binding_id
+                != execution.get("production_authorization_binding_id")
+                or self.component_provenance_hash is None
+            ):
+                raise ValueError(
+                    "readiness production account/authorization provenance differs"
+                )
 
     def blockers(
         self, policy: PolicyBundle, *, now: datetime | None = None
@@ -350,6 +408,18 @@ class ReadinessEvidence:
             failures.append("ROBINHOOD_TRADABILITY_UNAVAILABLE")
         if not self.notification_destination_configured or not self.notification_tested:
             failures.append("NOTIFICATION_DESTINATION_UNVERIFIED")
+        if any(
+            value is None
+            for value in (
+                self.probe_started_at,
+                self.probe_completed_at,
+                self.probe_elapsed_monotonic_seconds,
+                self.probe_clock_stable,
+            )
+        ):
+            failures.append("READINESS_CLOCK_EVIDENCE_MISSING")
+        elif self.probe_clock_stable is not True:
+            failures.append("READINESS_CLOCK_UNSTABLE")
         max_broker_age = int(policy.config["evidence"]["broker_snapshot_max_age_seconds"])
         for value, maximum, failure in (
             (self.broker_snapshot_age_seconds, max_broker_age, "BROKER_SNAPSHOT_STALE"),
@@ -373,10 +443,22 @@ class ReadinessEvidence:
                 failures.append(failure)
         if self.probe_errors:
             failures.append("READINESS_PROBE_ERROR")
+        if (
+            self.daemon_accessible_supported_client
+            and any(
+                value is None
+                for value in (
+                    self.broker_account_binding_fingerprint,
+                    self.broker_authorization_binding_id,
+                    self.component_provenance_hash,
+                )
+            )
+        ):
+            failures.append("PRODUCTION_COMPONENT_PROVENANCE_MISSING")
         return tuple(dict.fromkeys(failures))
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "evidence_source": self.evidence_source,
             "collected_at": self.collected_at.isoformat(),
@@ -450,17 +532,43 @@ class ReadinessEvidence:
             "completed_bar_age_seconds": self.completed_bar_age_seconds,
             "probe_errors": list(self.probe_errors),
         }
+        if self.probe_started_at is not None:
+            payload.update(
+                {
+                    "probe_started_at": self.probe_started_at.isoformat(),
+                    "probe_completed_at": self.probe_completed_at.isoformat(),
+                    "probe_elapsed_monotonic_seconds": self.probe_elapsed_monotonic_seconds,
+                    "probe_clock_stable": self.probe_clock_stable,
+                }
+            )
+        if self.broker_account_binding_fingerprint is not None:
+            payload.update(
+                {
+                    "broker_account_binding_fingerprint": self.broker_account_binding_fingerprint,
+                    "broker_authorization_binding_id": self.broker_authorization_binding_id,
+                    "component_provenance_hash": self.component_provenance_hash,
+                }
+            )
+        return payload
 
     @classmethod
     def from_payload(cls, raw: Mapping[str, Any]) -> "ReadinessEvidence":
         if not isinstance(raw, Mapping):
             raise ValueError("readiness evidence must be an object")
-        expected = set(cls._payload_fields())
-        if set(raw) != expected:
+        required = set(cls._payload_fields())
+        optional = set(_OPTIONAL_READINESS_FIELDS) | set(_OPTIONAL_BINDING_FIELDS)
+        if not required.issubset(raw) or not set(raw).issubset(required | optional):
             raise ValueError(
                 "readiness evidence fields differ; "
-                f"missing={sorted(expected - set(raw))}, extra={sorted(set(raw) - expected)}"
+                f"missing={sorted(required - set(raw))}, "
+                f"extra={sorted(set(raw) - required - optional)}"
             )
+        supplied_optional = set(_OPTIONAL_READINESS_FIELDS).intersection(raw)
+        if supplied_optional and supplied_optional != set(_OPTIONAL_READINESS_FIELDS):
+            raise ValueError("readiness probe timing fields must be supplied together")
+        supplied_bindings = set(_OPTIONAL_BINDING_FIELDS).intersection(raw)
+        if supplied_bindings and supplied_bindings != set(_OPTIONAL_BINDING_FIELDS):
+            raise ValueError("readiness production binding fields must be supplied together")
         return cls(
             schema_version=_required_text(raw["schema_version"], "schema_version"),
             evidence_source=_required_text(raw["evidence_source"], "evidence_source"),
@@ -522,6 +630,29 @@ class ReadinessEvidence:
             quote_age_seconds=_optional_age(raw["quote_age_seconds"], "quote_age_seconds"),
             completed_bar_age_seconds=_optional_age(raw["completed_bar_age_seconds"], "completed_bar_age_seconds"),
             probe_errors=_string_tuple(raw["probe_errors"], "probe_errors"),
+            probe_started_at=_optional_time(raw.get("probe_started_at"), "probe_started_at"),
+            probe_completed_at=_optional_time(raw.get("probe_completed_at"), "probe_completed_at"),
+            probe_elapsed_monotonic_seconds=_optional_age(
+                raw.get("probe_elapsed_monotonic_seconds"),
+                "probe_elapsed_monotonic_seconds",
+            ),
+            probe_clock_stable=(
+                None
+                if "probe_clock_stable" not in raw
+                else _strict_bool(raw["probe_clock_stable"], "probe_clock_stable")
+            ),
+            broker_account_binding_fingerprint=_optional_text(
+                raw.get("broker_account_binding_fingerprint"),
+                "broker_account_binding_fingerprint",
+            ),
+            broker_authorization_binding_id=_optional_text(
+                raw.get("broker_authorization_binding_id"),
+                "broker_authorization_binding_id",
+            ),
+            component_provenance_hash=_optional_text(
+                raw.get("component_provenance_hash"),
+                "component_provenance_hash",
+            ),
         )
 
     @classmethod
@@ -554,6 +685,17 @@ _READINESS_FIELDS = (
     "notification_tested", "broker_snapshot_age_seconds",
     "durable_snapshot_age_seconds", "quote_age_seconds", "completed_bar_age_seconds",
     "probe_errors",
+)
+_OPTIONAL_READINESS_FIELDS = (
+    "probe_started_at",
+    "probe_completed_at",
+    "probe_elapsed_monotonic_seconds",
+    "probe_clock_stable",
+)
+_OPTIONAL_BINDING_FIELDS = (
+    "broker_account_binding_fingerprint",
+    "broker_authorization_binding_id",
+    "component_provenance_hash",
 )
 @dataclass(frozen=True)
 class ActivationRecord:
@@ -704,15 +846,20 @@ class ActivationRecord:
             policy=policy, release_manifest_hash=release_manifest_hash,
             database_schema_version=database_schema_version,
         )
-        policy.require_activation_ready()
-        bound_blockers = self.readiness_evidence.blockers(policy, now=self.created_at)
-        if bound_blockers:
-            raise ValueError("ACTIVATION_BLOCKED: " + ",".join(bound_blockers))
         if current_readiness is not None:
             current_readiness.validate_bindings(
                 policy=policy, release_manifest_hash=release_manifest_hash,
                 database_schema_version=database_schema_version,
             )
+            prepared_profile = self.readiness_evidence.component_provenance_hash
+            current_profile = current_readiness.component_provenance_hash
+            if prepared_profile != current_profile:
+                raise ValueError("ACTIVATION_CURRENT_RUNTIME_PROFILE_CHANGED")
+        policy.require_activation_ready()
+        bound_blockers = self.readiness_evidence.blockers(policy, now=self.created_at)
+        if bound_blockers:
+            raise ValueError("ACTIVATION_BLOCKED: " + ",".join(bound_blockers))
+        if current_readiness is not None:
             current_blockers = current_readiness.blockers(policy, now=current)
             if current_blockers:
                 raise ValueError("ACTIVATION_CURRENT_READINESS_BLOCKED: " + ",".join(current_blockers))

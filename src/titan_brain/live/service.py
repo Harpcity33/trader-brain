@@ -10,7 +10,7 @@ degrading into a partial-autonomy claim.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
@@ -39,7 +39,13 @@ from .models import (
     PositionRecord,
     SessionLatch as DurableSessionLatch,
 )
-from .notifications import LiveStateOutboxAdapter, OutboxDispatcher
+from .notification_worker import notification_worker_health
+from .notifications import (
+    EnqueueOnlyOutbox,
+    LiveStateOutboxAdapter,
+    NotificationRoute,
+    OutboxDispatcher,
+)
 from .policy import PolicyBundle
 from .protection import (
     ProtectionDecision,
@@ -299,7 +305,8 @@ class FullLiveService:
         policy: PolicyBundle,
         state: LiveStateStore,
         broker: BrokerClient,
-        notifications: OutboxDispatcher,
+        notifications: OutboxDispatcher | EnqueueOnlyOutbox,
+        notification_route: NotificationRoute | None = None,
         actions: LifecycleActions | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -307,6 +314,7 @@ class FullLiveService:
         self.state = state
         self.broker = broker
         self.notifications = notifications
+        self.notification_route = notification_route
         self.actions = actions or DisabledLifecycleActions()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.account_key = str(policy.config["account"]["masked_identifier"])
@@ -321,7 +329,8 @@ class FullLiveService:
         self._startup = True
 
     def run_once(self) -> TickResult:
-        now = self._now()
+        tick_started_at = self._now()
+        now = tick_started_at
         runtime = self.state.runtime_status()
         if runtime is None:
             raise RuntimeError("runtime state must be initialized before service start")
@@ -332,9 +341,21 @@ class FullLiveService:
         try:
             snapshot = self.broker.get_account_snapshot(self.account_masked)
             self.policy.require_account(snapshot.account_masked, snapshot.account_type)
-            confirmed_absent = self._lookup_unknown_client_refs(
-                snapshot=snapshot, now=now
-            )
+            lookup = self._lookup_unknown_client_refs(snapshot=snapshot)
+            if lookup is not None:
+                snapshot = self._merge_client_ref_lookup(snapshot, lookup)
+                confirmed_absent = frozenset(
+                    lookup.confirmed_absent_client_refs
+                )
+            else:
+                confirmed_absent = frozenset()
+            # Account and exact-ref reads can span seconds.  All freshness,
+            # calendar, risk, and later market checks use a clock sample taken
+            # after those reads, never the tick-start timestamp.
+            now = self._now()
+            if now < tick_started_at:
+                raise RuntimeError("SERVICE_CLOCK_REGRESSED_DURING_ACCOUNT_READ")
+            lane = self.policy.calendar.lane(now)
             report = self.reconciler.reconcile_snapshot(
                 self.state,
                 snapshot=snapshot,
@@ -360,9 +381,13 @@ class FullLiveService:
             )
             self._startup = False
         except Exception as exc:
+            post_failure = self._now()
+            if post_failure >= tick_started_at:
+                now = post_failure
+                lane = self.policy.calendar.lane(now)
             category = (
                 "AUTHENTICATION_INCIDENT"
-                if "auth" in f"{type(exc).__name__}:{exc}".lower()
+                if "auth" in type(exc).__name__.lower()
                 else "RECONCILIATION_INCIDENT"
             )
             self._open_incident(category, exc, now)
@@ -382,7 +407,7 @@ class FullLiveService:
             )
             if mode_before not in {EngineMode.PAUSED, EngineMode.STOPPED}:
                 self._transition(EngineMode.INCIDENT, now, category)
-            sent, failed = self.notifications.drain(now)
+            sent, failed = self._deliver_notifications(now)
             mode_after = str(self.state.runtime_status()["mode"])
             return TickResult(
                 observed_at=now,
@@ -393,11 +418,13 @@ class FullLiveService:
                 reconciliation_blockers=(category,),
                 protection=(),
                 closeout=(),
-                actions=tuple(actions + ["BLOCK_DISCOVERY", "FLUSH_OUTBOX"]),
+                actions=tuple(
+                    actions + ["BLOCK_DISCOVERY", self._notification_action()]
+                ),
                 entries_considered=False,
                 notification_sent=sent,
                 notification_failed=failed,
-                error=f"{type(exc).__name__}: {exc}",
+                error=type(exc).__name__,
             )
 
         blockers = list(report.blockers)
@@ -444,8 +471,8 @@ class FullLiveService:
                     now,
                     "non-ingestible broker snapshot quarantined",
                 )
-            actions.append("FLUSH_OUTBOX")
-            sent, failed = self.notifications.drain(now)
+            actions.append(self._notification_action())
+            sent, failed = self._deliver_notifications(now)
             return TickResult(
                 observed_at=now,
                 mode_before=mode_before.value,
@@ -606,6 +633,21 @@ class FullLiveService:
 
         entries_considered = False
         mode_current = EngineMode(str(self.state.runtime_status()["mode"]))
+        independent_notification_blockers = self._notification_entry_blockers(now)
+        if (
+            authority_enabled
+            and mode_current in {EngineMode.ACTIVE, EngineMode.RECONCILING}
+            and independent_notification_blockers
+        ):
+            blockers.extend(independent_notification_blockers)
+            actions.append("BLOCK_DISCOVERY_NOTIFICATION_WORKER_UNHEALTHY")
+            self._transition(
+                EngineMode.PAUSE_NEW_ENTRIES,
+                now,
+                independent_notification_blockers[0],
+            )
+            mode_current = EngineMode(str(self.state.runtime_status()["mode"]))
+        activated_this_tick = False
         if (
             mode_current is EngineMode.RECONCILING
             and authority_enabled
@@ -615,6 +657,9 @@ class FullLiveService:
         ):
             self._transition(EngineMode.ACTIVE, now, "fresh startup reconciliation complete")
             mode_current = EngineMode.ACTIVE
+            # ACTIVE emits a durable RECOVERED event. The independent worker
+            # must deliver it before any later tick may consider an entry.
+            activated_this_tick = isinstance(self.notifications, EnqueueOnlyOutbox)
         if (
             mode_current is EngineMode.ACTIVE
             and authority_enabled
@@ -622,6 +667,7 @@ class FullLiveService:
             and not blockers
             and report.entries_allowed
             and protection_safe
+            and not activated_this_tick
         ):
             actions.append("DISCOVER_AND_EXECUTE")
             try:
@@ -646,10 +692,10 @@ class FullLiveService:
         if lane in {"flat_deadline", "closed"}:
             self._notify_end_of_day_if_flat(durable_snapshot, now)
 
-        # Drain after every broker-side consequence so confirmed events and
-        # deterministic incident alerts do not wait for a later polling tick.
-        actions.append("FLUSH_OUTBOX")
-        sent, failed = self.notifications.drain(now)
+        # Hand off after every broker-side consequence. Production only
+        # enqueues; an independently supervised worker owns provider delivery.
+        actions.append(self._notification_action())
+        sent, failed = self._deliver_notifications(now)
 
         return TickResult(
             observed_at=now,
@@ -667,26 +713,28 @@ class FullLiveService:
         )
 
     def _lookup_unknown_client_refs(
-        self, *, snapshot: AccountSnapshot, now: datetime
-    ) -> frozenset[str]:
-        """Obtain explicit negative evidence; never infer absence from a list."""
+        self, *, snapshot: AccountSnapshot
+    ) -> ClientRefLookupResult | None:
+        """Obtain exact positive and negative evidence for ambiguous refs."""
 
         if not self.broker.capabilities.supports_ref_id_lookup:
-            return frozenset()
+            return None
         rows = self.state.rows(
             "SELECT client_ref FROM order_intents "
-            "WHERE account_key=? AND state='UNKNOWN' ORDER BY client_ref",
+            "WHERE account_key=? AND state IN ('SUBMITTING','UNKNOWN') "
+            "AND kind IN ('ENTRY','PROTECTION','EXIT') ORDER BY client_ref",
             (self.account_key,),
         )
         requested = tuple(str(row["client_ref"]) for row in rows)
         if not requested:
-            return frozenset()
+            return None
         result = self.broker.lookup_equity_orders_by_client_ref(
             self.account_masked, requested
         )
         if not isinstance(result, ClientRefLookupResult):
             raise ValueError("broker client-ref lookup was not normalized")
-        age = (now - result.observed_at).total_seconds()
+        observed_now = self._now()
+        age = (observed_now - result.observed_at).total_seconds()
         maximum = int(
             self.policy.config["evidence"]["broker_snapshot_max_age_seconds"]
         )
@@ -696,12 +744,139 @@ class FullLiveService:
             or result.complete is not True
             or age < -1
             or age > maximum
+            or result.received_at < result.observed_at
+            or result.received_at > observed_now + timedelta(seconds=2)
             or result.observed_at < snapshot.observed_at
         ):
             raise ValueError(
                 "client-ref lookup evidence is incomplete, stale, or mismatched"
             )
-        return frozenset(result.confirmed_absent_client_refs)
+        if any(
+            order.broker_updated_at > result.observed_at + timedelta(seconds=2)
+            for order in result.found_orders
+        ):
+            raise ValueError("client-ref lookup contains future broker facts")
+        return result
+
+    @staticmethod
+    def _merge_client_ref_lookup(
+        snapshot: AccountSnapshot, result: ClientRefLookupResult
+    ) -> AccountSnapshot:
+        """Carry authoritative recovered orders into reconciliation.
+
+        A complete point lookup may include a terminal order outside the
+        account endpoint's normal history window.  Never discard that positive
+        evidence; merge it by immutable broker/client identity while rejecting
+        contradictions or evidence regression.
+        """
+
+        orders = list(snapshot.equity_orders)
+        by_id = {order.broker_order_id: index for index, order in enumerate(orders)}
+        by_ref = {
+            order.client_ref_id: order.broker_order_id
+            for order in orders
+            if order.client_ref_id is not None
+        }
+
+        def identity(order: OrderSnapshot) -> tuple[object, ...]:
+            return (
+                order.account_masked,
+                order.broker_order_id,
+                order.client_ref_id,
+                order.symbol,
+                order.side,
+                order.order_type,
+                order.requested_quantity,
+                order.market_hours,
+                order.time_in_force,
+                order.limit_price,
+                order.stop_price,
+            )
+
+        def mutable_facts(order: OrderSnapshot) -> tuple[object, ...]:
+            return (
+                order.state,
+                order.cumulative_filled_quantity,
+                order.fills,
+            )
+
+        for recovered in result.found_orders:
+            other_id = by_ref.get(recovered.client_ref_id)
+            if other_id is not None and other_id != recovered.broker_order_id:
+                raise ValueError(
+                    "client-ref lookup conflicts with account snapshot order identity"
+                )
+            index = by_id.get(recovered.broker_order_id)
+            if index is None:
+                by_id[recovered.broker_order_id] = len(orders)
+                if recovered.client_ref_id is not None:
+                    by_ref[recovered.client_ref_id] = recovered.broker_order_id
+                orders.append(recovered)
+                continue
+            current = orders[index]
+            if identity(current) != identity(recovered):
+                raise ValueError(
+                    "client-ref lookup changed immutable account-snapshot order facts"
+                )
+            if recovered.broker_updated_at < current.broker_updated_at:
+                continue
+            if (
+                recovered.broker_updated_at == current.broker_updated_at
+                and mutable_facts(recovered) != mutable_facts(current)
+            ):
+                raise ValueError(
+                    "client-ref lookup conflicts at the same broker revision"
+                )
+            if (
+                recovered.cumulative_filled_quantity
+                < current.cumulative_filled_quantity
+            ):
+                raise ValueError("client-ref lookup cumulative fill regressed")
+            orders[index] = recovered
+
+        latest_receipt = max(snapshot.received_at, result.received_at)
+        return replace(
+            snapshot,
+            equity_orders=tuple(orders),
+            received_at=latest_receipt,
+        )
+
+    def _notification_action(self) -> str:
+        if isinstance(self.notifications, EnqueueOnlyOutbox):
+            return "DEFER_OUTBOX_TO_INDEPENDENT_NOTIFICATION_WORKER"
+        return "FLUSH_OUTBOX"
+
+    def _notification_entry_blockers(self, now: datetime) -> tuple[str, ...]:
+        """Return independent-delivery blockers without affecting exits."""
+
+        if not isinstance(self.notifications, EnqueueOnlyOutbox):
+            return ()
+        if self.notification_route is None:
+            return ("NOTIFICATION_WORKER_ROUTE_UNCONFIGURED",)
+        if self.notification_route.provider == "local_jsonl":
+            return ("NOTIFICATION_PROVIDER_DESTINATION_REQUIRED",)
+        try:
+            healthy, errors = notification_worker_health(
+                self.state,
+                account_key=self.account_key,
+                route=self.notification_route,
+                now=now,
+            )
+        except Exception as exc:
+            return (f"NOTIFICATION_WORKER_PROBE_{type(exc).__name__.upper()}",)
+        if healthy:
+            return ()
+        return tuple(
+            "NOTIFICATION_WORKER_" + error.partition(":")[2]
+            if error.startswith("notification_worker:")
+            else "NOTIFICATION_WORKER_PROBE_FAILED"
+            for error in errors
+        )
+
+    def _deliver_notifications(self, now: datetime) -> tuple[int, int]:
+        if isinstance(self.notifications, EnqueueOnlyOutbox):
+            return 0, 0
+        return self.notifications.drain(now)
 
     def _ensure_fill_obligations(self) -> None:
         rows = self.state.rows(
@@ -751,7 +926,7 @@ class FullLiveService:
                 position=positions.get(symbol),
                 orders=snapshot.equity_orders,
                 symbol=symbol,
-                snapshot_received_at=snapshot.received_at,
+                snapshot_received_at=snapshot.observed_at,
             )
             for symbol in sorted(symbols)
         )
@@ -988,7 +1163,7 @@ class FullLiveService:
                 category=category,
                 severity=IncidentSeverity.CRITICAL,
                 opened_at=now,
-                detail={"error_type": type(exc).__name__, "message": str(exc)[:500]},
+                detail={"error_type": type(exc).__name__, "error_code": category},
             )
         )
 
@@ -1001,7 +1176,7 @@ class FullLiveService:
                 "event_id": f"{now.astimezone(NEW_YORK).date()}:{category}",
                 "state": "blocked",
                 "symbol": "ACCOUNT",
-                "reason": f"{type(exc).__name__}: {str(exc)[:200]}",
+                "reason": type(exc).__name__,
             },
             now,
         )
@@ -1167,6 +1342,15 @@ def build_local_outbox(
     )
 
 
+def build_enqueue_only_outbox(
+    store: LiveStateStore,
+    account_key: str,
+) -> EnqueueOnlyOutbox:
+    """Build the service-side publisher without provider delivery authority."""
+
+    return EnqueueOnlyOutbox(LiveStateOutboxAdapter(store, account_key))
+
+
 __all__ = [
     "DisabledLifecycleActions",
     "FullLiveService",
@@ -1174,5 +1358,6 @@ __all__ = [
     "ServiceRunner",
     "TickResult",
     "build_local_outbox",
+    "build_enqueue_only_outbox",
     "persist_account_snapshot",
 ]

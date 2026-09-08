@@ -20,12 +20,17 @@ from .base import (
     BrokerOperationResult,
     BrokerSide,
     BrokerUnknownSubmission,
+    ClientRefRecoverySource,
     ClientRefLookupResult,
     EquityOrderType,
     FillSnapshot,
     FundsSnapshot,
     MarketHours,
     OperationStatus,
+    OrderCoverageContract,
+    OrderFamily,
+    OrderFamilyCoverage,
+    OrderFamilyCoverageStatus,
     OrderRequest,
     OrderSnapshot,
     ReviewReceipt,
@@ -123,6 +128,27 @@ class FakeBrokerClient:
 
     @property
     def capabilities(self) -> BrokerCapabilities:
+        coverage = OrderCoverageContract(
+            contract_version="deterministic-fake-order-coverage-v1",
+            evidence_observed_at=self._now(),
+            families=tuple(
+                OrderFamilyCoverage(
+                    family=family,
+                    status=OrderFamilyCoverageStatus.COMPLETE_GENERAL,
+                    evidence_id=f"fake:{family.value}:all-in-memory",
+                    broker_authoritative=True,
+                    all_pages_consumed=True,
+                    includes_working_orders_across_dates=True,
+                    includes_parent_child_conditional=(
+                        family is OrderFamily.ADVANCED_EQUITY
+                    ),
+                )
+                for family in OrderFamily
+            ),
+            client_ref_recovery_source=ClientRefRecoverySource.DEDICATED_LOOKUP,
+            broker_preserves_client_ref=True,
+            negative_client_ref_results_authoritative=True,
+        )
         return BrokerCapabilities(
             connector="deterministic-fake",
             account_masked=self._snapshot.account_masked,
@@ -149,6 +175,7 @@ class FakeBrokerClient:
             supported_order_types=tuple(EquityOrderType),
             supported_market_hours=tuple(MarketHours),
             supported_time_in_force=tuple(TimeInForce),
+            order_coverage=coverage,
             unsupported_operations=("atomic_bracket", "oco", "replace"),
             notes=("Test-only transport; never a production broker.",),
         )
@@ -189,6 +216,7 @@ class FakeBrokerClient:
             for order in self._orders.values()
             if order.client_ref_id is not None
         }
+        observed_at = self._now()
         return ClientRefLookupResult(
             account_masked=account_masked,
             requested_client_refs=requested,
@@ -196,7 +224,8 @@ class FakeBrokerClient:
             confirmed_absent_client_refs=tuple(
                 ref for ref in requested if ref not in by_ref
             ),
-            observed_at=self._now(),
+            observed_at=observed_at,
+            received_at=observed_at,
             complete=True,
         )
 
@@ -248,6 +277,7 @@ class FakeBrokerClient:
                 operation="place_equity_order",
                 status=OperationStatus.REJECTED,
                 observed_at=self._now(),
+                received_at=self._now(),
                 accepted=False,
                 message="injected broker rejection",
             )
@@ -270,6 +300,7 @@ class FakeBrokerClient:
             operation="place_equity_order",
             status=OperationStatus.ACKNOWLEDGED,
             observed_at=self._now(),
+            received_at=self._now(),
             accepted=True,
             message="fake broker acknowledged submission; this is not fill evidence",
             order=order,
@@ -299,6 +330,7 @@ class FakeBrokerClient:
                 operation="cancel_equity_order",
                 status=OperationStatus.REJECTED,
                 observed_at=self._now(),
+                received_at=self._now(),
                 accepted=False,
                 message="injected cancel rejection",
                 order=self._orders[order_id],
@@ -312,6 +344,7 @@ class FakeBrokerClient:
                 operation="cancel_equity_order",
                 status=OperationStatus.REJECTED,
                 observed_at=self._now(),
+                received_at=self._now(),
                 accepted=False,
                 message="fill won the cancel race",
                 order=order,
@@ -330,6 +363,7 @@ class FakeBrokerClient:
             operation="cancel_equity_order",
             status=OperationStatus.PENDING_CANCEL,
             observed_at=now,
+            received_at=now,
             accepted=True,
             message="cancel request accepted; cancellation is not yet conclusive",
             order=pending,

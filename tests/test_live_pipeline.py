@@ -16,7 +16,12 @@ from titan_brain.live.broker import (
 )
 from titan_brain.live.execution import ExecutionStatus
 from titan_brain.live.latency import LatencyRecorder
-from titan_brain.live.market_data import CompletedBar, MarketDataCache, Quote
+from titan_brain.live.market_data import (
+    CompletedBar,
+    MarketDataCache,
+    MarketSessionState,
+    Quote,
+)
 from titan_brain.live.massive_adapter import PreparedStructure
 from titan_brain.live.models import SessionLatch as DurableSessionLatch
 from titan_brain.live.pipeline import (
@@ -56,10 +61,24 @@ def enabled_policy() -> PolicyBundle:
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
-    config["notifications"]["destination_bridge_configured"] = True
+    config["notifications"].update(
+        {
+            "delivery_sink": "gmail_api",
+            "destination_bridge_configured": True,
+            "provider": "gmail",
+            "destination_fingerprint": "f" * 64,
+            "route_version": "synthetic-test-v1",
+            "required_assurance": "PROVIDER_ACCEPTED",
+            "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+            "authorization_binding_id": "d" * 64,
+            "timeout_seconds": 5,
+        }
+    )
     config["discovery"].update(
         {
             "pipeline_configured": True,
+            "provider_composition_id": "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "provider_binding_id": "e" * 64,
             "instrument_evidence_provider": "synthetic_test_only",
             "quality_revalidation_provider": "synthetic_test_only",
             "minimum_setup_score": 70,
@@ -217,14 +236,15 @@ class MemoryLatencyStore:
 
 
 class StaticPreparedSource:
-    def __init__(self, items):
+    def __init__(self, items, *, health_report=None):
         self.items = tuple(items)
         self.calls = []
         self.tradability_results = []
+        self.health_report = health_report
 
     def health(self, *, now):
         self.calls.append("health")
-        return type("Health", (), {"blockers": ()})()
+        return self.health_report or type("Health", (), {"blockers": ()})()
 
     def prepared_structures(self, *, now, limit):
         self.calls.append("prepared_structures")
@@ -479,6 +499,34 @@ class PipelineTests(unittest.TestCase):
                 )
             finally:
                 store.close()
+
+    def test_lifecycle_executor_reports_closed_market_as_waiting_without_scanning(self) -> None:
+        item = structure()
+        self.record_current_latch()
+        health = type(
+            "Health",
+            (),
+            {
+                "blockers": (),
+                "service_healthy": True,
+                "session_state": MarketSessionState.WAITING_FOR_SESSION,
+                "entry_evidence_ready": False,
+                "entry_blockers": ("WAITING_FOR_SESSION",),
+            },
+        )()
+        source = StaticPreparedSource([item], health_report=health)
+        actions = FullLiveDiscoveryExecutor(
+            source=source,
+            pipeline=self.pipeline([item]),
+        ).execute(snapshot=self.snapshot, now=NOW)
+        self.assertEqual(actions, ("DISCOVERY:WAITING_FOR_SESSION",))
+        self.assertEqual(source.calls, ["health"])
+        self.assertFalse(
+            any(
+                call[0] in {FakeBrokerClient.REVIEW, FakeBrokerClient.PLACE}
+                for call in self.broker.calls
+            )
+        )
 
     def test_lifecycle_executor_short_circuits_checked_in_blocked_config(self) -> None:
         current = PolicyBundle.load(ROOT)

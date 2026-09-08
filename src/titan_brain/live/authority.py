@@ -53,7 +53,7 @@ class MutationAuthority(Protocol):
         target: OrderSnapshot | None = None,
         plan: object | None = None,
         risk_decision: object | None = None,
-    ) -> None: ...
+    ) -> AccountSnapshot | None: ...
 
 
 __all__ = [

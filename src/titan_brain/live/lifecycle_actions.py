@@ -29,6 +29,7 @@ from .broker import (
     EquityOrderType,
     MarketHours,
     OrderRequest,
+    OrderFamily,
     OrderSnapshot,
     PositionSnapshot,
     TimeInForce,
@@ -77,7 +78,7 @@ from .risk_runtime import (
     evaluate_entry,
 )
 from .state import LiveStateStore
-from .writer_lock import AccountWriterLock
+from .writer_lock import AccountWriterLock, account_writer_fingerprint
 
 
 _PLACEHOLDER_CLIENT_REF = str(UUID(int=0))
@@ -118,6 +119,10 @@ class DiscoveryExecutor(Protocol):
         self, *, snapshot: AccountSnapshot, now: datetime
     ) -> tuple[str, ...]: ...
 
+    def final_entry_evidence_failures(
+        self, *, plan: object, request: OrderRequest, now: datetime
+    ) -> tuple[str, ...]: ...
+
 
 @dataclass(frozen=True)
 class LifecycleReconcileResult:
@@ -154,7 +159,7 @@ class ProductionLifecycleActions:
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
         allow_mutations: bool = False,
-    ) -> None:
+    ) -> AccountSnapshot:
         if not isinstance(allow_mutations, bool):
             raise ValueError("allow_mutations must be boolean")
         self.policy = policy
@@ -191,7 +196,7 @@ class ProductionLifecycleActions:
         target: OrderSnapshot | None = None,
         plan: object | None = None,
         risk_decision: object | None = None,
-    ) -> None:
+    ) -> AccountSnapshot:
         """Revalidate live authority at the final broker transport boundary."""
 
         if not isinstance(now, datetime):
@@ -251,9 +256,17 @@ class ProductionLifecycleActions:
                     failures.append("FINAL_BROKER_SNAPSHOT_ACCOUNT_MISMATCH")
                 else:
                     try:
+                        supplied_observed = self._aware(
+                            supplied_snapshot.observed_at,
+                            "supplied mutation snapshot observed_at",
+                        )
                         supplied_received = self._aware(
                             supplied_snapshot.received_at,
                             "supplied mutation snapshot received_at",
+                        )
+                        refreshed_observed = self._aware(
+                            refreshed.observed_at,
+                            "refreshed mutation snapshot observed_at",
                         )
                         refreshed_received = self._aware(
                             refreshed.received_at,
@@ -262,10 +275,38 @@ class ProductionLifecycleActions:
                     except (TypeError, ValueError):
                         failures.append("FINAL_BROKER_SNAPSHOT_TIME_INVALID")
                     else:
+                        if refreshed_observed < supplied_observed:
+                            failures.append(
+                                "FINAL_BROKER_SNAPSHOT_OBSERVED_REGRESSED"
+                            )
                         if refreshed_received < supplied_received:
-                            failures.append("FINAL_BROKER_SNAPSHOT_REGRESSED")
-                        else:
-                            snapshot = refreshed
+                            failures.append(
+                                "FINAL_BROKER_SNAPSHOT_RECEIPT_REGRESSED"
+                            )
+                        if (
+                            normalized_operation is MutationOperation.ENTRY_PLACE
+                            and supplied_snapshot.risk_evidence_as_of is not None
+                            and refreshed.risk_evidence_as_of is not None
+                            and refreshed.risk_evidence_as_of
+                            < supplied_snapshot.risk_evidence_as_of
+                        ):
+                            failures.append("ENTRY_RISK_EVIDENCE_REGRESSED")
+                        # Even a regressed envelope is the latest broker response
+                        # available at this boundary.  Inspect it for additional
+                        # position/order/capacity blockers, while the regression
+                        # above independently makes the mutation fail closed.
+                        snapshot = refreshed
+                try:
+                    refreshed_clock = self._aware(
+                        self._clock(), "post-refresh mutation authority time"
+                    )
+                except (TypeError, ValueError):
+                    failures.append("MUTATION_AUTHORITY_CLOCK_INVALID")
+                else:
+                    if refreshed_clock < current:
+                        failures.append("MUTATION_AUTHORITY_CLOCK_REGRESSED")
+                    else:
+                        current = refreshed_clock
         if not isinstance(snapshot, AccountSnapshot):
             failures.append("MUTATION_AUTHORITY_SNAPSHOT_MISSING")
         else:
@@ -331,6 +372,7 @@ class ProductionLifecycleActions:
                         snapshot=snapshot,
                         plan=plan,
                         risk_decision=risk_decision,
+                        request=request,
                         phase=normalized_phase,
                         now=current,
                     )
@@ -392,8 +434,34 @@ class ProductionLifecycleActions:
                     for order in snapshot.equity_orders
                     if order.broker_order_id == target.broker_order_id
                 )
-                if len(matches) != 1 or matches[0] != target or target.state.terminal:
+                if len(matches) != 1:
                     failures.append("CANCEL_TARGET_NOT_CURRENT_AND_ACTIVE")
+                else:
+                    current_target = matches[0]
+                    immutable_identity = (
+                        current_target.account_masked == target.account_masked,
+                        current_target.symbol == target.symbol,
+                        current_target.side is target.side,
+                        current_target.order_type is target.order_type,
+                        current_target.requested_quantity == target.requested_quantity,
+                        current_target.market_hours is target.market_hours,
+                        current_target.time_in_force is target.time_in_force,
+                        current_target.limit_price == target.limit_price,
+                        current_target.stop_price == target.stop_price,
+                        current_target.client_ref_id == target.client_ref_id,
+                    )
+                    monotone_evidence = (
+                        current_target.broker_updated_at >= target.broker_updated_at
+                        and current_target.received_at >= target.received_at
+                        and current_target.cumulative_filled_quantity
+                        >= target.cumulative_filled_quantity
+                    )
+                    if (
+                        not all(immutable_identity)
+                        or not monotone_evidence
+                        or current_target.state.terminal
+                    ):
+                        failures.append("CANCEL_TARGET_NOT_CURRENT_AND_ACTIVE")
                 try:
                     if self._plan_for_local_order(target.broker_order_id) != normalized_plan:
                         failures.append("CANCEL_PLAN_OWNERSHIP_MISMATCH")
@@ -412,6 +480,8 @@ class ProductionLifecycleActions:
             # reuse the same account snapshot for another logical mutation.
             assert isinstance(snapshot, AccountSnapshot)
             self._mutation_snapshots.add(self._snapshot_key(snapshot))
+        assert isinstance(snapshot, AccountSnapshot)
+        return snapshot
 
     def _entry_risk_failures(
         self,
@@ -419,6 +489,7 @@ class ProductionLifecycleActions:
         snapshot: AccountSnapshot,
         plan: object,
         risk_decision: object,
+        request: OrderRequest,
         phase: MutationPhase,
         now: datetime,
     ) -> tuple[str, ...]:
@@ -431,15 +502,48 @@ class ProductionLifecycleActions:
         already durable, avoiding both double counting and a replay loophole.
         """
 
-        if not isinstance(plan, SignedPlan):
-            return ("ENTRY_SIGNED_PLAN_MISSING",)
-        if not isinstance(risk_decision, RuntimeRiskDecision):
-            return ("ENTRY_RISK_DECISION_MISSING",)
         failures: list[str] = []
+        if phase is MutationPhase.BEFORE_PLACE:
+            final_market_check = getattr(
+                self.discovery, "final_entry_evidence_failures", None
+            )
+            if not callable(final_market_check):
+                failures.append("FINAL_ENTRY_MARKET_RECHECK_UNAVAILABLE")
+            else:
+                try:
+                    market_failures = final_market_check(
+                        plan=plan, request=request, now=now
+                    )
+                    if not isinstance(market_failures, tuple) or any(
+                        not isinstance(item, str) or not item
+                        for item in market_failures
+                    ):
+                        failures.append("FINAL_ENTRY_MARKET_RECHECK_INVALID")
+                    else:
+                        failures.extend(market_failures)
+                except Exception as exc:
+                    failures.append(
+                        f"FINAL_ENTRY_MARKET_RECHECK_FAILED:{type(exc).__name__}"
+                    )
+        if not snapshot.entry_risk_evidence_ready:
+            failures.append("ENTRY_RISK_EVIDENCE_INCOMPLETE")
+        if snapshot.risk_evidence_as_of is not None:
+            risk_age = (now - snapshot.risk_evidence_as_of).total_seconds()
+            max_age = int(
+                self.policy.config["evidence"]["broker_snapshot_max_age_seconds"]
+            )
+            if risk_age < -1:
+                failures.append("ENTRY_RISK_EVIDENCE_FROM_FUTURE")
+            elif risk_age > max_age:
+                failures.append("STALE_ENTRY_RISK_EVIDENCE")
+        if not isinstance(plan, SignedPlan):
+            return tuple(failures + ["ENTRY_SIGNED_PLAN_MISSING"])
+        if not isinstance(risk_decision, RuntimeRiskDecision):
+            return tuple(failures + ["ENTRY_RISK_DECISION_MISSING"])
         try:
             plan.validate(self.policy, now)
         except (TypeError, ValueError) as exc:
-            failures.append(f"ENTRY_SIGNED_PLAN_INVALID:{exc}")
+            failures.append(f"ENTRY_SIGNED_PLAN_INVALID:{type(exc).__name__}")
         zone_date = now.astimezone(NEW_YORK).date()
         latch_rows = self.state.rows(
             "SELECT * FROM session_latches WHERE account_key=? AND trading_date=?",
@@ -479,7 +583,10 @@ class ProductionLifecycleActions:
                 / Decimal("100"),
             )
         except (TypeError, ValueError) as exc:
-            return tuple(failures + [f"CURRENT_SESSION_LATCH_INVALID:{exc}"])
+            return tuple(
+                failures
+                + [f"CURRENT_SESSION_LATCH_INVALID:{type(exc).__name__}"]
+            )
 
         try:
             # Local import keeps the authority protocol independent from the
@@ -591,7 +698,7 @@ class ProductionLifecycleActions:
                             str(cancel_tuple["target_evidence_floor_at"]),
                             "cancel evidence floor",
                         )
-                        if target.received_at > floor:
+                        if target.broker_updated_at > floor:
                             result = self.safety.reconcile_cancel(
                                 intent_id=str(row["intent_id"]), order=target
                             )
@@ -706,7 +813,7 @@ class ProductionLifecycleActions:
                         position=position,
                         orders=snapshot.equity_orders,
                         symbol=decision.symbol,
-                        snapshot_received_at=snapshot.received_at,
+                        snapshot_received_at=snapshot.observed_at,
                     )
                     if close_decision.action is ExitAction.SUBMIT_SAFE_CLOSE:
                         return self._advance_closeout(
@@ -722,7 +829,7 @@ class ProductionLifecycleActions:
                     position=position,
                     orders=snapshot.equity_orders,
                     symbol=decision.symbol,
-                    snapshot_received_at=snapshot.received_at,
+                    snapshot_received_at=snapshot.observed_at,
                 )
                 return self._advance_closeout(
                     snapshot=snapshot,
@@ -758,7 +865,7 @@ class ProductionLifecycleActions:
                 position=position,
                 orders=snapshot.equity_orders,
                 symbol=decision.symbol,
-                snapshot_received_at=snapshot.received_at,
+                snapshot_received_at=snapshot.observed_at,
             )
             if expected != decision:
                 return "BLOCKED:STALE_OR_MISMATCHED_CLOSEOUT_DECISION"
@@ -853,7 +960,7 @@ class ProductionLifecycleActions:
         if unresolved:
             return self._blocked(unresolved)
         floor = self._latest_terminal_action_floor(decision.symbol)
-        if floor is not None and snapshot.received_at <= floor:
+        if floor is not None and snapshot.observed_at <= floor:
             return "BLOCKED:STRICTLY_NEWER_POST_MUTATION_SNAPSHOT_REQUIRED"
         capacity = calculate_exit_capacity(
             position=self._position(snapshot, decision.symbol),
@@ -888,7 +995,10 @@ class ProductionLifecycleActions:
     ) -> str:
         before = IntentState(row["state"])
         updated_at = self._parse_time(str(row["updated_at"]), "intent updated_at")
-        if before in {IntentState.SUBMITTING, IntentState.UNKNOWN} and order.received_at <= updated_at:
+        if (
+            before in {IntentState.SUBMITTING, IntentState.UNKNOWN}
+            and order.broker_updated_at <= updated_at
+        ):
             return "WAIT_STRICTLY_NEWER_EVIDENCE"
         durable_orders = self.state.rows(
             "SELECT * FROM broker_orders WHERE intent_id=?",
@@ -1165,7 +1275,9 @@ class ProductionLifecycleActions:
                     "require_advanced_order_reconciliation"
                 )
                 is True
-                and not capabilities.supports_advanced_order_read
+                and not capabilities.order_coverage.family_complete(
+                    OrderFamily.ADVANCED_EQUITY
+                )
             ):
                 failures.append("ADVANCED_ORDER_READ_UNSUPPORTED")
         except Exception as exc:
@@ -1196,12 +1308,36 @@ class ProductionLifecycleActions:
     def _writer_failures(self) -> tuple[str, ...]:
         if self.writer_lock is None or not self.writer_lock.held:
             return ("ACCOUNT_WRITER_KERNEL_LOCK_NOT_HELD",)
-        expected_fingerprint = hashlib.sha256(
-            self.account_key.encode("utf-8")
-        ).hexdigest()
+        execution = self.policy.config["execution"]
+        production = (
+            execution.get("broker_adapter") == "supported_production_transport"
+        )
+        account_binding = (
+            str(execution.get("production_account_binding_fingerprint", ""))
+            if production
+            else None
+        )
+        authorization_binding = (
+            str(execution.get("production_authorization_binding_id", ""))
+            if production
+            else None
+        )
+        try:
+            expected_fingerprint = account_writer_fingerprint(
+                self.account_key,
+                broker_account_binding_fingerprint=account_binding,
+                authorization_binding_id=authorization_binding,
+            )
+        except ValueError:
+            return ("ACCOUNT_WRITER_PRODUCTION_BINDING_INVALID",)
         failures: list[str] = []
         if self.writer_lock.account_fingerprint != expected_fingerprint:
             failures.append("ACCOUNT_WRITER_LOCK_ACCOUNT_MISMATCH")
+        if production and (
+            self.writer_lock.broker_account_binding_fingerprint != account_binding
+            or self.writer_lock.authorization_binding_id != authorization_binding
+        ):
+            failures.append("ACCOUNT_WRITER_LOCK_BROKER_BINDING_MISMATCH")
         rows = self.state.rows(
             "SELECT * FROM account_writer_lease WHERE account_key=?",
             (self.account_key,),
@@ -1232,7 +1368,9 @@ class ProductionLifecycleActions:
             failures.append("ACCOUNT_NOT_ACTIVE")
         if not snapshot.auth_point_in_time:
             failures.append("AUTH_NOT_CURRENT")
-        age = (now - snapshot.received_at).total_seconds()
+        # Receipt time only says when collection completed.  Authority is as
+        # old as the earliest provider observation in the exhaustive envelope.
+        age = (now - snapshot.observed_at).total_seconds()
         max_age = int(
             self.policy.config["evidence"]["broker_snapshot_max_age_seconds"]
         )
@@ -1538,7 +1676,9 @@ class ProductionLifecycleActions:
 
     @staticmethod
     def _snapshot_key(snapshot: AccountSnapshot) -> str:
-        return f"{snapshot.account_masked}:{snapshot.received_at.isoformat()}"
+        # A re-receipt of unchanged provider facts is not new mutation
+        # authority. Consume by the authoritative observation point.
+        return f"{snapshot.account_masked}:{snapshot.observed_at.isoformat()}"
 
     def _reserve_snapshot_if_needed(
         self, snapshot: AccountSnapshot, outcome: SafetyExecutionOutcome

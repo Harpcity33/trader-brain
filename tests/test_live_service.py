@@ -4,20 +4,38 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+import os
 import tempfile
 import unittest
 
 from titan_brain.live.broker import (
     AccountSnapshot,
+    BrokerOrderState,
+    BrokerSide,
+    ClientRefLookupResult,
+    EquityOrderType,
     FakeBrokerClient,
     FundsSnapshot,
+    MarketHours,
+    OrderSnapshot,
     PositionSnapshot,
+    TimeInForce,
 )
 from titan_brain.live.broker.robinhood import RobinhoodBrokerAdapter
-from titan_brain.live.control import ControlInbox
-from titan_brain.live.notifications import JsonlNotificationSink
+from titan_brain.live.control import ControlInbox, HmacControlAuthenticator
+from titan_brain.live.notifications import (
+    DeliveryAssurance,
+    JsonlNotificationSink,
+    NotificationRoute,
+    destination_fingerprint,
+)
 from titan_brain.live.policy import PolicyBundle
-from titan_brain.live.service import FullLiveService, ServiceRunner, build_local_outbox
+from titan_brain.live.service import (
+    FullLiveService,
+    ServiceRunner,
+    build_enqueue_only_outbox,
+    build_local_outbox,
+)
 from titan_brain.live.state import LiveStateStore
 from titan_brain.live.writer_lock import AccountWriterLock
 from tests.live_activation_support import activate_canonical_runtime
@@ -35,11 +53,11 @@ def account_snapshot() -> AccountSnapshot:
         account_state="active",
         account_type="limited_margin",
         funds=FundsSnapshot(
-            total_value=Decimal("912.80"),
-            cash=Decimal("912.80"),
-            buying_power=Decimal("912.80"),
-            unleveraged_buying_power=Decimal("912.80"),
-            unsettled_funds=Decimal("602.93"),
+            total_value=Decimal("1000.00"),
+            cash=Decimal("1000.00"),
+            buying_power=Decimal("1000.00"),
+            unleveraged_buying_power=Decimal("1000.00"),
+            unsettled_funds=Decimal("250.00"),
         ),
         equity_positions=(),
         equity_orders=(),
@@ -54,7 +72,7 @@ def account_snapshot() -> AccountSnapshot:
         auth_point_in_time=True,
         daily_realized_pnl=Decimal("0.00"),
         weekly_realized_pnl=Decimal("0.00"),
-        peak_equity=Decimal("912.80"),
+        peak_equity=Decimal("1000.00"),
         daily_realized_pnl_complete=True,
         weekly_realized_pnl_complete=True,
         peak_equity_complete=True,
@@ -97,6 +115,89 @@ class ServiceTests(unittest.TestCase):
             clock=lambda: NOW,
         )
 
+    def test_exact_client_ref_positive_is_carried_into_account_reconciliation(self) -> None:
+        client_ref = "00000000-0000-4000-8000-000000000001"
+        recovered = OrderSnapshot(
+            broker_order_id="recovered-terminal-order",
+            account_masked="••••7153",
+            symbol="XYZ",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            state=BrokerOrderState.CANCELLED,
+            requested_quantity=Decimal("1"),
+            cumulative_filled_quantity=Decimal("0"),
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            broker_updated_at=NOW,
+            received_at=NOW,
+            limit_price=Decimal("10.00"),
+            client_ref_id=client_ref,
+        )
+        lookup = ClientRefLookupResult(
+            account_masked="••••7153",
+            requested_client_refs=(client_ref,),
+            found_orders=(recovered,),
+            confirmed_absent_client_refs=(),
+            observed_at=NOW,
+            received_at=NOW,
+            complete=True,
+        )
+
+        merged = FullLiveService._merge_client_ref_lookup(
+            account_snapshot(), lookup
+        )
+
+        self.assertEqual(merged.equity_orders, (recovered,))
+
+    def test_exact_ref_recovery_includes_crash_left_submitting_intents(self) -> None:
+        client_ref = "00000000-0000-4000-8000-000000000002"
+
+        class SubmittingIntentState:
+            def __init__(self) -> None:
+                self.query = ""
+
+            def rows(self, query, parameters):
+                self.query = query
+                self.asserted_parameters = parameters
+                if "'SUBMITTING'" not in query:
+                    return ()
+                return ({"client_ref": client_ref},)
+
+        broker = FakeBrokerClient(
+            initial_snapshot=account_snapshot(), clock=lambda: NOW
+        )
+        service = self.service(broker)
+        state = SubmittingIntentState()
+        service.state = state  # type: ignore[assignment]
+
+        result = service._lookup_unknown_client_refs(snapshot=account_snapshot())
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.requested_client_refs, (client_ref,))
+        self.assertIn("state IN ('SUBMITTING','UNKNOWN')", state.query)
+        self.assertEqual(broker.calls[-1], (broker.LOOKUP, (client_ref,)))
+
+    def test_account_read_completion_time_drives_tick_freshness_and_lane(self) -> None:
+        times = iter((NOW, NOW + timedelta(seconds=3), NOW + timedelta(seconds=3)))
+
+        service = FullLiveService(
+            policy=self.policy,
+            state=self.store,
+            broker=FakeBrokerClient(
+                initial_snapshot=account_snapshot(), clock=lambda: NOW
+            ),
+            notifications=build_local_outbox(
+                self.store,
+                "ending-7153",
+                JsonlNotificationSink(self.temp / "notifications.jsonl"),
+            ),
+            clock=lambda: next(times),
+        )
+
+        result = service.run_once()
+
+        self.assertEqual(result.observed_at, NOW + timedelta(seconds=3))
+
     def test_paused_tick_reconciles_before_protection_outbox_and_discovery_gate(self) -> None:
         broker = FakeBrokerClient(initial_snapshot=account_snapshot(), clock=lambda: NOW)
         result = self.service(broker).run_once()
@@ -113,6 +214,74 @@ class ServiceTests(unittest.TestCase):
         broker_rows = self.store.rows("SELECT * FROM broker_snapshots")
         self.assertEqual(len(broker_rows), 1)
         self.assertEqual(broker_rows[0]["realized_pnl_reconciled"], 1)
+
+    def test_production_coordinator_enqueues_but_never_delivers_provider_outbox(self) -> None:
+        class FailedBroker:
+            capabilities = FakeBrokerClient(
+                initial_snapshot=account_snapshot(), clock=lambda: NOW
+            ).capabilities
+
+            def get_account_snapshot(self, _account_masked):
+                raise RuntimeError("synthetic broker outage")
+
+        service = FullLiveService(
+            policy=self.policy,
+            state=self.store,
+            broker=FailedBroker(),
+            notifications=build_enqueue_only_outbox(
+                self.store, "ending-7153"
+            ),
+            clock=lambda: NOW,
+        )
+        result = service.run_once()
+        self.assertIn(
+            "DEFER_OUTBOX_TO_INDEPENDENT_NOTIFICATION_WORKER", result.actions
+        )
+        self.assertEqual(result.notification_sent, 0)
+        row = self.store.rows(
+            "SELECT state,claim_owner,delivery_receipt FROM notification_outbox"
+        )[0]
+        self.assertEqual(row["state"], "PENDING")
+        self.assertIsNone(row["claim_owner"])
+        self.assertIsNone(row["delivery_receipt"])
+        self.assertFalse((self.temp / "notifications.jsonl").exists())
+
+    def test_independent_notification_worker_health_is_a_continuous_entry_gate(self) -> None:
+        route = NotificationRoute(
+            provider="gmail",
+            destination_fingerprint=destination_fingerprint(
+                "gmail", "owner@example.invalid"
+            ),
+            route_version="service-health-v1",
+            required_assurance=DeliveryAssurance.PROVIDER_ACCEPTED,
+        )
+        self.store.acquire_notification_worker_lease(
+            account_key="ending-7153",
+            worker_id="service-health-worker",
+            process_id=os.getpid(),
+            route_id=route.route_id,
+            provider=route.provider,
+            destination_fingerprint=route.destination_fingerprint,
+            route_version=route.route_version,
+            acquired_at=NOW,
+        )
+        service = FullLiveService(
+            policy=self.policy,
+            state=self.store,
+            broker=FakeBrokerClient(
+                initial_snapshot=account_snapshot(), clock=lambda: NOW
+            ),
+            notifications=build_enqueue_only_outbox(
+                self.store, "ending-7153"
+            ),
+            notification_route=route,
+            clock=lambda: NOW,
+        )
+        self.assertEqual(service._notification_entry_blockers(NOW), ())
+        self.assertIn(
+            "NOTIFICATION_WORKER_HEARTBEAT_STALE_OR_FUTURE",
+            service._notification_entry_blockers(NOW + timedelta(seconds=16)),
+        )
 
     def test_flat_risk_release_hook_runs_only_for_ingestible_snapshots(self) -> None:
         valid = account_snapshot()
@@ -193,6 +362,10 @@ class ServiceTests(unittest.TestCase):
             runtime_id=self.policy.runtime_id,
             release_manifest_hash="a" * 64,
             max_snapshot_age=timedelta(seconds=5),
+            authenticator=HmacControlAuthenticator(
+                b"test-control-key-material-is-32-bytes-minimum",
+                authorization_binding_id="f" * 64,
+            ),
         )
         inbox.submit(
             "MANAGED_CLOSEOUT",

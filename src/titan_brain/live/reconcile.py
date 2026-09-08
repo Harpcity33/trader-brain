@@ -25,7 +25,7 @@ from .broker.base import (
     BrokerCapabilities,
     OrderSnapshot,
 )
-from .models import BrokerOrder, BrokerOrderState, Fill, IntentState
+from .models import BrokerOrder, BrokerOrderState, Fill, IntentKind, IntentState
 from .money import whole_shares
 from .state import LiveStateStore, object_hash
 
@@ -214,6 +214,61 @@ def _order_facts(order: OrderSnapshot) -> Mapping[str, object]:
     }
 
 
+def _require_exact_intent_order(
+    *, order: OrderSnapshot, intent: Mapping[str, object]
+) -> None:
+    """Bind a recovered broker-preserved client ref to every immutable field."""
+
+    try:
+        expected = json.loads(str(intent["order_tuple_json"]))
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReconciliationConflict("durable intent has no valid exact order tuple") from exc
+    if not isinstance(expected, Mapping) or intent["tuple_hash"] != object_hash(expected):
+        raise ReconciliationConflict("durable intent tuple hash is invalid")
+    required = {
+        "account_masked",
+        "symbol",
+        "side",
+        "order_type",
+        "quantity",
+        "market_hours",
+        "time_in_force",
+        "limit_price",
+        "stop_price",
+        "client_ref_id",
+    }
+    if not required.issubset(expected):
+        raise ReconciliationConflict("durable intent does not contain an exact order tuple")
+    actual = (
+        order.account_masked,
+        order.symbol,
+        order.side.value,
+        order.order_type.value,
+        whole_shares(order.requested_quantity, field="requested_quantity"),
+        order.market_hours.value,
+        order.time_in_force.value,
+        format(order.limit_price, "f") if order.limit_price is not None else None,
+        format(order.stop_price, "f") if order.stop_price is not None else None,
+        order.client_ref_id,
+    )
+    wanted = tuple(expected[field] for field in (
+        "account_masked",
+        "symbol",
+        "side",
+        "order_type",
+        "quantity",
+        "market_hours",
+        "time_in_force",
+        "limit_price",
+        "stop_price",
+        "client_ref_id",
+    ))
+    if actual != wanted:
+        raise ReconciliationConflict(
+            "broker-preserved client reference matched a different immutable order tuple"
+        )
+
+
 def ingest_local_order(
     store: LiveStateStore,
     *,
@@ -235,6 +290,7 @@ def ingest_local_order(
         raise ReconciliationConflict("intent account differs from reconciler account")
     if order.client_ref_id != intent["client_ref"]:
         raise ReconciliationConflict("broker client reference differs from local intent")
+    _require_exact_intent_order(order=order, intent=intent)
 
     requested = whole_shares(order.requested_quantity, field="requested_quantity")
     cumulative = whole_shares(
@@ -354,7 +410,20 @@ def resolve_unknown_intent(
         raise ReconciliationConflict(f"unknown durable intent {intent_id!r}")
     if IntentState(intent["state"]) is not IntentState.UNKNOWN:
         raise ReconciliationConflict("intent is not in UNKNOWN state")
-    evidence_at = snapshot.received_at
+    if IntentKind(intent["kind"]) is IntentKind.CANCEL:
+        return UnknownResolution(
+            intent_id=intent_id,
+            state=UnknownResolutionState.UNRESOLVED,
+            evidence_at=snapshot.observed_at,
+            reason=(
+                "cancel outcome resolves only from exact target-order evidence, "
+                "never from an equity-order client-ref lookup"
+            ),
+        )
+    # Local receipt/completion time cannot make an old multi-page broker
+    # observation authoritative.  Reuse the conservative snapshot observation
+    # timestamp that already represents the earliest required page.
+    evidence_at = snapshot.observed_at
     evidence_floor = _parse_db_time(intent["updated_at"])
     if evidence_at <= evidence_floor:
         return UnknownResolution(
@@ -377,13 +446,6 @@ def resolve_unknown_intent(
         )
     if matches:
         order = matches[0]
-        if order.received_at <= evidence_floor:
-            return UnknownResolution(
-                intent_id=intent_id,
-                state=UnknownResolutionState.WAITING_FOR_NEWER_EVIDENCE,
-                evidence_at=evidence_at,
-                reason="matching order evidence is not strictly newer",
-            )
         ingested = ingest_local_order(
             store,
             order=order,
@@ -471,11 +533,14 @@ def validate_authoritative_snapshot(
         blockers.append("ACCOUNT_NOT_ACTIVE")
     if not snapshot.auth_point_in_time:
         blockers.append("AUTH_NOT_CURRENT")
-    if snapshot.received_at > current + timedelta(seconds=2):
+    if snapshot.observed_at > current + timedelta(seconds=2):
         blockers.append("SNAPSHOT_FROM_FUTURE")
-    elif current - snapshot.received_at > max_age:
+    elif current - snapshot.observed_at > max_age:
         blockers.append("STALE_SNAPSHOT")
-    if floor is not None and snapshot.received_at <= floor:
+    # A later local receipt cannot advance an older provider observation.
+    # ``evidence_floor_at`` is therefore an observation floor, including
+    # across process restarts when it is restored from durable snapshots.
+    if floor is not None and snapshot.observed_at <= floor:
         blockers.append("OUT_OF_ORDER_SNAPSHOT")
 
     if not capabilities.can_prove_whole_broker_reconciliation:
@@ -658,7 +723,7 @@ class AuthoritativeReconciler:
         if not self.account_key:
             raise ValueError("account_key is required")
         self.max_snapshot_age = max_snapshot_age
-        self._last_received_at: datetime | None = None
+        self._last_observed_at: datetime | None = None
 
     def reconcile_snapshot(
         self,
@@ -671,9 +736,12 @@ class AuthoritativeReconciler:
         confirmed_absent_client_refs: Iterable[str] = (),
     ) -> ReconciliationReport:
         intents = store.rows(
-            "SELECT intent_id, client_ref, state FROM order_intents "
+            "SELECT intent_id, client_ref, state, updated_at FROM order_intents "
             "WHERE account_key = ?",
             (self.account_key,),
+        )
+        confirmed_absent_refs = frozenset(
+            str(value) for value in confirmed_absent_client_refs
         )
         local_orders = store.rows(
             "SELECT broker_order_id, state FROM broker_orders WHERE account_key = ?",
@@ -728,6 +796,28 @@ class AuthoritativeReconciler:
             for row in intents
             if IntentState(row["state"]) is IntentState.UNKNOWN
         }
+        submitting_rows = {
+            str(row["intent_id"]): row
+            for row in intents
+            if IntentState(row["state"]) is IntentState.SUBMITTING
+        }
+
+        durable_observation_rows = store.rows(
+            "SELECT observed_at FROM broker_snapshots WHERE account_key=? "
+            "ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1",
+            (self.account_key,),
+        )
+        durable_observation_floor = (
+            _parse_db_time(str(durable_observation_rows[0]["observed_at"]))
+            if durable_observation_rows
+            else None
+        )
+        observation_floors = tuple(
+            value
+            for value in (self._last_observed_at, durable_observation_floor)
+            if value is not None
+        )
+        observation_floor = max(observation_floors) if observation_floors else None
 
         report = validate_authoritative_snapshot(
             snapshot,
@@ -736,7 +826,7 @@ class AuthoritativeReconciler:
             phase=phase,
             now=now,
             max_age=self.max_snapshot_age,
-            evidence_floor_at=self._last_received_at,
+            evidence_floor_at=observation_floor,
             known_broker_order_ids=order_ids,
             known_client_refs=refs_to_intents,
             known_nonterminal_order_ids=nonterminal_ids,
@@ -769,7 +859,7 @@ class AuthoritativeReconciler:
                     intent_id=intent_id,
                     snapshot=snapshot,
                     capabilities=capabilities,
-                    confirmed_absent_client_refs=confirmed_absent_client_refs,
+                    confirmed_absent_client_refs=confirmed_absent_refs,
                 )
                 resolutions.append(resolution)
                 if resolution.resolved:
@@ -785,15 +875,62 @@ class AuthoritativeReconciler:
             ingested.append(ingested_order)
             unresolved_ids.discard(intent_id)
 
+        # A process can die after durably recording SUBMITTING but before it
+        # records either an acknowledgement or UNKNOWN.  Do not leave that
+        # crash boundary orphaned forever, and never interpret a plain order-
+        # list absence as proof.  An unmatched SUBMITTING intent becomes
+        # UNKNOWN only when a supported exact-ref lookup explicitly confirmed
+        # absence, the standard-order envelope is complete, and the provider
+        # observation is strictly newer than the durable mutation boundary.
+        # The transition itself establishes a new evidence floor, so this same
+        # snapshot cannot also clear UNKNOWN; a second strictly newer exact
+        # lookup is required before the reservation may be released.
+        newly_unknown: set[str] = set()
+        if (
+            capabilities.supports_ref_id_lookup
+            and snapshot.standard_equity_orders_complete
+        ):
+            for intent_id, row in sorted(submitting_rows.items()):
+                if intent_id in seen_intents or intent_id not in unresolved_ids:
+                    continue
+                if str(row["client_ref"]) not in confirmed_absent_refs:
+                    continue
+                mutation_floor = _parse_db_time(str(row["updated_at"]))
+                if snapshot.observed_at <= mutation_floor:
+                    continue
+                store.transition_intent(
+                    intent_id,
+                    IntentState.UNKNOWN,
+                    occurred_at=snapshot.observed_at,
+                    detail={
+                        "reason": "INTERRUPTED_SUBMISSION_EXACT_REF_ABSENT",
+                        "client_ref": str(row["client_ref"]),
+                        "same_intent_retry_allowed": False,
+                    },
+                )
+                unknown_ids.add(intent_id)
+                newly_unknown.add(intent_id)
+                resolutions.append(
+                    UnknownResolution(
+                        intent_id=intent_id,
+                        state=UnknownResolutionState.WAITING_FOR_NEWER_EVIDENCE,
+                        evidence_at=snapshot.observed_at,
+                        reason=(
+                            "crash-left SUBMITTING was durably marked UNKNOWN; "
+                            "a second strictly newer exact lookup is required"
+                        ),
+                    )
+                )
+
         # UNKNOWN intents without a matching order may be cleared only when an
         # explicit negative ref lookup was supplied.
-        for intent_id in sorted(unknown_ids):
+        for intent_id in sorted(unknown_ids - newly_unknown):
             resolution = resolve_unknown_intent(
                 store,
                 intent_id=intent_id,
                 snapshot=snapshot,
                 capabilities=capabilities,
-                confirmed_absent_client_refs=confirmed_absent_client_refs,
+                confirmed_absent_client_refs=confirmed_absent_refs,
             )
             resolutions.append(resolution)
             if resolution.resolved:
@@ -817,8 +954,11 @@ class AuthoritativeReconciler:
             unknown_resolutions=tuple(resolutions),
         )
         if "OUT_OF_ORDER_SNAPSHOT" not in result.blockers:
-            if self._last_received_at is None or snapshot.received_at > self._last_received_at:
-                self._last_received_at = snapshot.received_at
+            if (
+                self._last_observed_at is None
+                or snapshot.observed_at > self._last_observed_at
+            ):
+                self._last_observed_at = snapshot.observed_at
         return result
 
 
