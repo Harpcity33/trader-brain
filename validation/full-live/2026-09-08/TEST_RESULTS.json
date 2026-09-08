@@ -1,27 +1,38 @@
 {
   "schema_version": "titan_full_live_test_evidence_2026-09-08_v1",
-  "recorded_at_utc": "2026-09-08T00:59:02Z",
-  "source_commit": "4e6af86c8e506c0ac588d5d8d03d3d33eee93677",
-  "source_tree": "98683229d64113ce4aece5a503503b28999e7311",
+  "recorded_at_utc": "2026-09-08T03:54:46Z",
+  "source_commit": "57da53a1251b8850a2d3449667a41f8ab54a4b2b",
+  "source_tree": "ba2bb45d3517dd0f5f507aafcd1c783740035106",
   "environment": {
     "python": "3.12.14",
     "python_executable": "/Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12",
     "os": "Darwin 25.6.0 arm64"
   },
   "suite": {
-    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12 -B -m unittest discover -s tests -v",
-    "tests_run": 255,
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12 -B -m unittest discover -s tests -q",
+    "tests_run": 368,
     "failures": 0,
     "errors": 0,
     "result": "PASS",
-    "duration_seconds": 7.753
+    "duration_seconds": 12.592,
+    "wall_clock_seconds": 12.92
+  },
+  "repository_validation": {
+    "result": "PASS",
+    "checked_bytes": 3287591,
+    "python_files": 91,
+    "json_files": 19,
+    "toml_files": 4,
+    "manifest_sha256": "a43f9c6c1442cfdb0ce961d696b5d347c07a05ac072eb76bcc02399c5f223fa0",
+    "git_diff_check": "PASS"
   },
   "release_reproducibility": {
     "independent_builds": 2,
     "byte_for_byte_equal": true,
-    "release_id": "d892737a13335df7ba06b16041f8ae4b9d59675e7bacb7c37f48bfe84a7ac407",
-    "archive_sha256": "1c07a62822667ec9a26385adccc411888772780101eb9d19ab6602fdbf73b0c5",
-    "manifest_file_sha256": "b10b7dcab13714705ef436b8959c53e8a5dafae11007944f074f7892dc0116d3"
+    "release_id": "c7b05d86f385dc5be7eda48baa77256372b51770246984444695dfcd0058b0d1",
+    "archive_sha256": "6a83e98737704faacf08e5ec923fc4883ee93bb0e4f2ad459b0c462a623b8e03",
+    "archive_bytes": 270525,
+    "manifest_file_sha256": "e8782219267cd5ff94d9621dea50c82e89a323eaecae570ed24954c27004a37d"
   },
   "coverage_summary": [
     "durable intent-before-submit and exact review binding",
@@ -35,12 +46,20 @@
     "stale/crossed quotes, data loss, market halt, early close, and DST",
     "notification durability/backoff/deduplication and latency-stage integrity",
     "canonical machine readiness, exact activation phrase, one-use activation, and stale-flat/fresh-exposure rejection",
-    "deterministic Git-object release build and isolated paused installer"
+    "deterministic Git-object release build and isolated paused installer",
+    "supported-production broker transport normalization, exhaustive order-family pagination, and exact client-reference recovery",
+    "strict broker/provider receipt causality and contradictory rejection/exposure handling",
+    "release-bound Massive, Robinhood tradability, quality revalidation, and Gmail notification provider composition",
+    "independent notification worker route-bound receipts and failure isolation",
+    "transactional schema-v1-to-v3 paused deployment migration with audit preservation and fail-closed recovery"
   ],
   "evidence_limitations": {
     "failure_matrix_class": "SYNTHETIC_AUTOMATED_SIMULATION_ONLY",
     "live_broker_mutations_exercised": false,
     "live_market_session_certified": false,
-    "unattended_robinhood_transport_certified": false
+    "unattended_robinhood_transport_certified": false,
+    "production_provider_callbacks_authenticated_in_release": false,
+    "independent_notification_destination_authenticated": false,
+    "activation_or_service_start_performed": false
   }
 }
