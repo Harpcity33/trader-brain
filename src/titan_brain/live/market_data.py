@@ -8,6 +8,7 @@ from decimal import Decimal
 from enum import Enum
 import hashlib
 import json
+from threading import RLock
 from typing import Any, Iterable
 
 from .money import decimal_value, whole_shares
@@ -52,6 +53,9 @@ class Quote:
     source: str
     tradable: bool
     halted: bool = False
+    size_unit: str = "shares"
+    size_source_version: str = "provider_unspecified"
+    depth_scope: str = "top_of_book"
 
     @classmethod
     def build(
@@ -68,6 +72,9 @@ class Quote:
         source: str,
         tradable: bool,
         halted: bool = False,
+        size_unit: str = "shares",
+        size_source_version: str = "provider_unspecified",
+        depth_scope: str = "top_of_book",
     ) -> "Quote":
         bid_value = decimal_value(bid, "bid")
         ask_value = decimal_value(ask, "ask")
@@ -85,6 +92,12 @@ class Quote:
             raise ValueError("future-dated quote")
         if not str(source).strip():
             raise ValueError("quote source is required")
+        if str(size_unit) != "shares":
+            raise ValueError("quote sizes must be expressed in shares")
+        if not str(size_source_version).strip():
+            raise ValueError("quote size source/version is required")
+        if str(depth_scope) != "top_of_book":
+            raise ValueError("quote depth_scope must be top_of_book")
         return cls(
             symbol=_symbol(symbol),
             bid=bid_value,
@@ -97,6 +110,9 @@ class Quote:
             source=str(source),
             tradable=tradable is True,
             halted=halted is True,
+            size_unit="shares",
+            size_source_version=str(size_source_version),
+            depth_scope="top_of_book",
         )
 
     @property
@@ -206,76 +222,200 @@ class MarketDataCache:
         self.watermarks: dict[str, int] = {}
         self.degraded: dict[str, str] = {}
         self.active_scores: dict[str, Decimal] = {}
+        self._missing_sequences: dict[str, set[int]] = {}
+        self._lock = RLock()
+        self._session_start: datetime | None = None
+
+    def begin_session(self, session_start: datetime) -> bool:
+        """Atomically rotate volatile evidence at an exact session boundary."""
+
+        start = _aware(session_start, "session_start")
+        with self._lock:
+            if self._session_start is None:
+                self._session_start = start
+                return False
+            if self._session_start == start:
+                return False
+            self.quotes.clear()
+            self.bars.clear()
+            self.watermarks.clear()
+            self.degraded.clear()
+            self.active_scores.clear()
+            self._missing_sequences.clear()
+            self._session_start = start
+            return True
 
     def record_quote(self, quote: Quote) -> bool:
-        prior = self.quotes.get(quote.symbol)
-        if prior is not None and quote.observed_at < prior.observed_at:
-            return False
-        if prior is not None and quote.observed_at == prior.observed_at:
-            if quote.newest_venue_at < prior.newest_venue_at:
+        with self._lock:
+            prior = self.quotes.get(quote.symbol)
+            # Venue time, not local response order, decides which executable
+            # quote is newer.  In particular a slow REST response must never
+            # overwrite a quote already consumed from the live stream.
+            if prior is not None and quote.newest_venue_at < prior.newest_venue_at:
                 return False
-            if quote.newest_venue_at > prior.newest_venue_at:
-                self.quotes[quote.symbol] = quote
-                return True
-            # Two sources can be sampled in one local clock tick. Source labels
-            # do not turn identical executable market facts into a conflict.
-            comparable = (
-                "bid",
-                "ask",
-                "bid_size",
-                "ask_size",
-                "venue_bid_at",
-                "venue_ask_at",
-                "tradable",
-                "halted",
-            )
-            if all(getattr(quote, field) == getattr(prior, field) for field in comparable):
-                return False
-            raise ValueError("conflicting quote at the same observation time")
-        self.quotes[quote.symbol] = quote
-        return True
+            if prior is not None and quote.newest_venue_at == prior.newest_venue_at:
+                if quote.observed_at < prior.observed_at:
+                    return False
+                # Two sources can be sampled in one local clock tick. Source labels
+                # do not turn identical executable market facts into a conflict.
+                comparable = (
+                    "bid",
+                    "ask",
+                    "bid_size",
+                    "ask_size",
+                    "venue_bid_at",
+                    "venue_ask_at",
+                    "tradable",
+                    "halted",
+                    "size_unit",
+                    "size_source_version",
+                    "depth_scope",
+                )
+                if all(
+                    getattr(quote, field) == getattr(prior, field)
+                    for field in comparable
+                ):
+                    return False
+                if quote.observed_at == prior.observed_at:
+                    raise ValueError("conflicting quote at the same observation time")
+            self.quotes[quote.symbol] = quote
+            return True
 
     def record_completed_bar(self, bar: CompletedBar, *, received_at: datetime) -> str:
         received = _aware(received_at, "received_at")
         if bar.end_at > received:
             raise ValueError("incomplete or future bar")
-        symbol_bars = self.bars.setdefault(bar.symbol, {})
-        prior = symbol_bars.get(bar.end_at)
-        if prior is not None:
-            if bar.revision < prior.revision:
-                return "stale_revision"
-            if bar.revision == prior.revision:
-                if bar.digest == prior.digest:
-                    return "duplicate"
-                raise ValueError("conflicting bar without a higher revision")
+        with self._lock:
+            symbol_bars = self.bars.setdefault(bar.symbol, {})
+            prior = symbol_bars.get(bar.end_at)
+            if prior is not None:
+                if bar.revision < prior.revision:
+                    return "stale_revision"
+                if bar.revision == prior.revision:
+                    if bar.digest == prior.digest:
+                        return "duplicate"
+                    raise ValueError("conflicting bar without a higher revision")
+                symbol_bars[bar.end_at] = bar
+                self.degraded[bar.symbol] = (
+                    "CORRECTED_COMPLETED_BAR_REQUIRES_PLAN_REVALIDATION"
+                )
+                return "corrected"
+            previous_sequence = self.watermarks.get(bar.symbol)
+            missing = self._missing_sequences.setdefault(bar.symbol, set())
+            if previous_sequence is not None and bar.sequence > previous_sequence + 1:
+                # A regular US session contains fewer than 1,000 minutes.  A
+                # larger jump is corrupt input rather than a safe set to allocate.
+                if bar.sequence - previous_sequence > 2_000:
+                    self.degraded[bar.symbol] = "MARKET_DATA_SEQUENCE_GAP_UNBOUNDED"
+                else:
+                    missing.update(range(previous_sequence + 1, bar.sequence))
+            missing.discard(bar.sequence)
+            self.watermarks[bar.symbol] = max(
+                bar.sequence, previous_sequence if previous_sequence is not None else bar.sequence
+            )
             symbol_bars[bar.end_at] = bar
-            self.degraded[bar.symbol] = "CORRECTED_COMPLETED_BAR_REQUIRES_PLAN_REVALIDATION"
-            return "corrected"
-        previous_sequence = self.watermarks.get(bar.symbol)
-        if previous_sequence is not None and bar.sequence != previous_sequence + 1:
-            self.degraded[bar.symbol] = "MARKET_DATA_SEQUENCE_GAP"
-        self.watermarks[bar.symbol] = max(bar.sequence, previous_sequence or bar.sequence)
-        symbol_bars[bar.end_at] = bar
-        return "inserted"
+            if missing:
+                self.degraded[bar.symbol] = "MARKET_DATA_SEQUENCE_GAP"
+            elif self.degraded.get(bar.symbol) == "MARKET_DATA_SEQUENCE_GAP":
+                self.degraded.pop(bar.symbol, None)
+            return "inserted"
 
     def mark_disconnect(self, source: str) -> None:
         reason = f"MARKET_DATA_DISCONNECTED:{source}"
-        for symbol in set(self.quotes) | set(self.bars):
-            self.degraded[symbol] = reason
+        with self._lock:
+            for symbol in set(self.quotes) | set(self.bars):
+                self.degraded[symbol] = reason
+
+    def mark_symbol_degraded(self, symbol: str, reason: str) -> None:
+        normalized = _symbol(symbol)
+        if not str(reason).strip():
+            raise ValueError("degradation reason is required")
+        with self._lock:
+            self.degraded[normalized] = str(reason)
+
+    def clear_symbol_degradation(
+        self, symbol: str, *, expected_reason: str
+    ) -> bool:
+        """Clear only the exact transient state a caller actually repaired.
+
+        A concurrent disconnect, correction, or invalid stream event must not
+        be erased by completion of an older REST backfill.
+        """
+
+        normalized = _symbol(symbol)
+        expected = str(expected_reason)
+        if not expected.strip():
+            raise ValueError("expected degradation reason is required")
+        with self._lock:
+            if self.degraded.get(normalized) != expected:
+                return False
+            self.degraded.pop(normalized, None)
+            return True
 
     def record_snapshot_resync(self, symbol: str, *, sequence: int) -> None:
         normalized = _symbol(symbol)
         if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
             raise ValueError("resync sequence must be a non-negative integer")
-        self.watermarks[normalized] = sequence
-        self.degraded.pop(normalized, None)
+        with self._lock:
+            self.watermarks[normalized] = max(
+                sequence, self.watermarks.get(normalized, sequence)
+            )
+            self._missing_sequences.pop(normalized, None)
+            self.degraded.pop(normalized, None)
+
+    def missing_sequence_range(self, symbol: str) -> tuple[int, int] | None:
+        """Return the exact inclusive sequence gap currently blocking a symbol."""
+
+        normalized = _symbol(symbol)
+        with self._lock:
+            missing = self._missing_sequences.get(normalized, set())
+            if not missing:
+                return None
+            return min(missing), max(missing)
+
+    def quote_for(self, symbol: str) -> Quote | None:
+        with self._lock:
+            return self.quotes.get(_symbol(symbol))
+
+    def bar_for(self, symbol: str, end_at: datetime) -> CompletedBar | None:
+        normalized = _symbol(symbol)
+        completed_at = _aware(end_at, "end_at")
+        with self._lock:
+            return self.bars.get(normalized, {}).get(completed_at)
+
+    def degradation_for(self, symbol: str) -> str | None:
+        with self._lock:
+            return self.degraded.get(_symbol(symbol))
+
+    def quote_prices(self) -> dict[str, Decimal]:
+        with self._lock:
+            return {
+                symbol: quote.ask
+                for symbol, quote in self.quotes.items()
+                if quote.ask > 0
+            }
+
+    def symbol_state(
+        self, symbol: str
+    ) -> tuple[Quote | None, tuple[CompletedBar, ...], int | None, str | None]:
+        """Copy one symbol's facts atomically for cross-thread inspection."""
+
+        normalized = _symbol(symbol)
+        with self._lock:
+            return (
+                self.quotes.get(normalized),
+                tuple(self.bars.get(normalized, {}).values()),
+                self.watermarks.get(normalized),
+                self.degraded.get(normalized),
+            )
 
     def set_active_scores(self, candidates: Iterable[tuple[str, Any]]) -> tuple[str, ...]:
         normalized: dict[str, Decimal] = {}
         for symbol, score in candidates:
             normalized[_symbol(symbol)] = decimal_value(score, "candidate_score")
         ranked = sorted(normalized, key=lambda key: (-normalized[key], key))[: self.max_active]
-        self.active_scores = {key: normalized[key] for key in ranked}
+        with self._lock:
+            self.active_scores = {key: normalized[key] for key in ranked}
         return tuple(ranked)
 
     def validate_entry_evidence(
@@ -300,8 +440,10 @@ class MarketDataCache:
         causal_end = _aware(causal_bar_end, "causal_bar_end")
         shares = whole_shares(quantity)
         failures: list[str] = []
-        quote = self.quotes.get(normalized)
-        symbol_bars = self.bars.get(normalized, {})
+        with self._lock:
+            quote = self.quotes.get(normalized)
+            symbol_bars = dict(self.bars.get(normalized, {}))
+            degradation = self.degraded.get(normalized)
         bar = symbol_bars.get(causal_end)
         if created > current or expires <= created or current > expires:
             failures.append("PLAN_EXPIRED_OR_TIME_INVALID")
@@ -311,8 +453,8 @@ class MarketDataCache:
             failures.append("CAUSAL_COMPLETED_BAR_MISSING")
         elif (current - bar.end_at).total_seconds() > completed_bar_max_age_seconds:
             failures.append("COMPLETED_BAR_STALE")
-        if normalized in self.degraded:
-            failures.append(self.degraded[normalized])
+        if degradation is not None:
+            failures.append(degradation)
         quote_age: float | None = None
         spread: Decimal | None = None
         if quote is None:

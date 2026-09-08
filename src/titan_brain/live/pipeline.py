@@ -1048,7 +1048,9 @@ class FullLiveEntryPipeline:
         structure = candidate.structure
         validation = candidate.validation
         failures: list[str] = []
-        quote = self.market_data.quotes.get(structure.symbol)
+        quote, bars, _watermark, degradation = self.market_data.symbol_state(
+            structure.symbol
+        )
         if quote is None:
             return None, None, None, ("QUOTE_MISSING",)
         if quote.bid > quote.ask:
@@ -1057,13 +1059,14 @@ class FullLiveEntryPipeline:
             failures.append("ROBINHOOD_TRADABILITY_EVIDENCE_CONFLICT")
         if quote.halted:
             failures.append("MARKET_HALTED")
-        bar = self.market_data.bars.get(structure.symbol, {}).get(
-            _aware_utc(validation.completed_bar_end, "completed_bar_end")
+        completed_at = _aware_utc(
+            validation.completed_bar_end, "completed_bar_end"
         )
+        bar = next((item for item in bars if item.end_at == completed_at), None)
         if bar is None:
             failures.append("CAUSAL_COMPLETED_BAR_MISSING")
-        if structure.symbol in self.market_data.degraded:
-            failures.append(self.market_data.degraded[structure.symbol])
+        if degradation is not None:
+            failures.append(degradation)
         if failures:
             return None, None, None, _unique(failures)
         assert bar is not None
@@ -1106,12 +1109,9 @@ class FullLiveEntryPipeline:
             created_at=created_at,
             expires_at=expires_at,
             source_event_ids=source_event_ids,
+            quote=quote,
         )
-        price_map = {
-            symbol: cached.ask
-            for symbol, cached in self.market_data.quotes.items()
-            if cached.ask > 0
-        }
+        price_map = self.market_data.quote_prices()
         preliminary_snapshot, snapshot_failures = build_account_risk_snapshot(
             policy=self.policy,
             state=self.state,
@@ -1398,6 +1398,9 @@ class FullLiveEntryPipeline:
                 "ask": format(quote.ask, "f"),
                 "bid_size": quote.bid_size,
                 "ask_size": quote.ask_size,
+                "size_unit": quote.size_unit,
+                "size_source_version": quote.size_source_version,
+                "depth_scope": quote.depth_scope,
                 "venue_bid_at": quote.venue_bid_at.isoformat(),
                 "venue_ask_at": quote.venue_ask_at.isoformat(),
                 "observed_at": quote.observed_at.isoformat(),
@@ -1424,6 +1427,7 @@ class FullLiveEntryPipeline:
         created_at: datetime,
         expires_at: datetime,
         source_event_ids: tuple[str, ...],
+        quote: Quote,
     ) -> int | None:
         rows = self.state.rows(
             """SELECT plan_id,quantity FROM plans
@@ -1438,7 +1442,6 @@ class FullLiveEntryPipeline:
                 self.policy.config_hash,
             ),
         )
-        quote = self.market_data.quotes[structure.symbol]
         for row in rows:
             quantity = int(row["quantity"])
             candidate = self._build_plan(
@@ -1702,16 +1705,18 @@ class FullLiveDiscoveryExecutor:
         entry_blockers = tuple(
             str(item) for item in getattr(health, "entry_blockers", ())
         )
-        if health.blockers or entry_blockers or getattr(
-            health, "entry_evidence_ready", True
-        ) is not True:
-            return (
-                self._blocked(
-                    tuple(str(item) for item in health.blockers)
-                    + entry_blockers
-                    or ("MARKET_ENTRY_EVIDENCE_NOT_READY",)
-                ),
-            )
+        # Entry-health failures remain a hard no-entry gate for this cycle,
+        # but candidate discovery and read-only cache hydration must still be
+        # allowed to bootstrap the stream subscription that can clear them.
+        # The gate is applied again below before ``pipeline.run_once``.
+        entry_health_failures = (
+            tuple(str(item) for item in health.blockers) + entry_blockers
+        )
+        if (
+            getattr(health, "entry_evidence_ready", True) is not True
+            and not entry_health_failures
+        ):
+            entry_health_failures = ("MARKET_ENTRY_EVIDENCE_NOT_READY",)
 
         try:
             structures = self.source.prepared_structures(
@@ -1723,6 +1728,8 @@ class FullLiveDiscoveryExecutor:
                 self._blocked((f"MASSIVE_CANDIDATE_READ_FAILED:{type(exc).__name__}",)),
             )
         if not structures:
+            if entry_health_failures:
+                return (self._blocked(entry_health_failures),)
             return ("DISCOVERY:NO_TRADE",)
 
         try:
@@ -1741,6 +1748,8 @@ class FullLiveDiscoveryExecutor:
             return (
                 self._blocked(tuple(str(item) for item in hydration_failures)),
             )
+        if entry_health_failures:
+            return (self._blocked(entry_health_failures),)
 
         result = self.pipeline.run_once(
             structures=structures,

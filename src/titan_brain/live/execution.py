@@ -25,6 +25,7 @@ from .broker import (
     BrokerSide,
     BrokerUnknownSubmission,
     EquityOrderType,
+    LocalPreflightDecision,
     MarketHours,
     OperationStatus,
     OrderFamily,
@@ -184,6 +185,37 @@ def _is_exact_cancel_ack(
         result.status is OperationStatus.PENDING_CANCEL
         and result.order.state is BrokerOrderState.PENDING_CANCELLED
     )
+
+
+def _review_provenance_failures(
+    review: ReviewReceipt,
+    capabilities: BrokerCapabilities,
+) -> tuple[str, ...]:
+    """Keep local preflight distinct from mandatory provider review."""
+
+    if isinstance(review, LocalPreflightDecision):
+        checks = (
+            (
+                capabilities.supports_daemon_writes,
+                "LOCAL_PREFLIGHT_DAEMON_WRITE_UNSUPPORTED",
+            ),
+            (
+                capabilities.supports_unattended_writes,
+                "LOCAL_PREFLIGHT_UNATTENDED_WRITE_UNSUPPORTED",
+            ),
+            (
+                not capabilities.review_requires_explicit_confirmation,
+                "LOCAL_PREFLIGHT_CANNOT_REPLACE_REQUIRED_CONFIRMATION",
+            ),
+            (
+                not review.broker_bound and review.broker_review_id is None,
+                "LOCAL_PREFLIGHT_FALSE_BROKER_BINDING",
+            ),
+        )
+        return tuple(code for passed, code in checks if not passed)
+    if not review.broker_bound or not review.broker_review_id:
+        return ("BROKER_REVIEW_NOT_BOUND",)
+    return ()
 
 
 class ExecutionStatus(str, Enum):
@@ -909,8 +941,9 @@ class EntryExecutionCoordinator:
             return ["BROKER_REVIEW_NOT_NORMALIZED"]
         if review.request.exact_tuple != request.exact_tuple:
             failures.append("BROKER_REVIEW_TUPLE_MISMATCH")
-        if not review.broker_bound or not review.broker_review_id:
-            failures.append("BROKER_REVIEW_NOT_BOUND")
+        failures.extend(
+            _review_provenance_failures(review, self.broker.capabilities)
+        )
         if review.expires_at is None or review.expired_at(checked_at):
             failures.append("BROKER_REVIEW_EXPIRED_OR_UNBOUNDED")
         review_age = (checked_at - review.reviewed_at).total_seconds()
@@ -2360,8 +2393,9 @@ class SafetyExecutionCoordinator:
             return ("BROKER_REVIEW_NOT_NORMALIZED",)
         if review.request.exact_tuple != request.exact_tuple:
             failures.append("BROKER_REVIEW_TUPLE_MISMATCH")
-        if not review.broker_bound or not review.broker_review_id:
-            failures.append("BROKER_REVIEW_NOT_BOUND")
+        failures.extend(
+            _review_provenance_failures(review, self.broker.capabilities)
+        )
         if review.expires_at is None or review.expired_at(checked_at):
             failures.append("BROKER_REVIEW_EXPIRED_OR_UNBOUNDED")
         age = (checked_at - review.reviewed_at).total_seconds()

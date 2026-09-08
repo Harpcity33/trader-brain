@@ -45,6 +45,7 @@ from titan_brain.live.models import (
     OrderIntent,
     ProtectionObligation,
     ProtectionState,
+    ReservationState,
     RiskReservation,
 )
 from titan_brain.live.protection import (
@@ -641,6 +642,66 @@ class ReconciliationTests(StoreFixture):
         self.assertEqual(
             self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
             IntentState.RECONCILED.value,
+        )
+
+    def test_delayed_publication_after_two_empty_reads_never_releases_or_retries(self) -> None:
+        _, intent = self.prepare_intent(unknown=False)
+        reconciler = AuthoritativeReconciler(
+            account_masked=ACCOUNT_MASKED, account_key=ACCOUNT_KEY
+        )
+        for seconds in (6, 7):
+            report = reconciler.reconcile_snapshot(
+                self.store,
+                snapshot=account_snapshot(
+                    received_at=NOW + timedelta(seconds=seconds)
+                ),
+                capabilities=capabilities(),
+                now=NOW + timedelta(seconds=seconds),
+                # Eventually-consistent lookup classified this exact ref as
+                # NOT_SEEN_YET, so no authoritative negative is supplied.
+                confirmed_absent_client_refs=(),
+            )
+            self.assertIn("UNKNOWN_LOCAL_INTENT", report.blockers)
+            self.assertEqual(
+                self.store.row("order_intents", "intent_id", intent.intent_id)[
+                    "state"
+                ],
+                IntentState.SUBMITTING.value,
+            )
+            self.assertEqual(
+                self.store.row(
+                    "risk_reservations", "reservation_id", "reservation-1"
+                )["state"],
+                ReservationState.RESERVED.value,
+            )
+
+        published = order_snapshot(
+            order_id="delayed-broker-order",
+            state=BrokerOrderState.CONFIRMED,
+            client_ref=intent.client_ref,
+            updated_at=NOW + timedelta(seconds=8),
+        )
+        recovered = reconciler.reconcile_snapshot(
+            self.store,
+            snapshot=account_snapshot(
+                received_at=NOW + timedelta(seconds=8), orders=(published,)
+            ),
+            capabilities=capabilities(),
+            now=NOW + timedelta(seconds=8),
+        )
+        self.assertNotIn("UNKNOWN_LOCAL_INTENT", recovered.blockers)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", intent.intent_id)["state"],
+            IntentState.ACKNOWLEDGED.value,
+        )
+        self.assertEqual(
+            len(
+                self.store.rows(
+                    "SELECT * FROM order_intents WHERE intent_id=?",
+                    (intent.intent_id,),
+                )
+            ),
+            1,
         )
 
     def test_submitting_is_not_reclassified_by_incomplete_or_nonnewer_negative(self) -> None:

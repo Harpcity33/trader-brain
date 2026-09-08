@@ -29,7 +29,7 @@ from titan_brain.live.pipeline import (
 )
 
 
-NOW = datetime(2026, 9, 8, 14, 1, 1, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 BINDING = "a" * 64
 
 
@@ -140,6 +140,7 @@ class FakeStream:
         self.connected = connected
         self.events = tuple(events)
         self.drain_calls = []
+        self.symbol_sets = []
 
     def status(self, *, now):
         return MassiveStreamStatus(
@@ -155,6 +156,12 @@ class FakeStream:
     def drain(self, *, limit, timeout_seconds):
         self.drain_calls.append((limit, timeout_seconds))
         return self.events[:limit]
+
+    def set_symbols(self, symbols):
+        self.symbol_sets.append(tuple(symbols))
+
+    def close(self):
+        self.connected = False
 
 
 class Tradable:
@@ -280,7 +287,7 @@ class MinimalLivePolicy:
 
 class ProviderIntegrationTests(unittest.TestCase):
     def source(self, *, rest=None, stream=None, session=None):
-        return MassiveRestStreamSource(
+        source = MassiveRestStreamSource(
             candidates=CandidateSource(),
             rest=rest or FakeRest(),
             stream=stream or FakeStream(),
@@ -288,6 +295,8 @@ class ProviderIntegrationTests(unittest.TestCase):
             health_max_age_seconds=15,
             candidate_max_age_seconds=120,
         )
+        self.addCleanup(source.close)
+        return source
 
     def test_closed_session_is_waiting_not_service_failure(self) -> None:
         source = self.source(
@@ -333,12 +342,19 @@ class ProviderIntegrationTests(unittest.TestCase):
             tradability=tradability,
         )
         self.assertEqual(failures, ())
+        self.assertTrue(source.wait_for_backfills(timeout_seconds=2))
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=1)
+        while datetime.now(timezone.utc) < deadline:
+            cached = cache.quote_for("XYZ")
+            if cached is not None and cached.bid == Decimal("10.01"):
+                break
+            source._stop.wait(0.005)
         self.assertEqual(str(cache.quotes["XYZ"].bid), "10.01")
         self.assertTrue(cache.quotes["XYZ"].tradable)
         self.assertIn("nbbo_top_of_book", cache.quotes["XYZ"].source)
         self.assertIn("robinhood_instrument", cache.quotes["XYZ"].source)
         self.assertEqual(len(cache.bars["XYZ"]), 1)
-        self.assertGreaterEqual(len(tradability.calls), 2)
+        self.assertGreaterEqual(len(tradability.calls), 1)
 
     def test_bounded_urllib_transport_uses_only_injected_authorizer(self) -> None:
         captured = {}

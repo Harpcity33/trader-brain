@@ -4,6 +4,11 @@ Prepared for the September 8, 2026 target. This is the single policy-delta
 record for the full-live release. It does not grant order authority, activate a
 service, or turn an unresolved integration into an approved one.
 
+The completed recommended values and rationale are now recorded once in
+`PROPOSED_OWNER_POLICY_2026-09-08.md`. That file is a proposal, not an approval;
+the blank-state discussion below remains the provenance for why an owner
+decision is required.
+
 ## Baseline preserved without another approval
 
 The replacement release must retain all of the following exactly unless the

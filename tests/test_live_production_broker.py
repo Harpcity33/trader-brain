@@ -12,6 +12,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from titan_brain.live.broker import (  # noqa: E402
+    BrokerNativeReview,
     BrokerContractViolation,
     BrokerFactoryError,
     BrokerMutationBlocked,
@@ -20,10 +21,12 @@ from titan_brain.live.broker import (  # noqa: E402
     BrokerSide,
     ClientRefLookupResult,
     ClientRefRecoverySource,
+    CollectedObservation,
     EquityOrderType,
     FakeBrokerClient,
     FillSnapshot,
     MarketHours,
+    LocalPreflightDecision,
     OperationStatus,
     OrderCoverageContract,
     OrderFamily,
@@ -33,6 +36,7 @@ from titan_brain.live.broker import (  # noqa: E402
     OrderRequest,
     OrderSnapshot,
     ProductionAccountBase,
+    ProviderSnapshot,
     ProductionTransportDescriptor,
     RobinhoodBrokerAdapter,
     SupportedProductionBrokerAdapter,
@@ -56,7 +60,9 @@ REF_2 = "00000000-0000-4000-8000-000000000002"
 REF_3 = "00000000-0000-4000-8000-000000000003"
 
 
-def complete_history_contract() -> OrderCoverageContract:
+def complete_history_contract(
+    *, negative_results_authoritative: bool = True
+) -> OrderCoverageContract:
     return OrderCoverageContract(
         contract_version="supported-test-history-v1",
         evidence_observed_at=NOW,
@@ -76,7 +82,7 @@ def complete_history_contract() -> OrderCoverageContract:
         ),
         client_ref_recovery_source=ClientRefRecoverySource.EXHAUSTIVE_ORDER_HISTORY,
         broker_preserves_client_ref=True,
-        negative_client_ref_results_authoritative=True,
+        negative_client_ref_results_authoritative=negative_results_authoritative,
     )
 
 
@@ -134,6 +140,10 @@ class FixtureProductionTransport:
         )
         self.loop = loop
         self.calls: list[tuple[OrderFamily, str | None]] = []
+        self.clock_value = NOW
+
+    def clock(self) -> datetime:
+        return self.clock_value
 
     @property
     def descriptor(self) -> ProductionTransportDescriptor:
@@ -149,6 +159,7 @@ class FixtureProductionTransport:
         return ProductionAccountBase(
             snapshot=self.base,
             snapshot_token="fixture-provider-snapshot-1",
+            snapshot_token_source="fixture:documented-version-field",
         )
 
     def list_order_family_page(
@@ -172,7 +183,19 @@ class FixtureProductionTransport:
 
     def review_equity_order(self, exact_account_id, request):
         self._account(exact_account_id)
-        return self.fake.review_equity_order(request)
+        review = self.fake.review_equity_order(request)
+        return BrokerNativeReview(
+            request=review.request,
+            reviewed_at=review.reviewed_at,
+            expires_at=review.expires_at,
+            disclosure=review.disclosure,
+            order_checks=review.order_checks,
+            required_confirmation_phrase=review.required_confirmation_phrase,
+            broker_review_id=review.broker_review_id,
+            broker_bound=review.broker_bound,
+            preview=review.preview,
+            received_at=review.received_at,
+        )
 
     def place_equity_order(self, exact_account_id, request, **kwargs):
         self._account(exact_account_id)
@@ -183,6 +206,9 @@ class FixtureProductionTransport:
         return self.fake.cancel_equity_order(ACCOUNT, broker_order_id, **kwargs)
 
     def _page(self, family, page_id, orders, next_cursor):
+        page_index = 1 if family is OrderFamily.STANDARD_EQUITY and page_id.startswith("standard-2") else 0
+        if page_id == "standard-loop":
+            page_index = 1
         return OrderFamilyPage(
             account_masked=ACCOUNT,
             family=family,
@@ -190,9 +216,10 @@ class FixtureProductionTransport:
             page_id=page_id,
             orders=orders,
             active_order_count=sum(not item.state.terminal for item in orders),
-            observed_at=NOW,
-            received_at=NOW,
+            observed_at=self.clock_value,
+            received_at=self.clock_value,
             next_cursor=next_cursor,
+            page_index=page_index,
         )
 
     @staticmethod
@@ -203,13 +230,9 @@ class FixtureProductionTransport:
 
 class SlowSecondPageTransport(FixtureProductionTransport):
     def list_order_family_page(self, exact_account_id, family, cursor):
-        page = super().list_order_family_page(exact_account_id, family, cursor)
         if family is OrderFamily.STANDARD_EQUITY and cursor == "":
-            return replace(
-                page,
-                observed_at=NOW + timedelta(seconds=6),
-                received_at=NOW + timedelta(seconds=6),
-            )
+            self.clock_value = NOW + timedelta(seconds=6)
+        page = super().list_order_family_page(exact_account_id, family, cursor)
         return page
 
 
@@ -219,6 +242,31 @@ class CrossSnapshotPageTransport(FixtureProductionTransport):
         if family is OrderFamily.STANDARD_EQUITY and cursor == "":
             return replace(page, snapshot_token="different-provider-snapshot")
         return page
+
+
+class StaleAccountReceiptTransport(FixtureProductionTransport):
+    def get_account_base(self, exact_account_id):
+        envelope = super().get_account_base(exact_account_id)
+        stale = NOW - timedelta(seconds=3)
+        return replace(
+            envelope,
+            snapshot=replace(
+                envelope.snapshot,
+                observed_at=stale,
+                received_at=stale,
+                risk_evidence_as_of=stale,
+            ),
+        )
+
+
+class FuturePageReceiptTransport(FixtureProductionTransport):
+    def list_order_family_page(self, exact_account_id, family, cursor):
+        page = super().list_order_family_page(exact_account_id, family, cursor)
+        return replace(
+            page,
+            observed_at=NOW + timedelta(seconds=3),
+            received_at=NOW + timedelta(seconds=3),
+        )
 
 
 class DedicatedLookupTransport(FixtureProductionTransport):
@@ -282,6 +330,121 @@ class ContradictoryRejectedPlaceTransport(FixtureProductionTransport):
             message="rejected while returning a working order",
             order=live_order,
         )
+
+
+class CollectedObservationTransport(FixtureProductionTransport):
+    def __init__(self, *, move_on_second_collection: bool = False) -> None:
+        super().__init__()
+        self.collection_number = 0
+        self.current_collection_id = "0" * 64
+        self.move_on_second_collection = move_on_second_collection
+
+    def get_account_base(self, exact_account_id):
+        self._account(exact_account_id)
+        self.collection_number += 1
+        self.current_collection_id = f"{self.collection_number:064x}"
+        return CollectedObservation(
+            snapshot=self.base,
+            collection_id=self.current_collection_id,
+            request_started_at=NOW,
+            request_completed_at=NOW,
+        )
+
+    def list_order_family_page(self, exact_account_id, family, cursor):
+        page = super().list_order_family_page(exact_account_id, family, cursor)
+        orders = page.orders
+        active = page.active_order_count
+        if (
+            self.move_on_second_collection
+            and self.collection_number == 2
+            and family is OrderFamily.STANDARD_EQUITY
+            and cursor is None
+        ):
+            extra = order("moving-order", REF_3)
+            orders = orders + (extra,)
+            active += 1
+        return replace(
+            page,
+            snapshot_token=None,
+            collection_id=self.current_collection_id,
+            orders=orders,
+            active_order_count=active,
+        )
+
+
+class EventuallyConsistentHistoryTransport(CollectedObservationTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        coverage = complete_history_contract(negative_results_authoritative=False)
+        self._descriptor = replace(
+            self.descriptor,
+            capabilities=replace(
+                self.descriptor.capabilities,
+                order_coverage=coverage,
+            ),
+        )
+        self.published = False
+
+    def list_order_family_page(self, exact_account_id, family, cursor):
+        page = super().list_order_family_page(exact_account_id, family, cursor)
+        if family is OrderFamily.STANDARD_EQUITY:
+            if cursor is None:
+                orders = (order("delayed", REF_3),) if self.published else ()
+                return replace(
+                    page,
+                    orders=orders,
+                    active_order_count=len(orders),
+                    next_cursor=None,
+                )
+            raise AssertionError("eventually consistent fixture has one page")
+        return page
+
+
+class MissingPageTransport(FixtureProductionTransport):
+    def list_order_family_page(self, exact_account_id, family, cursor):
+        page = super().list_order_family_page(exact_account_id, family, cursor)
+        if family is OrderFamily.STANDARD_EQUITY and cursor == "":
+            return replace(page, page_index=2)
+        return page
+
+
+class DirectApiNoPreviewTransport(FixtureProductionTransport):
+    def review_equity_order(self, exact_account_id, request):
+        self._account(exact_account_id)
+        return LocalPreflightDecision(
+            request=request,
+            reviewed_at=NOW,
+            received_at=NOW,
+            expires_at=NOW + timedelta(seconds=30),
+            disclosure="Local deterministic policy preflight; not broker-issued.",
+            order_checks=(),
+            required_confirmation_phrase=None,
+            broker_review_id=None,
+            broker_bound=False,
+            preview={},
+            decision_id="local-decision-1",
+            policy_binding_id="policy-sha256:test",
+            evidence_collection_id="collection-sha256:test",
+            provider_contract_id="direct-api-contract-v1",
+        )
+
+    def place_equity_order(self, exact_account_id, request, **kwargs):
+        self._account(exact_account_id)
+        accepted = order("direct-api-order", request.client_ref_id)
+        return BrokerOperationResult(
+            operation="place_equity_order",
+            status=OperationStatus.ACKNOWLEDGED,
+            observed_at=NOW,
+            received_at=NOW,
+            accepted=True,
+            message="accepted",
+            order=accepted,
+        )
+
+
+class AttendedRouteLocalPreflightTransport(DirectApiNoPreviewTransport):
+    def __init__(self) -> None:
+        super().__init__(require_confirmation=True)
 
 
 class ProductionBrokerContractTests(unittest.TestCase):
@@ -421,6 +584,16 @@ class ProductionBrokerContractTests(unittest.TestCase):
                 next_cursor=None,
             )
 
+    def test_read_receipts_are_bound_to_actual_transport_call(self) -> None:
+        with self.assertRaisesRegex(BrokerContractViolation, "predates"):
+            SupportedProductionBrokerAdapter(
+                StaleAccountReceiptTransport(), clock=lambda: NOW
+            ).get_account_snapshot(ACCOUNT)
+        with self.assertRaisesRegex(BrokerContractViolation, "in the future"):
+            SupportedProductionBrokerAdapter(
+                FuturePageReceiptTransport(), clock=lambda: NOW
+            ).get_account_snapshot(ACCOUNT)
+
     def test_account_base_rejects_risk_fact_after_provider_observation(self) -> None:
         transport = FixtureProductionTransport()
         snapshot = replace(
@@ -429,7 +602,11 @@ class ProductionBrokerContractTests(unittest.TestCase):
             risk_evidence_as_of=NOW + timedelta(seconds=3),
         )
         with self.assertRaisesRegex(ValueError, "risk fact"):
-            ProductionAccountBase(snapshot=snapshot, snapshot_token="snapshot")
+            ProductionAccountBase(
+                snapshot=snapshot,
+                snapshot_token="snapshot",
+                snapshot_token_source="fixture:documented-version-field",
+            )
 
     def test_client_ref_result_rejects_cross_account_found_order(self) -> None:
         with self.assertRaisesRegex(ValueError, "lookup account"):
@@ -463,7 +640,7 @@ class ProductionBrokerContractTests(unittest.TestCase):
 
     def test_snapshot_consumes_every_page_including_empty_cursor(self) -> None:
         transport = FixtureProductionTransport()
-        adapter = SupportedProductionBrokerAdapter(transport)
+        adapter = SupportedProductionBrokerAdapter(transport, clock=transport.clock)
         snapshot = adapter.get_account_snapshot(ACCOUNT)
         self.assertEqual(
             [item.broker_order_id for item in snapshot.equity_orders], ["one", "two"]
@@ -472,7 +649,8 @@ class ProductionBrokerContractTests(unittest.TestCase):
         self.assertTrue(snapshot.whole_broker_reconciled)
 
     def test_slow_pagination_preserves_earliest_observation_for_freshness(self) -> None:
-        adapter = SupportedProductionBrokerAdapter(SlowSecondPageTransport())
+        transport = SlowSecondPageTransport()
+        adapter = SupportedProductionBrokerAdapter(transport, clock=transport.clock)
         snapshot = adapter.get_account_snapshot(ACCOUNT)
         self.assertEqual(snapshot.observed_at, NOW)
         self.assertEqual(snapshot.received_at, NOW + timedelta(seconds=6))
@@ -487,15 +665,57 @@ class ProductionBrokerContractTests(unittest.TestCase):
 
     def test_cursor_loop_fails_entire_snapshot(self) -> None:
         adapter = SupportedProductionBrokerAdapter(
-            FixtureProductionTransport(loop=True)
+            FixtureProductionTransport(loop=True), clock=lambda: NOW
         )
         with self.assertRaisesRegex(BrokerContractViolation, "cursor loop"):
             adapter.get_account_snapshot(ACCOUNT)
 
     def test_pagination_cannot_cross_provider_snapshot_token(self) -> None:
-        adapter = SupportedProductionBrokerAdapter(CrossSnapshotPageTransport())
+        adapter = SupportedProductionBrokerAdapter(
+            CrossSnapshotPageTransport(), clock=lambda: NOW
+        )
         with self.assertRaisesRegex(BrokerContractViolation, "snapshot tokens"):
             adapter.get_account_snapshot(ACCOUNT)
+
+    def test_missing_page_index_fails_the_entire_collection(self) -> None:
+        adapter = SupportedProductionBrokerAdapter(
+            MissingPageTransport(), clock=lambda: NOW
+        )
+        with self.assertRaisesRegex(BrokerContractViolation, "skipped or reordered"):
+            adapter.get_account_snapshot(ACCOUNT)
+
+    def test_non_atomic_collection_requires_two_stable_reads(self) -> None:
+        stable = CollectedObservationTransport()
+        snapshot = SupportedProductionBrokerAdapter(
+            stable, clock=stable.clock
+        ).get_account_snapshot(ACCOUNT)
+        self.assertEqual(len(snapshot.equity_orders), 2)
+        self.assertEqual(stable.collection_number, 2)
+
+        moving = CollectedObservationTransport(move_on_second_collection=True)
+        with self.assertRaisesRegex(BrokerContractViolation, "state moved"):
+            SupportedProductionBrokerAdapter(
+                moving, clock=moving.clock
+            ).get_account_snapshot(ACCOUNT)
+
+    def test_eventually_consistent_history_absence_remains_not_seen_yet(self) -> None:
+        transport = EventuallyConsistentHistoryTransport()
+        adapter = SupportedProductionBrokerAdapter(transport, clock=lambda: NOW)
+        first = adapter.lookup_equity_orders_by_client_ref(ACCOUNT, (REF_3,))
+        second = adapter.lookup_equity_orders_by_client_ref(ACCOUNT, (REF_3,))
+        for result in (first, second):
+            self.assertEqual(result.found_orders, ())
+            self.assertEqual(result.confirmed_absent_client_refs, ())
+            self.assertEqual(result.not_seen_yet_client_refs, (REF_3,))
+            self.assertTrue(result.complete)
+
+        transport.published = True
+        published = adapter.lookup_equity_orders_by_client_ref(ACCOUNT, (REF_3,))
+        self.assertEqual(
+            tuple(item.client_ref_id for item in published.found_orders), (REF_3,)
+        )
+        self.assertEqual(published.confirmed_absent_client_refs, ())
+        self.assertEqual(published.not_seen_yet_client_refs, ())
 
     def test_exhaustive_history_recovers_exact_refs_and_authoritative_absence(self) -> None:
         adapter = SupportedProductionBrokerAdapter(
@@ -541,6 +761,47 @@ class ProductionBrokerContractTests(unittest.TestCase):
                 review=review,
                 explicit_confirmation=review.required_confirmation_phrase,
             )
+
+    def test_direct_api_without_preview_id_uses_explicit_local_preflight(self) -> None:
+        transport = DirectApiNoPreviewTransport()
+        adapter = SupportedProductionBrokerAdapter(transport, clock=lambda: NOW)
+        request = OrderRequest(
+            account_masked=ACCOUNT,
+            symbol="TEST",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            quantity=1,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id=REF_3,
+            limit_price=Decimal("10.00"),
+        )
+        review = adapter.review_equity_order(request)
+        self.assertIsInstance(review, LocalPreflightDecision)
+        self.assertFalse(review.broker_bound)
+        self.assertIsNone(review.broker_review_id)
+        placed = adapter.place_equity_order(request, review=review)
+        self.assertEqual(placed.order.client_ref_id, REF_3)
+
+    def test_local_preflight_cannot_replace_attended_confirmation(self) -> None:
+        adapter = SupportedProductionBrokerAdapter(
+            AttendedRouteLocalPreflightTransport(), clock=lambda: NOW
+        )
+        request = OrderRequest(
+            account_masked=ACCOUNT,
+            symbol="TEST",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            quantity=1,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id=REF_3,
+            limit_price=Decimal("10.00"),
+        )
+        with self.assertRaisesRegex(
+            BrokerContractViolation, "cannot replace mandatory"
+        ):
+            adapter.review_equity_order(request)
 
     def test_named_factory_preserves_attended_path_and_requires_injected_production(self) -> None:
         attended = build_broker_client(

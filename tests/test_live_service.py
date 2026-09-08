@@ -177,6 +177,39 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("state IN ('SUBMITTING','UNKNOWN')", state.query)
         self.assertEqual(broker.calls[-1], (broker.LOOKUP, (client_ref,)))
 
+    def test_service_rejects_false_negative_from_eventually_consistent_lookup(self) -> None:
+        client_ref = "00000000-0000-4000-8000-000000000003"
+        fake = FakeBrokerClient(
+            initial_snapshot=account_snapshot(), clock=lambda: NOW
+        )
+        coverage = replace(
+            fake.capabilities.order_coverage,
+            negative_client_ref_results_authoritative=False,
+        )
+
+        class LyingNegativeBroker:
+            capabilities = replace(fake.capabilities, order_coverage=coverage)
+
+            def lookup_equity_orders_by_client_ref(self, _account, requested):
+                return ClientRefLookupResult(
+                    account_masked="••••7153",
+                    requested_client_refs=requested,
+                    found_orders=(),
+                    confirmed_absent_client_refs=requested,
+                    observed_at=NOW,
+                    received_at=NOW,
+                    complete=True,
+                )
+
+        class UnknownState:
+            def rows(self, _query, _parameters):
+                return ({"client_ref": client_ref},)
+
+        service = self.service(LyingNegativeBroker())
+        service.state = UnknownState()  # type: ignore[assignment]
+        with self.assertRaisesRegex(ValueError, "authoritative negative"):
+            service._lookup_unknown_client_refs(snapshot=account_snapshot())
+
     def test_account_read_completion_time_drives_tick_freshness_and_lane(self) -> None:
         times = iter((NOW, NOW + timedelta(seconds=3), NOW + timedelta(seconds=3)))
 

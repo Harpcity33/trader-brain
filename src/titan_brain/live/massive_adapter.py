@@ -10,6 +10,8 @@ eligibility always comes from an independent injected provider.
 from __future__ import annotations
 
 from contextlib import closing
+from concurrent.futures import Future, ThreadPoolExecutor
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,6 +20,8 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+from threading import Event, RLock, Thread
+import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import quote as url_quote, urlencode
 from urllib.request import Request, urlopen
@@ -252,9 +256,68 @@ class MassiveStreamTransport(Protocol):
 
     def status(self, *, now: datetime) -> MassiveStreamStatus: ...
 
+    def set_symbols(self, symbols: Sequence[str]) -> None: ...
+
+    def close(self) -> None: ...
+
     def drain(
         self, *, limit: int, timeout_seconds: float
     ) -> Sequence[Mapping[str, Any]]: ...
+
+
+@dataclass(frozen=True)
+class MassiveSymbolReadiness:
+    symbol: str
+    phase: str
+    ready: bool
+    quote_received_at: datetime | None
+    completed_bar_end: datetime | None
+    blocker: str | None
+
+
+@dataclass(frozen=True)
+class MassiveSymbolEvidenceSnapshot:
+    sampled_at: datetime
+    symbol: str
+    quote: Quote | None
+    latest_completed_bar: CompletedBar | None
+    readiness: MassiveSymbolReadiness
+
+
+@dataclass(frozen=True)
+class MassiveHotPathMetrics:
+    observed_at: datetime
+    watched_symbols: int
+    ready_symbols: int
+    pending_backfills: int
+    cold_start_rest_calls: int
+    gap_rest_calls: int
+    steady_state_rest_calls: int
+    health_rest_calls: int
+    stream_batches: int
+    stream_events: int
+    stream_backlog_batches: int
+    ignored_second_aggregates: int
+    stream_failures: int
+    queue_age_p50_ms: float | None
+    queue_age_p95_ms: float | None
+    drain_wait_p50_ms: float | None
+    drain_wait_p95_ms: float | None
+    processing_p50_ms: float | None
+    processing_p95_ms: float | None
+    latest_stream_receipt_at: datetime | None
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(float(value) for value in values)
+    index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * percentile)))
+    return round(ordered[index], 3)
 
 
 class PreparedCandidateSource(Protocol):
@@ -278,13 +341,50 @@ def _provider_time(value: object, field: str) -> datetime:
     return datetime.fromtimestamp(raw / divisor, timezone.utc)
 
 
-class MassiveRestStreamSource:
-    """Production market-evidence source over injected Massive transports.
+_MASSIVE_QUOTE_SIZE_CUTOVER = datetime(2025, 11, 3, tzinfo=timezone.utc)
 
-    Candidate geometry remains a separately injected, non-authoritative input.
-    Quotes are NBBO/top-of-book only; their sizes are never represented as
-    full Level 2 depth.  Robinhood tradability is obtained independently via
-    the ``tradability`` argument to :meth:`hydrate_cache`.
+
+def _massive_quote_sizes(
+    bid_size: object, ask_size: object, *, venue_at: datetime
+) -> tuple[int, int, str]:
+    """Normalize provider-versioned stock quote sizes to executable shares."""
+
+    values: list[int] = []
+    for name, raw in (("bid_size", bid_size), ("ask_size", ask_size)):
+        if isinstance(raw, bool):
+            raise MassiveStoreError(f"{name} is invalid")
+        try:
+            value = Decimal(str(raw))
+        except Exception as exc:
+            raise MassiveStoreError(f"{name} is invalid") from exc
+        if value < 0 or value != value.to_integral_value():
+            raise MassiveStoreError(f"{name} is invalid")
+        values.append(int(value))
+    if venue_at >= _MASSIVE_QUOTE_SIZE_CUTOVER:
+        return (
+            values[0],
+            values[1],
+            "massive_stock_quotes_shares_effective_2025-11-03",
+        )
+    return (
+        values[0] * 100,
+        values[1] * 100,
+        "massive_stock_quotes_legacy_round_lots_converted_to_shares",
+    )
+
+
+class MassiveRestStreamSource:
+    """Continuously ingested Massive evidence with isolated REST backfills.
+
+    One daemon consumer is the sole owner of ``stream.drain``.  Candidate
+    discovery only updates its bounded subscription and schedules cold/gap
+    work; it never drains the stream or waits for historical REST.  Slow
+    history therefore makes only the affected symbol unready and cannot stop
+    quote/minute-event ingestion for the remaining book.
+
+    Massive stock quote sizes are stored exactly as *shares*, per the current
+    provider contract effective 2025-11-03.  They are NBBO/top-of-book sizes,
+    not round lots and not full order-book depth.
     """
 
     def __init__(
@@ -299,6 +399,7 @@ class MassiveRestStreamSource:
         request_timeout_seconds: float = 3.0,
         stream_drain_timeout_seconds: float = 0.05,
         stream_batch_limit: int = 1000,
+        backfill_concurrency: int = 4,
     ) -> None:
         if rest.authorization.binding_id != stream.authorization.binding_id:
             raise ValueError("Massive REST and stream authorization bindings differ")
@@ -310,6 +411,8 @@ class MassiveRestStreamSource:
             raise ValueError("Massive stream drain timeout must be in [0, 5]")
         if not 1 <= stream_batch_limit <= 10_000:
             raise ValueError("Massive stream batch limit must be in [1, 10000]")
+        if not 1 <= backfill_concurrency <= 16:
+            raise ValueError("Massive backfill concurrency must be in [1, 16]")
         self.candidates = candidates
         self.rest = rest
         self.stream = stream
@@ -319,6 +422,44 @@ class MassiveRestStreamSource:
         self.request_timeout_seconds = float(request_timeout_seconds)
         self.stream_drain_timeout_seconds = float(stream_drain_timeout_seconds)
         self.stream_batch_limit = int(stream_batch_limit)
+        self.backfill_concurrency = int(backfill_concurrency)
+
+        self._lock = RLock()
+        self._stop = Event()
+        self._stream_thread: Thread | None = None
+        self._executor = ThreadPoolExecutor(
+            max_workers=self.backfill_concurrency,
+            thread_name_prefix="titan-massive-rest",
+        )
+        self._cache: MarketDataCache | None = None
+        self._tradability: TradabilityProvider | None = None
+        self._watched: tuple[str, ...] = ()
+        self._session_start: datetime | None = None
+        self._session_generation = 0
+        self._symbol_phase: dict[str, str] = {}
+        self._symbol_blocker: dict[str, str] = {}
+        self._symbol_tradable: dict[str, bool] = {}
+        self._backfills: dict[str, Future[tuple[str, str | None]]] = {}
+        self._pending_minutes: dict[tuple[str, datetime], Mapping[str, Any]] = {}
+        self._rest_health_future: Future[None] | None = None
+        self._rest_health_at: datetime | None = None
+        self._rest_health_state = "pending"
+        self._rest_health_failure: str | None = None
+        self._metrics: dict[str, int] = {
+            "cold_start_rest_calls": 0,
+            "gap_rest_calls": 0,
+            "steady_state_rest_calls": 0,
+            "health_rest_calls": 0,
+            "stream_batches": 0,
+            "stream_events": 0,
+            "stream_backlog_batches": 0,
+            "ignored_second_aggregates": 0,
+            "stream_failures": 0,
+        }
+        self._queue_ages_ms: deque[float] = deque(maxlen=4096)
+        self._drain_wait_ms: deque[float] = deque(maxlen=4096)
+        self._processing_ms: deque[float] = deque(maxlen=4096)
+        self._latest_stream_receipt_at: datetime | None = None
 
     def release_components(self) -> tuple[tuple[str, object, tuple[str, ...]], ...]:
         """Declare transports, candidates, and session logic for attestation."""
@@ -332,7 +473,7 @@ class MassiveRestStreamSource:
             (
                 "massive_stream_transport",
                 self.stream,
-                ("status", "drain"),
+                ("status", "set_symbols", "drain", "close"),
             ),
             (
                 "prepared_candidate_source",
@@ -342,8 +483,61 @@ class MassiveRestStreamSource:
             ("market_session_state", self.session_state, ("__call__",)),
         )
 
+    def close(self, *, wait: bool = True) -> None:
+        """Stop background ingestion without mutating any provider state."""
+
+        self._stop.set()
+        # Closing the read-only socket first unblocks a transport drain that
+        # may otherwise wait for its configured timeout.
+        self.stream.close()
+        thread = self._stream_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0 if wait else 0.0)
+        self._executor.shutdown(wait=wait, cancel_futures=True)
+
+    def _schedule_rest_health(self, current: datetime) -> None:
+        with self._lock:
+            prior = self._rest_health_future
+            fresh = (
+                self._rest_health_at is not None
+                and (current - self._rest_health_at).total_seconds()
+                <= self.health_max_age_seconds
+            )
+            if fresh or (prior is not None and not prior.done()) or self._stop.is_set():
+                return
+            self._rest_health_future = self._executor.submit(self._probe_rest_health)
+
+    def _probe_rest_health(self) -> None:
+        try:
+            response = self.rest.get_json(
+                "/v1/marketstatus/now",
+                parameters={},
+                timeout_seconds=self.request_timeout_seconds,
+            )
+            received_at = _utc_now()
+            state = str(response.get("status", "reachable"))
+            failure = None
+        except Exception as exc:
+            received_at = _utc_now()
+            state = "unavailable"
+            failure = f"MASSIVE_REST_UNAVAILABLE:{type(exc).__name__}"
+        with self._lock:
+            self._metrics["health_rest_calls"] += 1
+            self._rest_health_at = received_at
+            self._rest_health_state = state
+            self._rest_health_failure = failure
+
     def health(self, *, now: datetime) -> MassiveFeedHealth:
         current = _aware(now, "now")
+        # Snapshot the last completed probe before launching its refresh.  A
+        # probe that races to completion during this call cannot retroactively
+        # make evidence that was pending or expired at the call boundary look
+        # ready.
+        with self._lock:
+            rest_state = self._rest_health_state
+            rest_failure = self._rest_health_failure
+            rest_health_at = self._rest_health_at
+        self._schedule_rest_health(current)
         health_blockers: list[str] = []
         entry_blockers: list[str] = []
         states: dict[str, str] = {}
@@ -354,16 +548,21 @@ class MassiveRestStreamSource:
         except Exception as exc:
             session = MarketSessionState.WAITING_FOR_SESSION
             health_blockers.append(f"SESSION_STATE_UNAVAILABLE:{type(exc).__name__}")
-        try:
-            response = self.rest.get_json(
-                "/v1/marketstatus/now",
-                parameters={},
-                timeout_seconds=self.request_timeout_seconds,
-            )
-            states["massive_rest"] = str(response.get("status", "reachable"))
-        except Exception as exc:
-            health_blockers.append(f"MASSIVE_REST_UNAVAILABLE:{type(exc).__name__}")
-            states["massive_rest"] = "unavailable"
+        with self._lock:
+            rest_probe = self._rest_health_future
+        states["massive_rest"] = rest_state
+        if rest_failure is not None:
+            health_blockers.append(rest_failure)
+        if rest_health_at is None:
+            entry_blockers.append("MASSIVE_REST_HEALTH_PENDING")
+        else:
+            rest_age = (current - rest_health_at).total_seconds()
+            if rest_age < -1:
+                entry_blockers.append("MASSIVE_REST_HEALTH_FUTURE_DATED")
+            elif rest_age > self.health_max_age_seconds:
+                entry_blockers.append("MASSIVE_REST_HEALTH_EXPIRED")
+        if rest_probe is not None and not rest_probe.done():
+            entry_blockers.append("MASSIVE_REST_HEALTH_IN_FLIGHT")
         latest_quote: datetime | None = None
         latest_bar: datetime | None = None
         try:
@@ -438,17 +637,257 @@ class MassiveRestStreamSource:
         start = _aware(session_start, "session_start")
         if start >= current:
             raise ValueError("session_start must precede now")
-        symbols = tuple(dict.fromkeys(item.symbol.strip().upper() for item in structures))
-        failures: list[str] = []
+        symbols = tuple(
+            dict.fromkeys(item.symbol.strip().upper() for item in structures)
+        )
+        cache.begin_session(start)
+        cache.set_active_scores((item.symbol, item.ranking_score) for item in structures)
+        with self._lock:
+            if self._cache is not None and self._cache is not cache:
+                raise ValueError("Massive source cannot be rebound to another cache")
+            if self._tradability is not None and self._tradability is not tradability:
+                raise ValueError("Massive source cannot be rebound to another tradability provider")
+            session_changed = (
+                self._session_start is not None
+                and self._session_start != start
+            )
+            self._cache = cache
+            self._tradability = tradability
+            self._session_start = start
+            self._watched = symbols
+            if session_changed:
+                self._session_generation += 1
+                self._symbol_phase.clear()
+                self._symbol_blocker.clear()
+                self._symbol_tradable.clear()
+                self._pending_minutes.clear()
+
+        # The transport owns actual subscribe/unsubscribe and reconnect
+        # resubscription mechanics.  This call is idempotent and contains no
+        # broker or financial mutation.
+        self.stream.set_symbols(symbols)
+        self._ensure_stream_consumer()
+
         for symbol in symbols:
-            eligible = False
+            _, _, _, degradation = cache.symbol_state(symbol)
+            with self._lock:
+                phase = self._symbol_phase.get(symbol)
+                active = self._backfills.get(symbol)
+            if phase is None:
+                self._schedule_backfill(symbol, mode="cold", start=start, end=current)
+            else:
+                gap = cache.missing_sequence_range(symbol)
+                resync_required = gap is not None or degradation in {
+                    "MARKET_DATA_DISCONNECTED:massive",
+                }
+                if not resync_required or (active is not None and not active.done()):
+                    continue
+                gap_start = (
+                    datetime.fromtimestamp(gap[0] * 60, timezone.utc)
+                    if gap is not None
+                    else start
+                )
+                gap_end = (
+                    datetime.fromtimestamp(gap[1] * 60, timezone.utc)
+                    if gap is not None
+                    else current
+                )
+                self._schedule_backfill(
+                    symbol, mode="gap", start=gap_start, end=gap_end
+                )
+
+        # Per-symbol initialization/failure is represented in the cache and
+        # readiness API.  It must not convert one cold candidate into a global
+        # discovery or protection failure.
+        return ()
+
+    def _ensure_stream_consumer(self) -> None:
+        with self._lock:
+            if self._stream_thread is not None and self._stream_thread.is_alive():
+                return
+            if self._stop.is_set():
+                raise MassiveStoreError("Massive source is closed")
+            self._stream_thread = Thread(
+                target=self._stream_loop,
+                name="titan-massive-stream",
+                daemon=True,
+            )
+            self._stream_thread.start()
+
+    def _stream_loop(self) -> None:
+        while not self._stop.is_set():
+            drain_started = time.monotonic()
             try:
-                eligible = tradability.is_tradable(symbol, as_of=current)
+                events = self.stream.drain(
+                    limit=self.stream_batch_limit,
+                    timeout_seconds=self.stream_drain_timeout_seconds,
+                )
+                # Receipt is sampled only after the transport returned the
+                # batch. Venue timestamps remain untouched inside each event.
+                received_at = _utc_now()
+                processing_started = time.monotonic()
+                self._process_stream_batch(tuple(events), received_at=received_at)
+            except Exception:
+                received_at = _utc_now()
+                processing_started = time.monotonic()
+                with self._lock:
+                    self._metrics["stream_failures"] += 1
+                    cache = self._cache
+                if cache is not None:
+                    cache.mark_disconnect("massive")
+            completed = time.monotonic()
+            with self._lock:
+                self._drain_wait_ms.append(
+                    max(0.0, (processing_started - drain_started) * 1000)
+                )
+                self._processing_ms.append(
+                    max(0.0, (completed - processing_started) * 1000)
+                )
+            # Test transports can return immediately; avoid a hot spin while
+            # retaining sub-millisecond handoff with a real blocking socket.
+            self._stop.wait(0.001)
+
+    def _process_stream_batch(
+        self, events: Sequence[Mapping[str, Any]], *, received_at: datetime
+    ) -> None:
+        receipt = _aware(received_at, "stream receipt")
+        with self._lock:
+            watched = set(self._watched)
+            cache = self._cache
+            eligible = dict(self._symbol_tradable)
+            if events:
+                self._metrics["stream_batches"] += 1
+                self._metrics["stream_events"] += len(events)
+                if len(events) >= self.stream_batch_limit:
+                    self._metrics["stream_backlog_batches"] += 1
+                self._latest_stream_receipt_at = receipt
+        if cache is None:
+            return
+        for event in events:
+            if not isinstance(event, Mapping):
+                with self._lock:
+                    self._metrics["stream_failures"] += 1
+                continue
+            symbol = str(event.get("sym", "")).strip().upper()
+            if symbol not in watched:
+                continue
+            kind = str(event.get("ev", "")).upper()
+            if kind == "Q":
+                try:
+                    self._record_quote(
+                        cache,
+                        symbol=symbol,
+                        raw=event,
+                        received_at=receipt,
+                        tradable=eligible.get(symbol, False),
+                        source="massive_stream_nbbo_top_of_book+robinhood_instrument",
+                    )
+                    venue = _provider_time(
+                        event.get("sip_timestamp", event.get("t")),
+                        f"quote timestamp {symbol}",
+                    )
+                    with self._lock:
+                        self._queue_ages_ms.append(
+                            max(0.0, (receipt - venue).total_seconds() * 1000)
+                        )
+                except Exception:
+                    cache.mark_symbol_degraded(symbol, "MASSIVE_STREAM_QUOTE_INVALID")
+            elif kind == "A":
+                # Per-second aggregates are deliberately not minute bars.
+                with self._lock:
+                    self._metrics["ignored_second_aggregates"] += 1
+            elif kind == "AM":
+                try:
+                    start_at = self._minute_start(event, stream=True)
+                    with self._lock:
+                        self._pending_minutes[(symbol, start_at)] = dict(event)
+                except Exception:
+                    cache.mark_symbol_degraded(symbol, "MASSIVE_STREAM_MINUTE_INVALID")
+        self._flush_completed_minutes(receipt)
+
+    def _flush_completed_minutes(self, received_at: datetime) -> None:
+        with self._lock:
+            ready = [
+                (key, raw)
+                for key, raw in self._pending_minutes.items()
+                if key[1] + timedelta(minutes=1) <= received_at
+            ]
+            for key, _raw in ready:
+                self._pending_minutes.pop(key, None)
+            cache = self._cache
+        if cache is None:
+            return
+        for (symbol, _start), raw in ready:
+            try:
+                bar = self._minute_bar(symbol, raw, stream=True)
+                cache.record_completed_bar(bar, received_at=received_at)
+            except Exception:
+                cache.mark_symbol_degraded(symbol, "MASSIVE_STREAM_MINUTE_INVALID")
+
+    def _schedule_backfill(
+        self, symbol: str, *, mode: str, start: datetime, end: datetime
+    ) -> None:
+        with self._lock:
+            prior = self._backfills.get(symbol)
+            if prior is not None and not prior.done():
+                return
+            self._symbol_phase[symbol] = "COLD_START" if mode == "cold" else "RESYNC"
+            self._symbol_blocker[symbol] = (
+                "MASSIVE_INITIAL_HISTORY_PENDING"
+                if mode == "cold"
+                else "MASSIVE_GAP_RESYNC_PENDING"
+            )
+            cache = self._cache
+            if cache is not None:
+                cache.mark_symbol_degraded(symbol, self._symbol_blocker[symbol])
+            future = self._executor.submit(
+                self._backfill_symbol,
+                symbol,
+                mode,
+                _aware(start, "backfill start"),
+                _aware(end, "backfill end"),
+                self._session_generation,
+            )
+            self._backfills[symbol] = future
+            future.add_done_callback(
+                lambda completed, requested=symbol, generation=self._session_generation: self._finish_backfill(
+                    requested, generation, completed
+                )
+            )
+
+    def _backfill_symbol(
+        self,
+        symbol: str,
+        mode: str,
+        start: datetime,
+        end: datetime,
+        generation: int,
+    ) -> tuple[str, str | None]:
+        with self._lock:
+            cache = self._cache
+            tradability = self._tradability
+            current_generation = self._session_generation
+        if generation != current_generation:
+            return "OBSOLETE", None
+        if cache is None or tradability is None:
+            return "FAILED", "MASSIVE_SOURCE_NOT_BOUND"
+        try:
+            eligible = tradability.is_tradable(symbol, as_of=_utc_now())
+            with self._lock:
+                self._symbol_tradable[symbol] = eligible is True
+            existing_quote = cache.quote_for(symbol)
+            if mode == "cold" and existing_quote is None:
+                with self._lock:
+                    self._metrics["cold_start_rest_calls"] += 1
                 quote_payload = self.rest.get_json(
                     f"/v3/quotes/{url_quote(symbol, safe='')}",
                     parameters={"limit": "1", "order": "desc", "sort": "timestamp"},
                     timeout_seconds=self.request_timeout_seconds,
                 )
+                quote_received_at = _utc_now()
+                with self._lock:
+                    if generation != self._session_generation:
+                        return "OBSOLETE", None
                 quote_results = quote_payload.get("results")
                 if not isinstance(quote_results, list) or not quote_results:
                     raise MassiveStoreError("Massive quote result is missing")
@@ -456,65 +895,233 @@ class MassiveRestStreamSource:
                     cache,
                     symbol=symbol,
                     raw=quote_results[0],
-                    received_at=current,
+                    received_at=quote_received_at,
                     tradable=eligible,
                     source="massive_rest_nbbo_top_of_book+robinhood_instrument",
                 )
-            except Exception as exc:
-                failures.append(f"QUOTE_INVALID:{symbol}:{type(exc).__name__}")
-            try:
-                bars_payload = self.rest.get_json(
-                    f"/v2/aggs/ticker/{url_quote(symbol, safe='')}/range/1/minute/"
-                    f"{start.date().isoformat()}/{current.date().isoformat()}",
-                    parameters={"adjusted": "true", "limit": "50000", "sort": "asc"},
-                    timeout_seconds=self.request_timeout_seconds,
-                )
-                results = bars_payload.get("results")
-                if not isinstance(results, list) or not results:
-                    raise MassiveStoreError("Massive aggregate result is missing")
-                last_sequence = 0
-                for raw in results:
-                    if not isinstance(raw, Mapping):
-                        raise MassiveStoreError("Massive aggregate row is invalid")
-                    bar = self._bar(symbol, raw)
-                    if bar.start_at < start or bar.end_at > current:
-                        continue
-                    cache.record_completed_bar(bar, received_at=current)
-                    last_sequence = max(last_sequence, bar.sequence)
-                if not last_sequence:
-                    raise MassiveStoreError("no completed in-session aggregate is available")
-                cache.record_snapshot_resync(symbol, sequence=last_sequence)
-            except Exception as exc:
-                failures.append(f"COMPLETED_BAR_INVALID:{symbol}:{type(exc).__name__}")
-        try:
-            for event in self.stream.drain(
-                limit=self.stream_batch_limit,
-                timeout_seconds=self.stream_drain_timeout_seconds,
-            ):
-                if not isinstance(event, Mapping):
-                    raise MassiveStoreError("Massive stream event is invalid")
-                symbol = str(event.get("sym", "")).strip().upper()
-                if symbol not in symbols:
+
+            first_ms = int(start.timestamp() * 1000)
+            # Only completed minute starts are requested.  The response receipt
+            # below is still the final authority on whether each returned bar
+            # was actually complete when observed.
+            last_complete = _utc_now().replace(second=0, microsecond=0) - timedelta(
+                minutes=1
+            )
+            requested_end = min(end, last_complete)
+            if requested_end < start:
+                raise MassiveStoreError("no completed minute is available")
+            last_ms = int(requested_end.timestamp() * 1000)
+            with self._lock:
+                self._metrics[
+                    "cold_start_rest_calls" if mode == "cold" else "gap_rest_calls"
+                ] += 1
+            bars_payload = self.rest.get_json(
+                f"/v2/aggs/ticker/{url_quote(symbol, safe='')}/range/1/minute/"
+                f"{first_ms}/{last_ms}",
+                parameters={"adjusted": "true", "limit": "50000", "sort": "asc"},
+                timeout_seconds=self.request_timeout_seconds,
+            )
+            bars_received_at = _utc_now()
+            with self._lock:
+                if generation != self._session_generation:
+                    return "OBSOLETE", None
+            if bars_payload.get("next_url"):
+                raise MassiveStoreError("Massive aggregate backfill is incomplete")
+            results = bars_payload.get("results")
+            if not isinstance(results, list) or not results:
+                raise MassiveStoreError("Massive aggregate result is missing")
+            last_sequence = 0
+            for raw in results:
+                if not isinstance(raw, Mapping):
+                    raise MassiveStoreError("Massive aggregate row is invalid")
+                bar = self._minute_bar(symbol, raw, stream=False)
+                if (
+                    bar.start_at < start
+                    or bar.start_at > requested_end
+                    or bar.end_at > bars_received_at
+                ):
                     continue
-                eligible = tradability.is_tradable(symbol, as_of=current)
-                kind = str(event.get("ev", "")).upper()
-                if kind == "Q":
-                    self._record_quote(
-                        cache,
-                        symbol=symbol,
-                        raw=event,
-                        received_at=current,
-                        tradable=eligible,
-                        source="massive_stream_nbbo_top_of_book+robinhood_instrument",
+                existing = cache.bar_for(symbol, bar.end_at)
+                if existing is not None:
+                    factual_fields = (
+                        "start_at",
+                        "end_at",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "volume",
+                        "sequence",
                     )
-                elif kind in {"A", "AM"}:
-                    bar = self._bar(symbol, event)
-                    if bar.end_at <= current:
-                        cache.record_completed_bar(bar, received_at=current)
+                    if any(
+                        getattr(existing, field) != getattr(bar, field)
+                        for field in factual_fields
+                    ):
+                        raise MassiveStoreError(
+                            "REST backfill conflicts with an ingested stream bar"
+                        )
+                else:
+                    cache.record_completed_bar(bar, received_at=bars_received_at)
+                last_sequence = max(last_sequence, bar.sequence)
+            if not last_sequence:
+                raise MassiveStoreError("no completed in-range aggregate is available")
+            remaining_gap = cache.missing_sequence_range(symbol)
+            if remaining_gap is not None:
+                requested_first = int(start.timestamp()) // 60
+                requested_last = int(requested_end.timestamp()) // 60
+                if mode != "gap" or not (
+                    remaining_gap[1] < requested_first
+                    or remaining_gap[0] > requested_last
+                ):
+                    raise MassiveStoreError(
+                        "Massive gap backfill did not cover every missing minute"
+                    )
+                # A newer, disjoint gap appeared while this request was in
+                # flight.  Preserve it; an older response cannot prove the
+                # symbol contiguous through the newer watermark.
+                raise MassiveStoreError(
+                    "Massive symbol developed a newer gap during backfill"
+                )
+            cache.clear_symbol_degradation(
+                symbol,
+                expected_reason=(
+                    "MASSIVE_INITIAL_HISTORY_PENDING"
+                    if mode == "cold"
+                    else "MASSIVE_GAP_RESYNC_PENDING"
+                ),
+            )
+            return "READY", None
         except Exception as exc:
-            failures.append(f"MASSIVE_STREAM_DRAIN_FAILED:{type(exc).__name__}")
-        cache.set_active_scores((item.symbol, item.ranking_score) for item in structures)
-        return tuple(dict.fromkeys(failures))
+            return "FAILED", f"MASSIVE_BACKFILL_FAILED:{type(exc).__name__}"
+
+    def _finish_backfill(
+        self,
+        symbol: str,
+        generation: int,
+        future: Future[tuple[str, str | None]],
+    ) -> None:
+        try:
+            phase, blocker = future.result()
+        except Exception as exc:
+            phase, blocker = "FAILED", f"MASSIVE_BACKFILL_FAILED:{type(exc).__name__}"
+        with self._lock:
+            if generation != self._session_generation:
+                return
+            self._symbol_phase[symbol] = phase
+            if blocker is None:
+                self._symbol_blocker.pop(symbol, None)
+            else:
+                self._symbol_blocker[symbol] = blocker
+            cache = self._cache
+        if cache is not None and blocker is not None:
+            cache.mark_symbol_degraded(symbol, blocker)
+
+    def wait_for_backfills(self, *, timeout_seconds: float = 5.0) -> bool:
+        """Bounded test/operations barrier; never used in the trading hot path."""
+
+        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+        while time.monotonic() <= deadline:
+            with self._lock:
+                pending = [future for future in self._backfills.values() if not future.done()]
+                transitional = any(
+                    phase in {"COLD_START", "RESYNC"}
+                    for phase in self._symbol_phase.values()
+                )
+            if not pending and not transitional:
+                return True
+            self._stop.wait(0.005)
+        return False
+
+    def symbol_readiness(
+        self, symbol: str, *, now: datetime
+    ) -> MassiveSymbolReadiness:
+        normalized = str(symbol).strip().upper()
+        current = _aware(now, "readiness now")
+        with self._lock:
+            cache = self._cache
+            phase = self._symbol_phase.get(normalized, "UNBOUND")
+            blocker = self._symbol_blocker.get(normalized)
+        if cache is None:
+            return MassiveSymbolReadiness(
+                normalized, phase, False, None, None, blocker or "MASSIVE_CACHE_UNBOUND"
+            )
+        quote, bars, _watermark, degradation = cache.symbol_state(normalized)
+        latest_bar = max((bar.end_at for bar in bars), default=None)
+        if quote is None:
+            blocker = blocker or "QUOTE_MISSING"
+        else:
+            quote_age = (current - quote.newest_venue_at).total_seconds()
+            if quote_age < -1:
+                blocker = blocker or "QUOTE_FUTURE_DATED"
+            elif quote_age > self.health_max_age_seconds:
+                blocker = blocker or "QUOTE_STALE"
+        if latest_bar is None:
+            blocker = blocker or "COMPLETED_BAR_MISSING"
+        else:
+            bar_age = (current - latest_bar).total_seconds()
+            if bar_age < 0:
+                blocker = blocker or "COMPLETED_BAR_FUTURE_DATED"
+            elif bar_age > self.candidate_max_age_seconds:
+                blocker = blocker or "COMPLETED_BAR_STALE"
+        blocker = blocker or degradation
+        return MassiveSymbolReadiness(
+            symbol=normalized,
+            phase=phase,
+            ready=phase == "READY" and blocker is None,
+            quote_received_at=quote.observed_at if quote is not None else None,
+            completed_bar_end=latest_bar,
+            blocker=blocker,
+        )
+
+    def evidence_snapshot(
+        self, symbol: str, *, now: datetime
+    ) -> MassiveSymbolEvidenceSnapshot:
+        current = _aware(now, "evidence snapshot now")
+        readiness = self.symbol_readiness(symbol, now=current)
+        with self._lock:
+            cache = self._cache
+        if cache is None:
+            quote = None
+            latest = None
+        else:
+            quote, bars, _watermark, _degraded = cache.symbol_state(symbol)
+            latest = max(bars, key=lambda item: item.end_at, default=None)
+        return MassiveSymbolEvidenceSnapshot(
+            sampled_at=current,
+            symbol=str(symbol).strip().upper(),
+            quote=quote,
+            latest_completed_bar=latest,
+            readiness=readiness,
+        )
+
+    def hot_path_metrics(self, *, now: datetime) -> MassiveHotPathMetrics:
+        current = _aware(now, "metrics now")
+        with self._lock:
+            values = dict(self._metrics)
+            queue_ages = tuple(self._queue_ages_ms)
+            drain_wait = tuple(self._drain_wait_ms)
+            processing = tuple(self._processing_ms)
+            pending = sum(not future.done() for future in self._backfills.values())
+            latest = self._latest_stream_receipt_at
+            watched_symbols = set(self._watched)
+        ready_symbols = sum(
+            self.symbol_readiness(symbol, now=current).ready
+            for symbol in watched_symbols
+        )
+        return MassiveHotPathMetrics(
+            observed_at=current,
+            watched_symbols=len(watched_symbols),
+            ready_symbols=ready_symbols,
+            pending_backfills=pending,
+            queue_age_p50_ms=_percentile(queue_ages, 0.50),
+            queue_age_p95_ms=_percentile(queue_ages, 0.95),
+            drain_wait_p50_ms=_percentile(drain_wait, 0.50),
+            drain_wait_p95_ms=_percentile(drain_wait, 0.95),
+            processing_p50_ms=_percentile(processing, 0.50),
+            processing_p95_ms=_percentile(processing, 0.95),
+            latest_stream_receipt_at=latest,
+            **values,
+        )
 
     @staticmethod
     def _record_quote(
@@ -528,31 +1135,57 @@ class MassiveRestStreamSource:
     ) -> None:
         timestamp = raw.get("sip_timestamp", raw.get("t"))
         venue = _provider_time(timestamp, f"quote timestamp {symbol}")
+        bid_size, ask_size, size_version = _massive_quote_sizes(
+            raw.get("bid_size", raw.get("bs")),
+            raw.get("ask_size", raw.get("as")),
+            venue_at=venue,
+        )
         cache.record_quote(
             Quote.build(
                 symbol=symbol,
                 bid=raw.get("bid_price", raw.get("bp")),
                 ask=raw.get("ask_price", raw.get("ap")),
-                bid_size=int(raw.get("bid_size", raw.get("bs"))),
-                ask_size=int(raw.get("ask_size", raw.get("as"))),
+                bid_size=bid_size,
+                ask_size=ask_size,
                 venue_bid_at=venue,
                 venue_ask_at=venue,
                 observed_at=received_at,
                 source=source,
                 tradable=tradable,
+                size_unit="shares",
+                size_source_version=size_version,
+                depth_scope="top_of_book",
             )
         )
 
     @staticmethod
-    def _bar(symbol: str, raw: Mapping[str, Any]) -> CompletedBar:
-        start_at = _provider_time(raw.get("t", raw.get("s")), "aggregate start")
-        end_raw = raw.get("e")
-        end_at = (
-            _provider_time(end_raw, "aggregate end")
-            if end_raw is not None
-            else start_at + timedelta(minutes=1)
+    def _minute_start(raw: Mapping[str, Any], *, stream: bool) -> datetime:
+        if stream and str(raw.get("ev", "")).upper() != "AM":
+            raise MassiveStoreError("only AM events are minute aggregates")
+        start_at = _provider_time(
+            raw.get("s") if stream else raw.get("t"), "aggregate start"
         )
+        if start_at.second != 0 or start_at.microsecond != 0:
+            raise MassiveStoreError("minute aggregate start is not minute-aligned")
+        return start_at
+
+    @classmethod
+    def _minute_bar(
+        cls, symbol: str, raw: Mapping[str, Any], *, stream: bool
+    ) -> CompletedBar:
+        start_at = cls._minute_start(raw, stream=stream)
+        end_at = start_at + timedelta(minutes=1)
+        end_raw = raw.get("e")
+        if stream and end_raw is None:
+            raise MassiveStoreError("stream minute aggregate end is missing")
+        if end_raw is not None:
+            provider_end = _provider_time(end_raw, "aggregate end")
+            if provider_end < start_at or provider_end > end_at + timedelta(seconds=1):
+                raise MassiveStoreError("minute aggregate end is outside its minute")
+            if stream and provider_end < end_at - timedelta(seconds=1):
+                raise MassiveStoreError("stream minute aggregate is only partial")
         sequence = int(start_at.timestamp()) // 60
+        kind = "AM" if stream else "REST_AM"
         return CompletedBar.build(
             symbol=symbol,
             start_at=start_at,
@@ -565,7 +1198,7 @@ class MassiveRestStreamSource:
             sequence=sequence,
             revision=max(0, int(raw.get("revision", 0))),
             source_event_id=(
-                f"massive:{str(raw.get('ev', 'A')).upper()}:{symbol}:"
+                f"massive:{kind}:{symbol}:"
                 f"{int(start_at.timestamp() * 1000)}:{int(raw.get('revision', 0))}"
             ),
         )
@@ -928,18 +1561,26 @@ class LocalMassiveReadOnlySource:
                             received_at = _parse_time(
                                 quote_row["received_at"], f"quote received_at {symbol}"
                             )
+                            bid_size, ask_size, size_version = _massive_quote_sizes(
+                                quote_row["bid_size"],
+                                quote_row["ask_size"],
+                                venue_at=event_at,
+                            )
                             cache.record_quote(
                                 Quote.build(
                                     symbol=symbol,
                                     bid=quote_row["bid"],
                                     ask=quote_row["ask"],
-                                    bid_size=int(quote_row["bid_size"]),
-                                    ask_size=int(quote_row["ask_size"]),
+                                    bid_size=bid_size,
+                                    ask_size=ask_size,
                                     venue_bid_at=event_at,
                                     venue_ask_at=event_at,
                                     observed_at=received_at,
                                     source="local_titan_massive_sqlite+robinhood_tradability",
                                     tradable=tradability.is_tradable(symbol, as_of=current),
+                                    size_unit="shares",
+                                    size_source_version=size_version,
+                                    depth_scope="top_of_book",
                                 )
                             )
                         except (TypeError, ValueError, MassiveStoreError) as exc:
@@ -966,6 +1607,14 @@ class LocalMassiveReadOnlySource:
                             )
                             start_at = _event_time(row["start_ms"], "bar start")
                             end_at = _event_time(row["end_ms"], "bar end")
+                            if (
+                                start_at.second != 0
+                                or start_at.microsecond != 0
+                                or end_at - start_at != timedelta(minutes=1)
+                            ):
+                                raise MassiveStoreError(
+                                    "local completed bar is not one aligned minute"
+                                )
                             sequence = int(row["end_ms"]) // 60_000
                             revision = int(received_at.timestamp() * 1_000_000)
                             result = cache.record_completed_bar(
@@ -981,7 +1630,8 @@ class LocalMassiveReadOnlySource:
                                     sequence=sequence,
                                     revision=revision,
                                     source_event_id=(
-                                        f"massive:A:{symbol}:{int(row['start_ms'])}:{revision}"
+                                        f"massive:SQLITE_1M:{symbol}:"
+                                        f"{int(row['start_ms'])}:{revision}"
                                     ),
                                 ),
                                 received_at=received_at,
@@ -1007,12 +1657,15 @@ __all__ = [
     "LocalMassiveReadOnlySource",
     "MassiveAuthorizationEvidence",
     "MassiveFeedHealth",
+    "MassiveHotPathMetrics",
     "MassiveRequestAuthorizer",
     "MassiveRestStreamSource",
     "MassiveRestTransport",
     "MassiveStoreError",
     "MassiveStreamStatus",
     "MassiveStreamTransport",
+    "MassiveSymbolEvidenceSnapshot",
+    "MassiveSymbolReadiness",
     "PreparedCandidateSource",
     "PreparedStructure",
     "TradabilityProvider",

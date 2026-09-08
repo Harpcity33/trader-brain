@@ -216,13 +216,8 @@ class OrderCoverageContract:
         if self.client_ref_recovery_source is ClientRefRecoverySource.UNAVAILABLE:
             if self.broker_preserves_client_ref or self.negative_client_ref_results_authoritative:
                 raise ValueError("unavailable client-ref recovery cannot claim positive guarantees")
-        elif not all(
-            (
-                self.broker_preserves_client_ref,
-                self.negative_client_ref_results_authoritative,
-            )
-        ):
-            raise ValueError("client-ref recovery requires preserved IDs and authoritative negatives")
+        elif not self.broker_preserves_client_ref:
+            raise ValueError("client-ref recovery requires broker-preserved IDs")
         if (
             self.client_ref_recovery_source is ClientRefRecoverySource.EXHAUSTIVE_ORDER_HISTORY
             and not all(
@@ -245,7 +240,20 @@ class OrderCoverageContract:
 
     @property
     def supports_exact_client_ref_recovery(self) -> bool:
-        return self.client_ref_recovery_source is not ClientRefRecoverySource.UNAVAILABLE
+        """Whether exact positive matches can be recovered.
+
+        This deliberately does not imply that a missing record is an
+        authoritative rejection. Eventually-consistent order history often
+        preserves client IDs while publishing accepted orders after a delay.
+        """
+
+        return all(
+            (
+                self.client_ref_recovery_source
+                is not ClientRefRecoverySource.UNAVAILABLE,
+                self.broker_preserves_client_ref,
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -775,6 +783,7 @@ class ReviewReceipt:
     broker_review_id: str | None
     broker_bound: bool
     preview: Mapping[str, Any] = field(default_factory=dict)
+    received_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.request, OrderRequest):
@@ -807,9 +816,54 @@ class ReviewReceipt:
         if not isinstance(self.preview, Mapping):
             raise ValueError("preview must be a mapping")
         object.__setattr__(self, "preview", dict(self.preview))
+        receipt = self.reviewed_at if self.received_at is None else _utc(
+            self.received_at, "received_at"
+        )
+        if receipt < self.reviewed_at:
+            raise ValueError("review receipt cannot precede review observation")
+        object.__setattr__(self, "received_at", receipt)
 
     def expired_at(self, now: datetime) -> bool:
         return self.expires_at is not None and _utc(now, "now") >= self.expires_at
+
+
+@dataclass(frozen=True)
+class BrokerNativeReview(ReviewReceipt):
+    """A provider-issued review/preview with its native execution binding."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not self.broker_bound or self.broker_review_id is None:
+            raise ValueError("broker-native review requires a broker review ID")
+
+
+@dataclass(frozen=True, kw_only=True)
+class LocalPreflightDecision(ReviewReceipt):
+    """A local policy decision, never a broker review or approval token.
+
+    This is valid only on a separately verified provider contract that permits
+    direct API order submission. A mandatory broker review/confirmation can
+    never be represented by this type.
+    """
+
+    decision_id: str = ""
+    policy_binding_id: str = ""
+    evidence_collection_id: str = ""
+    provider_contract_id: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for name in (
+            "decision_id",
+            "policy_binding_id",
+            "evidence_collection_id",
+            "provider_contract_id",
+        ):
+            object.__setattr__(self, name, _required(getattr(self, name), name))
+        if self.broker_bound or self.broker_review_id is not None:
+            raise ValueError("local preflight cannot claim a broker review binding")
+        if self.required_confirmation_phrase is not None:
+            raise ValueError("local preflight cannot encode broker confirmation")
 
 
 @dataclass(frozen=True)
@@ -848,7 +902,7 @@ class BrokerOperationResult:
 
 @dataclass(frozen=True)
 class ClientRefLookupResult:
-    """Authoritative point-in-time lookup for an exact set of client refs."""
+    """Exact client-ref lookup with explicit unresolved-negative semantics."""
 
     account_masked: str
     requested_client_refs: tuple[str, ...]
@@ -857,6 +911,7 @@ class ClientRefLookupResult:
     observed_at: datetime
     received_at: datetime
     complete: bool
+    not_seen_yet_client_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         account = _account_mask(self.account_masked)
@@ -864,6 +919,10 @@ class ClientRefLookupResult:
         absent = tuple(
             _required(item, "confirmed_absent_client_ref")
             for item in self.confirmed_absent_client_refs
+        )
+        not_seen = tuple(
+            _required(item, "not_seen_yet_client_ref")
+            for item in self.not_seen_yet_client_refs
         )
         found = tuple(self.found_orders)
         if any(
@@ -875,14 +934,20 @@ class ClientRefLookupResult:
             raise ValueError("requested client refs must be unique")
         if len(set(absent)) != len(absent) or not set(absent).issubset(requested):
             raise ValueError("absent client refs must be a unique requested subset")
+        if len(set(not_seen)) != len(not_seen) or not set(not_seen).issubset(requested):
+            raise ValueError("not-seen-yet client refs must be a unique requested subset")
         found_refs = tuple(order.client_ref_id for order in found)
         if any(ref is None or ref not in requested for ref in found_refs):
             raise ValueError("found orders must bind requested client refs")
         if len(set(found_refs)) != len(found_refs):
             raise ValueError("lookup returned duplicate client refs")
-        if set(found_refs).intersection(absent):
-            raise ValueError("a client ref cannot be both found and absent")
-        if self.complete is True and set(found_refs).union(absent) != set(requested):
+        classified = (set(found_refs), set(absent), set(not_seen))
+        if any(
+            classified[left].intersection(classified[right])
+            for left, right in ((0, 1), (0, 2), (1, 2))
+        ):
+            raise ValueError("client-ref lookup classifications must be disjoint")
+        if self.complete is True and set().union(*classified) != set(requested):
             raise ValueError("complete lookup must classify every requested client ref")
         if not isinstance(self.complete, bool):
             raise ValueError("lookup complete must be boolean")
@@ -890,6 +955,7 @@ class ClientRefLookupResult:
         object.__setattr__(self, "requested_client_refs", requested)
         object.__setattr__(self, "found_orders", found)
         object.__setattr__(self, "confirmed_absent_client_refs", absent)
+        object.__setattr__(self, "not_seen_yet_client_refs", not_seen)
         observed = _utc(self.observed_at, "observed_at")
         received = _utc(self.received_at, "received_at")
         if received < observed:
@@ -980,6 +1046,7 @@ __all__ = [
     "BrokerContractViolation",
     "BrokerError",
     "BrokerMutationBlocked",
+    "BrokerNativeReview",
     "BrokerOperationResult",
     "BrokerOrderState",
     "BrokerSide",
@@ -989,6 +1056,7 @@ __all__ = [
     "EquityOrderType",
     "FillSnapshot",
     "FundsSnapshot",
+    "LocalPreflightDecision",
     "MarketHours",
     "OperationStatus",
     "OrderCoverageContract",

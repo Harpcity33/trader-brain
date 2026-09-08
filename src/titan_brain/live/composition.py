@@ -549,6 +549,7 @@ class RuntimeComposition:
                         "request_timeout_seconds",
                         "stream_drain_timeout_seconds",
                         "stream_batch_limit",
+                        "backfill_concurrency",
                     )
                 }
             facts["discovery_provider"] = discovery

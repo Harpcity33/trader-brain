@@ -131,38 +131,48 @@ configuration, policy, account suffix, and database-schema hashes match
 `$INSTALL_ROOT/release-manifest.json`. A missing or mismatched value is a hard
 stop.
 
-### Exact provider-injection prerequisite
+### Exact local provider assembly and remaining prerequisites
 
 The staged coordinator and independent notification worker invoke Python as
 `python -I -S -B`, so neither service loads user/site customization or an
 environment-supplied import path, and neither writes bytecode into a release.
 
-The stock `scripts/titan-full-live` launcher intentionally constructs no live
-provider clients and performs no credential discovery. It therefore remains a
-hard blocker for a signed production transport, Massive/Robinhood discovery
-composition, or Gmail route. A production-capable release must include and
-manifest-bind an owner-reviewed launcher that passes one `RuntimeComposition`
-to `titan_brain.live.cli.main`. That composition must contain:
+The stock `scripts/titan-full-live` launcher constructs one release-contained
+`LocalProviderAssembly` from the immutable nonsecret profile in
+`config/provider_bindings.json`. It passes the same `RuntimeComposition` and
+assembly to `doctor`, readiness, the coordinator, provider status, and the
+independent notification worker. Private values are read only from the named
+macOS Keychain items; connected-app tokens are never exported.
 
-- the approved `ProductionTransport` for broker reads and mutations;
+The current assembly contains concrete provider-supported Massive REST/WSS
+clients and a durable Gmail desktop OAuth sender implementation. Gmail remains
+disabled until the owner authorizes its exact account and destination. The
+verified Robinhood MCP route remains attended-only and its Codex OAuth token is
+not exportable to the daemon, so the assembly deliberately supplies neither a
+broker mutation transport nor Robinhood tradability. Full-live readiness must
+remain blocked until a supported route supplies:
+
+- an approved `ProductionTransport` for broker reads and mutations whose
+  documented contract permits the intended unattended lifecycle;
 - `SupportedDiscoveryProviderComposition`, built around
   `MassiveRestStreamSource`, an authenticated Robinhood instrument reader, and
   an independently recomputing quality-evidence reader sharing the exact
   signed non-secret provider binding;
-- `GmailProviderBinding` using the existing authorized account and exact signed
-  implementation/authorization binding IDs.
+- an owner-authorized `GmailProviderBinding` with exact signed
+  implementation, authorization, sender, and destination bindings;
 - a runtime-only control authenticator with at least 256 bits of secret entropy,
   bound to that same signed production authorization receipt. The secret is
   never placed in the release, configuration, command line, or control request.
 
 The executable transport, stream, candidate, instrument, quality, and
 notification components must all reside in and match the same release
-manifest. Tokens remain outside the release and are supplied only through the
-already-authorized injected clients. Until such a launcher and matching signed
-configuration are committed, rebuilt, reviewed, and installed paused,
-`doctor`, `readiness`, `serve`, and `notification-worker` fail closed. Do not
-patch the installed release or put a token in configuration, an environment
-dump, a command line, or the repository.
+manifest. Tokens remain outside the release and are loaded through the
+reviewed Keychain-backed clients. Until the broker route, owner policy,
+tradability, notification destination, and control authentication are bound in
+a rebuilt and reviewed release, `doctor`, `readiness`, `serve`, and
+`notification-worker` fail closed. Do not patch the installed release or put a
+token in configuration, an environment dump, a command line, or the
+repository.
 
 ## Readiness and owner-controlled cutover
 
@@ -177,11 +187,10 @@ window. The supported sequence is:
    supported advanced-order state from strictly fresh broker evidence. Any
    unknown submission or uncovered quantity blocks cutover.
 3. Test the exact signed notification route with its independent worker. The
-   stock launcher performs no credential discovery. A reviewed production
-   release must supply a manifest-bound runtime composition that injects the
-   already-authorized provider token/client and whose implementation and
-   authorization binding IDs match signed configuration. Without that
-   injection, the worker fails closed before claiming a provider-bound row.
+   launcher must load the owner-authorized Keychain-backed Gmail binding and
+   its implementation, authorization, sender, and destination binding IDs must
+   match signed configuration. Without that exact binding, the worker fails
+   closed before claiming a provider-bound row.
 
    As an explicit owner action, copy, enable, bootstrap, and start only the
    notification worker first. Do not start the trading coordinator here:

@@ -1682,6 +1682,26 @@ def command_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_provider_status(args: argparse.Namespace) -> int:
+    """Report real local provider connections without mutation or delivery."""
+
+    assembly = getattr(args, "provider_assembly", None)
+    reporter = getattr(assembly, "connection_report", None)
+    if not callable(reporter):
+        raise CommandBlocked("LOCAL_PROVIDER_ASSEMBLY_UNAVAILABLE")
+    report = reporter(probe_network=args.probe_network is True)
+    if not isinstance(report, Mapping):
+        raise CommandBlocked("LOCAL_PROVIDER_CONNECTION_REPORT_INVALID")
+    _print(report)
+    connections = report.get("connections")
+    if not isinstance(connections, list):
+        return 2
+    return 0 if all(
+        isinstance(item, Mapping) and item.get("status") == "CONNECTED"
+        for item in connections
+    ) else 2
+
+
 def command_serve(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
@@ -2326,6 +2346,12 @@ def build_parser() -> argparse.ArgumentParser:
     command("init-state", "initialize the installed release PAUSED", command_init_state)
     command("doctor", "read-only readiness and capability report", command_doctor)
     command("status", "read-only runtime status", command_status)
+    provider_status = command(
+        "provider-status",
+        "redacted credential presence or authenticated read-only provider checks",
+        command_provider_status,
+    )
+    provider_status.add_argument("--probe-network", action="store_true")
     command(
         "readiness",
         "collect activation evidence directly from installed dependencies",
@@ -2391,10 +2417,12 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     runtime_composition: RuntimeComposition | None = None,
+    provider_assembly: object | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.runtime_composition = runtime_composition or RuntimeComposition()
+    args.provider_assembly = provider_assembly
     try:
         return int(args.handler(args))
     except (CommandBlocked, ValueError, OSError, RuntimeError) as exc:

@@ -528,6 +528,36 @@ class PipelineTests(unittest.TestCase):
             )
         )
 
+    def test_entry_health_blocker_bootstraps_read_only_hydration_without_entry(self) -> None:
+        item = structure()
+        self.record_current_latch()
+        health = type(
+            "Health",
+            (),
+            {
+                "blockers": (),
+                "service_healthy": True,
+                "session_state": MarketSessionState.ENTRY_ELIGIBLE,
+                "entry_evidence_ready": False,
+                "entry_blockers": ("MASSIVE_REST_HEALTH_PENDING",),
+            },
+        )()
+        source = StaticPreparedSource([item], health_report=health)
+        actions = FullLiveDiscoveryExecutor(
+            source=source,
+            pipeline=self.pipeline([item]),
+        ).execute(snapshot=self.snapshot, now=NOW)
+        self.assertIn("MASSIVE_REST_HEALTH_PENDING", actions[0])
+        self.assertEqual(
+            source.calls, ["health", "prepared_structures", "hydrate_cache"]
+        )
+        self.assertFalse(
+            any(
+                call[0] in {FakeBrokerClient.REVIEW, FakeBrokerClient.PLACE}
+                for call in self.broker.calls
+            )
+        )
+
     def test_lifecycle_executor_short_circuits_checked_in_blocked_config(self) -> None:
         current = PolicyBundle.load(ROOT)
         item = structure()

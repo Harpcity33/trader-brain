@@ -751,6 +751,13 @@ class FullLiveService:
             raise ValueError(
                 "client-ref lookup evidence is incomplete, stale, or mismatched"
             )
+        if (
+            result.confirmed_absent_client_refs
+            and not self.broker.capabilities.order_coverage.negative_client_ref_results_authoritative
+        ):
+            raise ValueError(
+                "client-ref lookup claimed absence without authoritative negative semantics"
+            )
         if any(
             order.broker_updated_at > result.observed_at + timedelta(seconds=2)
             for order in result.found_orders
