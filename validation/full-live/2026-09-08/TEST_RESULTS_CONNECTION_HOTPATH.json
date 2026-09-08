@@ -1,0 +1,97 @@
+{
+  "schema_version": "titan_connection_hotpath_test_evidence_2026-09-08_v1",
+  "recorded_at_utc": "2026-09-08T08:51:01Z",
+  "reviewed_base_commit": "f7d0accaf38d4a6cd93a22cc2cd3229bc728bdfa",
+  "local_implementation_commit": "41754dc4c3e95407ef062e7b2a62398276df1e06",
+  "published_implementation_commit": "c3336f1e8b02bfc6f521cc23a32cd3918c95a7cb",
+  "shared_source_tree": "fcefe173710bb201c260de6b72c5a728a54b35bc",
+  "published_branch": "codex/full-live-2026-09-08",
+  "published_parent_verified": true,
+  "environment": {
+    "python": "3.12.14",
+    "python_executable": "/Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12",
+    "os": "Darwin 25.6.0 arm64"
+  },
+  "focused_suite": {
+    "modules": [
+      "tests.test_live_local_assembly",
+      "tests.test_live_massive_hotpath"
+    ],
+    "tests_run": 21,
+    "failures": 0,
+    "errors": 0,
+    "duration_seconds": 0.197,
+    "result": "PASS"
+  },
+  "full_suite": {
+    "command": "PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest discover -s tests -p test_*.py",
+    "tests_run": 398,
+    "failures": 0,
+    "errors": 0,
+    "duration_seconds": 13.270,
+    "result": "PASS"
+  },
+  "repository_validation": {
+    "result": "PASS",
+    "checked_bytes": 3827886,
+    "python_files": 95,
+    "json_files": 22,
+    "toml_files": 4,
+    "manifest_sha256": "92904eaea77f5bf43af752de245b6244b97d760fb4be9610f18f8d878dd40a7f",
+    "git_diff_check": "PASS"
+  },
+  "release_reproducibility": {
+    "independent_builds": 2,
+    "byte_for_byte_equal": true,
+    "release_id": "45f83b40a1db48b26df383f9141e618825d8ee52a4781e01333a0a3acc527ecb",
+    "archive_sha256": "e8f56d29184f18a2f3c689e0c4b381bf0a1c20aeb1118317c29899e3c50cf545",
+    "archive_bytes": 298076,
+    "manifest_file_sha256": "7d235084ab489cf1b4e0e945972aaa29a5a746af11168cec65b1b8ed64a2f37b"
+  },
+  "paused_install": {
+    "installed_at": "2026-09-08T08:49:17.053617+00:00",
+    "installed_mode": "PAUSED",
+    "authority_enabled": 0,
+    "broker_accessed_by_installer": false,
+    "installer_called_launchctl": false,
+    "legacy_runtime_modified": false,
+    "release_valid": true,
+    "audit_chain_valid": true
+  },
+  "installed_provider_probe": {
+    "checked_at": "2026-09-08T08:49:33.404827+00:00",
+    "massive_rest": "AUTHENTICATED_CONNECTED",
+    "massive_stream": "AUTHENTICATED_CONNECTED",
+    "robinhood_daemon": "BLOCKED_UNATTENDED_UNSUPPORTED_ON_VERIFIED_ROUTE",
+    "gmail_notification": "NOT_CONFIGURED",
+    "broker_mutations_invoked": 0,
+    "notification_messages_sent": 0
+  },
+  "authenticated_attended_robinhood_read": {
+    "checked_at": "2026-09-08T08:50:07.733Z",
+    "account_binding": "ending-7153",
+    "account_state": "active",
+    "account_type": "limited_margin",
+    "portfolio_read": "SUCCEEDED",
+    "equity_positions_first_page_count": 0,
+    "option_positions_nonzero_first_page_count": 0,
+    "equity_orders_since_2026_09_01_first_page_count": 3,
+    "option_orders_since_2026_09_01_first_page_count": 0,
+    "all_next_cursors_empty": true,
+    "broker_mutations_invoked": 0
+  },
+  "runtime_observation": {
+    "full_live_processes": 0,
+    "coordinator_launchd_loaded": false,
+    "notification_launchd_loaded": false,
+    "legacy_titan_runtime_left_running": true
+  },
+  "limitations": {
+    "live_broker_mutations_exercised": false,
+    "unattended_robinhood_transport_certified": false,
+    "owner_policy_applied": false,
+    "gmail_oauth_authenticated": false,
+    "notification_delivery_tested": false,
+    "activation_or_full_live_service_start_performed": false
+  }
+}
