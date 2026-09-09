@@ -19,8 +19,10 @@ Review package:
 
 The last evidenced August workflow was mixed rather than fully autonomous:
 
-- HSAI had a user-requested and user-confirmed entry, followed by a Codex stop
-  placement and a scheduled Codex exit without a new human message.
+- HSAI had a user-requested entry and a human approval for the preceding $19.05
+  review. Codex then changed the executable tuple to $19.08 without redisplay
+  or reconfirmation, placed the stop, and later exited during a scheduled run
+  without a new human message.
 - USDE had a broker-classified user entry, followed by a scheduled Codex exit
   without a new human message.
 - GIPR had broker-classified user entry and exit orders while the automation was
