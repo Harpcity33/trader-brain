@@ -400,6 +400,7 @@ class MassiveRestStreamSource:
         stream_drain_timeout_seconds: float = 0.05,
         stream_batch_limit: int = 1000,
         backfill_concurrency: int = 4,
+        maximum_watched_symbols: int = 64,
     ) -> None:
         if rest.authorization.binding_id != stream.authorization.binding_id:
             raise ValueError("Massive REST and stream authorization bindings differ")
@@ -413,6 +414,8 @@ class MassiveRestStreamSource:
             raise ValueError("Massive stream batch limit must be in [1, 10000]")
         if not 1 <= backfill_concurrency <= 16:
             raise ValueError("Massive backfill concurrency must be in [1, 16]")
+        if not 1 <= maximum_watched_symbols <= 10_000:
+            raise ValueError("Massive watched-symbol limit must be in [1, 10000]")
         self.candidates = candidates
         self.rest = rest
         self.stream = stream
@@ -423,6 +426,7 @@ class MassiveRestStreamSource:
         self.stream_drain_timeout_seconds = float(stream_drain_timeout_seconds)
         self.stream_batch_limit = int(stream_batch_limit)
         self.backfill_concurrency = int(backfill_concurrency)
+        self.maximum_watched_symbols = int(maximum_watched_symbols)
 
         self._lock = RLock()
         self._stop = Event()
@@ -433,6 +437,8 @@ class MassiveRestStreamSource:
         )
         self._cache: MarketDataCache | None = None
         self._tradability: TradabilityProvider | None = None
+        self._candidate_watched: tuple[str, ...] = ()
+        self._risk_watched: set[str] = set()
         self._watched: tuple[str, ...] = ()
         self._session_start: datetime | None = None
         self._session_generation = 0
@@ -622,7 +628,17 @@ class MassiveRestStreamSource:
     def prepared_structures(
         self, *, now: datetime, limit: int
     ) -> tuple[PreparedStructure, ...]:
-        return self.candidates.prepared_structures(now=now, limit=limit)
+        with self._lock:
+            # Owned-position monitoring outranks discovery.  Reserve its live
+            # stream slots before asking the candidate source for work so a
+            # full candidate book can never crowd target/protection evidence
+            # out of the provider's bounded subscription.
+            available = max(
+                0, self.maximum_watched_symbols - len(self._risk_watched)
+            )
+        return self.candidates.prepared_structures(
+            now=now, limit=min(int(limit), available)
+        )
 
     def hydrate_cache(
         self,
@@ -635,13 +651,89 @@ class MassiveRestStreamSource:
     ) -> tuple[str, ...]:
         current = _aware(now, "now")
         start = _aware(session_start, "session_start")
-        if start >= current:
-            raise ValueError("session_start must precede now")
-        symbols = tuple(
+        if start > current:
+            raise ValueError("session_start cannot be after now")
+        candidate_symbols = tuple(
             dict.fromkeys(item.symbol.strip().upper() for item in structures)
         )
         cache.begin_session(start)
-        cache.set_active_scores((item.symbol, item.ranking_score) for item in structures)
+        symbols = self._bind_subscription(
+            cache,
+            session_start=start,
+            tradability=tradability,
+            candidate_symbols=candidate_symbols,
+        )
+        subscribed = set(symbols)
+        cache.set_active_scores(
+            (item.symbol, item.ranking_score)
+            for item in structures
+            if item.symbol.strip().upper() in subscribed
+        )
+        self._refresh_subscription(
+            cache,
+            symbols=symbols,
+            session_start=start,
+            now=current,
+            tradability=tradability,
+        )
+
+        # Per-symbol initialization/failure is represented in the cache and
+        # readiness API.  It must not convert one cold candidate into a global
+        # discovery or protection failure.
+        return ()
+
+    def ensure_risk_symbols(
+        self,
+        cache: MarketDataCache,
+        *,
+        symbols: Sequence[str],
+        session_start: datetime,
+        now: datetime,
+        tradability: TradabilityProvider,
+    ) -> tuple[str, ...]:
+        """Keep owned-position evidence live independently of discovery.
+
+        Protection and target exits must still bootstrap after a daemon
+        restart when no candidate scan has run.  Risk symbols therefore join
+        the live subscription directly and remain there for the rest of the
+        process session.  This is read-only market/tradability work: it never
+        creates a plan, grants authority, or calls a broker mutation endpoint.
+        """
+
+        current = _aware(now, "now")
+        start = _aware(session_start, "session_start")
+        if start > current:
+            raise ValueError("session_start cannot be after now")
+        required = tuple(
+            dict.fromkeys(str(symbol).strip().upper() for symbol in symbols)
+        )
+        if any(not symbol for symbol in required):
+            raise ValueError("risk symbols must be non-empty")
+        cache.begin_session(start)
+        watched = self._bind_subscription(
+            cache,
+            session_start=start,
+            tradability=tradability,
+            risk_symbols=required,
+        )
+        self._refresh_subscription(
+            cache,
+            symbols=watched,
+            session_start=start,
+            now=current,
+            tradability=tradability,
+        )
+        return ()
+
+    def _bind_subscription(
+        self,
+        cache: MarketDataCache,
+        *,
+        session_start: datetime,
+        tradability: TradabilityProvider,
+        candidate_symbols: Sequence[str] | None = None,
+        risk_symbols: Sequence[str] = (),
+    ) -> tuple[str, ...]:
         with self._lock:
             if self._cache is not None and self._cache is not cache:
                 raise ValueError("Massive source cannot be rebound to another cache")
@@ -649,23 +741,86 @@ class MassiveRestStreamSource:
                 raise ValueError("Massive source cannot be rebound to another tradability provider")
             session_changed = (
                 self._session_start is not None
-                and self._session_start != start
+                and self._session_start != session_start
             )
             self._cache = cache
             self._tradability = tradability
-            self._session_start = start
-            self._watched = symbols
             if session_changed:
                 self._session_generation += 1
                 self._symbol_phase.clear()
                 self._symbol_blocker.clear()
                 self._symbol_tradable.clear()
                 self._pending_minutes.clear()
+                # Old futures cannot be cancelled reliably, so generation
+                # fencing makes their callbacks inert while a new session is
+                # free to schedule its own work for the same symbol.
+                self._backfills.clear()
+                self._candidate_watched = ()
+                self._risk_watched.clear()
+            self._session_start = session_start
+            if candidate_symbols is not None:
+                self._candidate_watched = tuple(candidate_symbols)
+            proposed_risk = self._risk_watched | set(risk_symbols)
+            if len(proposed_risk) > self.maximum_watched_symbols:
+                raise MassiveStoreError(
+                    "owned-position symbols exceed Massive subscription capacity"
+                )
+            self._risk_watched = proposed_risk
+            candidate_capacity = self.maximum_watched_symbols - len(
+                self._risk_watched
+            )
+            retained_candidates = tuple(
+                symbol
+                for symbol in self._candidate_watched
+                if symbol not in self._risk_watched
+            )[:candidate_capacity]
+            # Risk symbols are deliberately first.  Candidate rotation can
+            # evict candidates but can never evict an owned position.
+            self._watched = tuple(
+                dict.fromkeys(
+                    (*sorted(self._risk_watched), *retained_candidates)
+                )
+            )
+            return self._watched
+
+    def _refresh_subscription(
+        self,
+        cache: MarketDataCache,
+        *,
+        symbols: Sequence[str],
+        session_start: datetime,
+        now: datetime,
+        tradability: TradabilityProvider,
+    ) -> None:
+        current = _aware(now, "now")
+        start = _aware(session_start, "session_start")
+
+        # Eligibility is point-in-time broker evidence.  A source first bound
+        # during premarket must not carry a false premarket eligibility bit
+        # into the regular session, and yesterday's true bit must not survive
+        # a later broker denial.  Refresh it read-only on every sampling pass;
+        # the exact same view object remains bound for stream publication.
+        for symbol in symbols:
+            with self._lock:
+                phase = self._symbol_phase.get(symbol)
+            # Initial eligibility is joined inside the cold backfill alongside
+            # the one-shot quote.  Refreshing here as well would change that
+            # atomic cold-start contract; this pass is for an already-bound
+            # symbol crossing a later session boundary.
+            if phase is None:
+                continue
+            try:
+                eligible = tradability.is_tradable(symbol, as_of=current) is True
+            except Exception:
+                eligible = False
+            with self._lock:
+                self._symbol_tradable[symbol] = eligible
+                cache.update_quote_tradability(symbol, tradable=eligible)
 
         # The transport owns actual subscribe/unsubscribe and reconnect
         # resubscription mechanics.  This call is idempotent and contains no
         # broker or financial mutation.
-        self.stream.set_symbols(symbols)
+        self.stream.set_symbols(tuple(symbols))
         self._ensure_stream_consumer()
 
         for symbol in symbols:
@@ -695,11 +850,6 @@ class MassiveRestStreamSource:
                 self._schedule_backfill(
                     symbol, mode="gap", start=gap_start, end=gap_end
                 )
-
-        # Per-symbol initialization/failure is represented in the cache and
-        # readiness API.  It must not convert one cold candidate into a global
-        # discovery or protection failure.
-        return ()
 
     def _ensure_stream_consumer(self) -> None:
         with self._lock:
@@ -754,7 +904,6 @@ class MassiveRestStreamSource:
         with self._lock:
             watched = set(self._watched)
             cache = self._cache
-            eligible = dict(self._symbol_tradable)
             if events:
                 self._metrics["stream_batches"] += 1
                 self._metrics["stream_events"] += len(events)
@@ -774,14 +923,18 @@ class MassiveRestStreamSource:
             kind = str(event.get("ev", "")).upper()
             if kind == "Q":
                 try:
-                    self._record_quote(
-                        cache,
-                        symbol=symbol,
-                        raw=event,
-                        received_at=receipt,
-                        tradable=eligible.get(symbol, False),
-                        source="massive_stream_nbbo_top_of_book+robinhood_instrument",
-                    )
+                    # Publish against the latest independent eligibility while
+                    # serializing with backfill updates. A batch-start snapshot
+                    # could otherwise restore a stale eligibility flag.
+                    with self._lock:
+                        self._record_quote(
+                            cache,
+                            symbol=symbol,
+                            raw=event,
+                            received_at=receipt,
+                            tradable=self._symbol_tradable.get(symbol, False),
+                            source="massive_stream_nbbo_top_of_book+broker_instrument",
+                        )
                     venue = _provider_time(
                         event.get("sip_timestamp", event.get("t")),
                         f"quote timestamp {symbol}",
@@ -874,7 +1027,10 @@ class MassiveRestStreamSource:
         try:
             eligible = tradability.is_tradable(symbol, as_of=_utc_now())
             with self._lock:
+                if generation != self._session_generation:
+                    return "OBSOLETE", None
                 self._symbol_tradable[symbol] = eligible is True
+                cache.update_quote_tradability(symbol, tradable=eligible is True)
             existing_quote = cache.quote_for(symbol)
             if mode == "cold" and existing_quote is None:
                 with self._lock:
@@ -897,7 +1053,7 @@ class MassiveRestStreamSource:
                     raw=quote_results[0],
                     received_at=quote_received_at,
                     tradable=eligible,
-                    source="massive_rest_nbbo_top_of_book+robinhood_instrument",
+                    source="massive_rest_nbbo_top_of_book+broker_instrument",
                 )
 
             first_ms = int(start.timestamp() * 1000)
@@ -1539,8 +1695,8 @@ class LocalMassiveReadOnlySource:
     ) -> tuple[str, ...]:
         current = _aware(now, "now")
         start = _aware(session_start, "session_start")
-        if start >= current:
-            raise ValueError("session_start must precede now")
+        if start > current:
+            raise ValueError("session_start cannot be after now")
         symbols = tuple(dict.fromkeys(item.symbol for item in structures))
         failures: list[str] = []
         if not symbols:

@@ -13,10 +13,33 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PROTECTED_ACCOUNT_LAST4 = ("7153", "3103")
 
 
 def fail(message: str) -> None:
     raise AssertionError(message)
+
+
+def prohibited_content_patterns() -> dict[str, re.Pattern[str]]:
+    protected_suffixes = "|".join(
+        re.escape(value) for value in PROTECTED_ACCOUNT_LAST4
+    )
+    return {
+        # Match any unmasked numeric account identifier ending in a protected
+        # last four. Do not commit an exact full identifier merely to test this
+        # scanner; tests construct synthetic digit sequences at runtime.
+        "unmasked_target_broker_account_number": re.compile(
+            rf"(?<!\d)\d{{5,20}}(?:{protected_suffixes})(?!\d)"
+        ),
+        # Detect a committed six-digit confirmation secret by its assignment
+        # context without embedding any real or stale secret in the validator.
+        "confirmation_code_assignment": re.compile(
+            r"(?i)\b(?:confirmation|verification|otp)[_-]?(?:code|token)?\b"
+            r"\s*[:=]\s*[\"']\d{6}[\"']"
+        ),
+        "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+        "github_token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]+"),
+    }
 
 
 def main() -> int:
@@ -67,22 +90,7 @@ def main() -> int:
     if "never pause, alter, replace" not in options["prompt"]:
         fail("options live-core isolation language missing")
 
-    prohibited = {
-        # Match any unmasked numeric account identifier ending in the approved
-        # last four.  Do not commit the exact full identifier, even split
-        # across string literals, merely to search for it.
-        "unmasked_target_broker_account_number": re.compile(
-            r"(?<!\d)\d{5,20}7153(?!\d)"
-        ),
-        # Detect a committed six-digit confirmation secret by its assignment
-        # context without embedding any real or stale secret in the validator.
-        "confirmation_code_assignment": re.compile(
-            r"(?i)\b(?:confirmation|verification|otp)[_-]?(?:code|token)?\b"
-            r"\s*[:=]\s*[\"']\d{6}[\"']"
-        ),
-        "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-        "github_token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]+"),
-    }
+    prohibited = prohibited_content_patterns()
     checked_bytes = 0
     for path in sorted(item for item in ROOT.rglob("*") if item.is_file()):
         if "__pycache__" in path.parts:

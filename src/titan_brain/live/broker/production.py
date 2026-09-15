@@ -18,6 +18,7 @@ from ..models import BrokerOrderState
 from ..money import whole_shares
 from .base import (
     AccountSnapshot,
+    AttendedLocalReview,
     BrokerCapabilities,
     BrokerCapabilityError,
     BrokerContractViolation,
@@ -305,7 +306,7 @@ class ProductionTransport(Protocol):
 
     def review_equity_order(
         self, exact_account_id: str, request: OrderRequest
-    ) -> BrokerNativeReview | LocalPreflightDecision: ...
+    ) -> BrokerNativeReview | AttendedLocalReview | LocalPreflightDecision: ...
 
     def place_equity_order(
         self,
@@ -349,6 +350,29 @@ class SupportedProductionBrokerAdapter:
     @property
     def capabilities(self) -> BrokerCapabilities:
         return self.descriptor.capabilities
+
+    def bind_entry_risk_activation(
+        self,
+        *,
+        lineage_hash: str,
+        minimum_peak: object,
+    ) -> None:
+        """Bind an IBKR activation floor without exposing its transport."""
+
+        binder = getattr(self.transport, "bind_entry_risk_activation", None)
+        if not callable(binder):
+            raise BrokerMutationBlocked(
+                "production entry activation-risk binding is unavailable"
+            )
+        result = binder(
+            lineage_hash=lineage_hash,
+            minimum_peak=minimum_peak,
+        )
+        if result is not None:
+            raise BrokerMutationBlocked(
+                "production entry activation-risk binding is invalid"
+            )
+        return None
 
     def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
         self._assert_account(account_masked)
@@ -540,7 +564,10 @@ class SupportedProductionBrokerAdapter:
                 call_completed_at=call_completed_at,
             )
 
-        if contract.client_ref_recovery_source is not ClientRefRecoverySource.EXHAUSTIVE_ORDER_HISTORY:
+        if contract.client_ref_recovery_source not in {
+            ClientRefRecoverySource.EXHAUSTIVE_ORDER_HISTORY,
+            ClientRefRecoverySource.CURRENT_DAY_ORDER_ROSTER,
+        }:
             raise BrokerCapabilityError("unsupported client-ref recovery source")
         snapshot = self.get_account_snapshot(account_masked)
         orders = list(snapshot.equity_orders)
@@ -549,7 +576,7 @@ class SupportedProductionBrokerAdapter:
             if order.client_ref_id is None:
                 continue
             if order.client_ref_id in by_ref:
-                raise BrokerContractViolation("exhaustive history returned duplicate client refs")
+                raise BrokerContractViolation("order roster returned duplicate client refs")
             by_ref[order.client_ref_id] = order
         result = ClientRefLookupResult(
             account_masked=account_masked,
@@ -584,7 +611,10 @@ class SupportedProductionBrokerAdapter:
             self.descriptor.exact_account_id, request
         )
         call_completed_at = _utc(self._clock(), "clock")
-        if not isinstance(review, (BrokerNativeReview, LocalPreflightDecision)):
+        if not isinstance(
+            review,
+            (BrokerNativeReview, AttendedLocalReview, LocalPreflightDecision),
+        ):
             raise BrokerContractViolation(
                 "production review must declare broker-native or local-preflight provenance"
             )
@@ -604,6 +634,19 @@ class SupportedProductionBrokerAdapter:
             ):
                 raise BrokerContractViolation(
                     "broker review requires confirmation contrary to transport capabilities"
+                )
+        elif isinstance(review, AttendedLocalReview):
+            if not self.capabilities.review_requires_explicit_confirmation:
+                raise BrokerContractViolation(
+                    "attended local review conflicts with transport capabilities"
+                )
+            if review.required_confirmation_phrase is None:
+                raise BrokerContractViolation(
+                    "attended local review omitted its exact confirmation phrase"
+                )
+            if not self.capabilities.supports_daemon_writes:
+                raise BrokerContractViolation(
+                    "attended local review requires a configured direct-write path"
                 )
         else:
             if self.capabilities.review_requires_explicit_confirmation:
@@ -862,6 +905,8 @@ class SupportedProductionBrokerAdapter:
     def _review_identity(review: ReviewReceipt) -> str:
         if isinstance(review, BrokerNativeReview):
             return f"broker:{review.broker_review_id}"
+        if isinstance(review, AttendedLocalReview):
+            return f"attended:{review.decision_id}"
         if isinstance(review, LocalPreflightDecision):
             return f"local:{review.decision_id}"
         raise BrokerContractViolation(

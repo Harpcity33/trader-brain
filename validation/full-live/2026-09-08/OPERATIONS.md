@@ -5,7 +5,7 @@
 - **BUILT** means the source and deterministic release archive exist and pass
   tests. It does not mean they are installed.
 - **INSTALLED_PAUSED** means a verified release exists below
-  `~/Library/Application Support/Titan Momentum/full-live`, its durable runtime
+  `~/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103`, its durable runtime
   identity is `PAUSED` (or has not yet been initialized), and its disabled
   launchd plists are only staged under that subtree.
 - **RUNNING_RECONCILE_ONLY** means the owner has explicitly started the new
@@ -15,29 +15,35 @@
   `ACTIVE` only after a fresh clean broker reconciliation. Configuration text,
   installation, a loaded plist, or a running PID is not proof of this state.
 
-As delivered from source, `config/full_live.json` keeps live entries and the
-local mutation interlock disabled. It contains explicit broker,
-reconciliation, staged-risk-provenance, live-evidence-provider, notification
-bridge, and numeric liquidity/score blockers. That is deliberate: the current
-supported Robinhood connector is attended and is not a daemon-capable
-unattended mutation transport. Those blockers cannot be waived with a
-confirmation phrase. Until a reviewed replacement release resolves them, the
-activation command must fail closed.
+As delivered from source, `config/full_live_ibkr.json` keeps live entries and
+the local mutation interlock disabled. It contains explicit broker,
+reconciliation, risk-provenance, live-evidence-provider, notification,
+and all-in fee-bound blockers. Approved operational spread/depth and target
+semantics are applied, with their immutable approval artifacts hash-bound into
+the release. An
+authenticated local IB Gateway read does not by itself prove a supported
+unattended place/cancel contract. The selected profile remains staged until
+IBKR's exact external-data/manual-Transmit contract is verified, the required
+account settings are verified, exhaustive reads pass, and every
+release-bound authority and notification receipt exists. Those evidence gates
+cannot be waived with a confirmation phrase or cleared by editing booleans.
 
 ## Deterministic build
 
 From a clean, reviewed repository checkout, record the exact `HEAD` commit and
 build. `--source-revision` is an assertion, not a free-form manifest label: it
 must resolve to the exact current `HEAD`. The builder rejects staged or
-unstaged tracked changes and any uncommitted path that would belong to the
-release inventory.
+unstaged tracked changes and every untracked repository file, including
+ignored files. The output directory must resolve outside the source
+repository.
 
 ```sh
 PYTHON=/absolute/path/to/python3.11-or-newer
 "$PYTHON" scripts/build_full_live_release.py \
   --source-root /absolute/path/to/trader-brain \
   --output-dir /absolute/path/to/release-output \
-  --source-revision EXACT_40_CHARACTER_GIT_COMMIT
+  --source-revision EXACT_40_CHARACTER_GIT_COMMIT \
+  --config config/full_live_ibkr.json
 ```
 
 The output contains:
@@ -46,14 +52,14 @@ The output contains:
 - the same path plus `.sha256`
 - the same path plus `.manifest.json`
 
-The manifest schema is `titan_full_live_release_2026-09-08_v1`.
+The manifest schema is `titan_full_live_release_2026-09-14_v2`.
 `release_manifest_hash` is SHA-256 of canonical JSON after dropping only that
 field. `source_tree` is the canonical file-inventory hash. `config_hash` and
 `policy_hash` use the runtime's policy hashing convention. The manifest is
 excluded from its own file inventory. Repeating a build with identical content
 and source revision must produce identical bytes. Payload bytes are read from
 the recorded commit's Git blobs, so every packaged file digest is bound to
-`source_commit`; unrelated untracked files are never packaged.
+`source_commit`; an untracked repository file prevents the build.
 
 ## Paused installation
 
@@ -62,27 +68,42 @@ Installation is intentionally separate from activation. Use the same Python
 
 ```sh
 PYTHON=/absolute/path/to/python3.11-or-newer
+IBKR_SDK_VENV=/absolute/path/to/authorized-ibapi-10.50.2-venv
 "$PYTHON" scripts/install_full_live_paused.py \
   /absolute/path/to/titan-full-live-<hash>.tar.gz \
-  --root "$HOME/Library/Application Support/Titan Momentum/full-live" \
-  --python-executable "$PYTHON"
+  --root "$HOME/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103" \
+  --trusted-source-root /absolute/path/to/reviewed/trader-brain \
+  --expected-source-revision EXACT_40_CHARACTER_GIT_COMMIT \
+  --python-executable "$PYTHON" \
+  --ibkr-sdk-venv "$IBKR_SDK_VENV"
 ```
 
 The installer verifies the sidecar archive hash, embedded manifest, complete
-file inventory, and every file digest. It installs a content-addressed release,
-updates `current`, writes `release-manifest.json`, and stages these two disabled
-plists only:
+file inventory, and every file digest. The trusted repository and full source
+commit are mandatory independent inputs. Before creating the install root, the
+installer disables Git replacement objects and reconstructs the complete
+deterministic manifest from that commit's blobs and executable modes. An
+internally rehashed archive, a different or missing commit, an incomplete
+inventory, or a replaced source therefore fails closed. It then installs a
+content-addressed release, updates `current`, writes `release-manifest.json`,
+and stages these two disabled plists only:
 
-`~/Library/Application Support/Titan Momentum/full-live/launchd/com.harpcity.trader-brain-full-live.plist`
+For the IBKR profile, the committed provider config also pins the exact
+approved SDK/protobuf file-inventory SHA-256. The installer inventories the
+supplied venv without importing it and refuses matching version metadata with
+different bytes. The installed receipt and runtime revalidation must match that
+release pin; the receipt proves local byte identity, not a vendor signature.
 
-`~/Library/Application Support/Titan Momentum/full-live/launchd/com.harpcity.trader-brain-full-live-notifications.plist`
+`~/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103/launchd/com.harpcity.trader-brain-full-live-ibkr-3103.plist`
+
+`~/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103/launchd/com.harpcity.trader-brain-full-live-ibkr-3103-notifications.plist`
 
 The first process is the trading coordinator. The second is the only process
 permitted to claim durable outbox rows and deliver them to the signed provider
 route. The coordinator only enqueues; it neither sends nor starts the worker.
 The two labels, argument vectors, logs, and supervision lifecycles are distinct.
 
-The installer does not call `launchctl`, start a process, access Robinhood,
+The installer does not call `launchctl`, start a process, access IBKR,
 initialize a missing state database, copy anything to `~/Library/LaunchAgents`,
 or modify the legacy `Titan Momentum` runtime. If a full-live state database
 already exists, a release switch requires an exact recognized v1, v2, or v3
@@ -117,7 +138,7 @@ path. The target account's nonsecret key is hashed into the lock filename.
 Set paths explicitly and inspect before any scheduler action:
 
 ```sh
-INSTALL_ROOT="$HOME/Library/Application Support/Titan Momentum/full-live"
+INSTALL_ROOT="$HOME/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103"
 LAUNCHER="$INSTALL_ROOT/current/scripts/titan-full-live"
 PYTHON=/absolute/path/to/the-same-python3.11-or-newer
 
@@ -131,6 +152,30 @@ configuration, policy, account suffix, and database-schema hashes match
 `$INSTALL_ROOT/release-manifest.json`. A missing or mismatched value is a hard
 stop.
 
+### Independent notification setup inventory
+
+Before provisioning or testing a route, run:
+
+```sh
+"$PYTHON" "$LAUNCHER" notification-setup-status --install-root "$INSTALL_ROOT"
+```
+
+This diagnostic validates the installed release and checks only the metadata
+of five exact account-scoped Keychain locators. It does not read secret
+contents, import/activate the IBKR SDK, compose a broker or market-data client,
+make a network request, send an email, modify local state, or issue readiness
+evidence. It works when the broker SDK is unavailable. Exit status 2 means
+setup/evidence remains unverified, not that a broker probe was attempted.
+
+For account ending 3103, the `ibkr_gmail` profile is distinct from the legacy
+Robinhood `gmail` profile. Its credentials cannot be borrowed from account
+ending 7153. A connected Gmail app session also does not establish that the
+independent local worker has a durable OAuth authorization. The owner must
+authorize the destination and a test; the local credential/consent binding and
+an actually received route-bound test must then be verified. Metadata presence
+alone does not satisfy any of those proofs. Do not send a connector-only test
+and describe it as an independent-worker test.
+
 ### Exact local provider assembly and remaining prerequisites
 
 The staged coordinator and independent notification worker invoke Python as
@@ -139,24 +184,28 @@ environment-supplied import path, and neither writes bytecode into a release.
 
 The stock `scripts/titan-full-live` launcher constructs one release-contained
 `LocalProviderAssembly` from the immutable nonsecret profile in
-`config/provider_bindings.json`. It passes the same `RuntimeComposition` and
-assembly to `doctor`, readiness, the coordinator, provider status, and the
-independent notification worker. Private values are read only from the named
-macOS Keychain items; connected-app tokens are never exported.
+`config/provider_bindings.json`. Doctor, readiness, and the coordinator receive
+the complete release-attested broker/discovery composition. The independent
+notification worker and route-test command receive a delivery-only composition
+and never instantiate IBKR or Massive clients, allowing them to coexist with
+the fixed-ID broker reader. Private values are read only from the named macOS
+Keychain items; connected-app tokens are never exported.
 
 The current assembly contains concrete provider-supported Massive REST/WSS
-clients and a durable Gmail desktop OAuth sender implementation. Gmail remains
-disabled until the owner authorizes its exact account and destination. The
-verified Robinhood MCP route remains attended-only and its Codex OAuth token is
-not exportable to the daemon, so the assembly deliberately supplies neither a
-broker mutation transport nor Robinhood tradability. Full-live readiness must
-remain blocked until a supported route supplies:
+clients, official local IBKR TWS API readers/contract evidence, a guarded IBKR
+order transport, and a durable Gmail desktop OAuth sender implementation.
+Gmail remains disabled until the owner authorizes its exact account and
+destination. The IBKR writer is unavailable unless the immutable release and a
+private authority artifact prove the supported endpoint/account/client and the
+no-confirmation contract. Full-live readiness must remain blocked until the
+following evidence is supplied:
 
-- an approved `ProductionTransport` for broker reads and mutations whose
-  documented contract permits the intended unattended lifecycle;
+- an approved `IbkrProductionTransport` for exhaustive reads and mutations
+  whose provider contract permits the intended unattended lifecycle without
+  manual Transmit or bypassing API precautions;
 - `SupportedDiscoveryProviderComposition`, built around
-  `MassiveRestStreamSource`, an authenticated Robinhood instrument reader, and
-  an independently recomputing quality-evidence reader sharing the exact
+  `MassiveRestStreamSource`, authenticated IBKR contract/tradability evidence,
+  and the release-contained deterministic quality reader sharing the exact
   signed non-secret provider binding;
 - an owner-authorized `GmailProviderBinding` with exact signed
   implementation, authorization, sender, and destination bindings;
@@ -174,6 +223,39 @@ a rebuilt and reviewed release, `doctor`, `readiness`, `serve`, and
 token in configuration, an environment dump, a command line, or the
 repository.
 
+### Daily autonomous risk baseline
+
+An unattended release also requires a private, canonical daily IBKR risk
+baseline at:
+
+```text
+$INSTALL_ROOT/control/ibkr/daily-risk-baseline.json
+```
+
+The file must be a non-symlink regular file owned by the local user, have mode
+`0400` or `0600`, and carry schema
+`titan_ibkr_daily_risk_baseline_2026-09-14_v1`. Its HMAC key is a third,
+distinct account-scoped Keychain item selected by the signed policy; it may not
+reuse the provider-authority or owner-policy/pricing key. The receipt binds the
+exact release-manifest, config, policy, risk, account, and account-fingerprint
+identities plus the current and prior exchange-calendar trading dates. Its
+evidence must be USD, exact-account and broker-authoritative, and must include
+week-to-date realized P&L through the prior trading day, prior high-water
+equity, an immutable provider receipt hash, provider source, and provider
+observation time.
+
+No release command creates or signs this provider fact. A trusted existing
+control plane must derive it from authenticated IBKR account records and place
+the exact signed file before readiness. The runtime authenticates it before
+opening the command session and again on every broker snapshot, combines it
+only with fresh current-day `reqPnL.realizedPnL`, and advances the separately
+bound monotone ledger at
+`$INSTALL_ROOT/state/ibkr-risk-high-water.sqlite3`. The calendar-backed binding
+rotates at each trading date without a daemon restart; a missing, stale,
+altered, future, non-trading-day, or regressing receipt blocks new write
+authority. It never weakens reconciliation, protection, exit, or closeout
+requirements.
+
 ## Readiness and owner-controlled cutover
 
 Do not disable the existing account writer merely because package tests pass.
@@ -183,6 +265,11 @@ window. The supported sequence is:
 1. Run `doctor` and resolve every policy, broker-capability, authentication,
    market-data, notification, and release-integrity blocker. Numeric spread and
    depth thresholds require approved policy values; absence is not unlimited.
+   Before an unattended probe, provision the exact release-bound daily risk
+   baseline described above and verify that its Keychain locator and private
+   file are distinct from the provider-authority and owner-policy/pricing
+   receipts. A baseline from an earlier release or trading date cannot be
+   reused.
 2. Confirm all standard equity positions/orders, option positions/orders, and
    supported advanced-order state from strictly fresh broker evidence. Any
    unknown submission or uncovered quantity blocks cutover.
@@ -197,14 +284,14 @@ window. The supported sequence is:
 
    ```sh
    install -m 600 \
-     "$INSTALL_ROOT/launchd/com.harpcity.trader-brain-full-live-notifications.plist" \
-     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-notifications.plist"
+     "$INSTALL_ROOT/launchd/com.harpcity.trader-brain-full-live-ibkr-3103-notifications.plist" \
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-ibkr-3103-notifications.plist"
    launchctl enable \
-     "gui/$(id -u)/com.harpcity.trader-brain-full-live-notifications"
+     "gui/$(id -u)/com.harpcity.trader-brain-full-live-ibkr-3103-notifications"
    launchctl bootstrap "gui/$(id -u)" \
-     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-notifications.plist"
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-ibkr-3103-notifications.plist"
    launchctl kickstart -k \
-     "gui/$(id -u)/com.harpcity.trader-brain-full-live-notifications"
+     "gui/$(id -u)/com.harpcity.trader-brain-full-live-ibkr-3103-notifications"
    ```
 
    Then enqueue the redacted route test. The command and worker must record a
@@ -227,18 +314,54 @@ window. The supported sequence is:
    provider receipt to be no more than 300 seconds old. The checked-in September
    8 configuration intentionally uses local staging and therefore cannot pass
    this gate.
-4. Confirm the old heartbeat/account writer has been disabled. Preserve any
-   working broker-held protection; disabling a writer is not a closeout. The
-   new writer must still be stopped here so the activation commands can prove
-   exclusive ownership of the account lock.
-   A paused or disabled `automation.toml` is configuration evidence only. The
-   `record-legacy-retirement` command additionally requires a fresh read from
-   the Codex automation control plane proving the exact scheduler runtime ID,
-   automation ID, matching configuration hash and status, zero active
-   executions, and a query-receipt hash. This release has no supported local
-   control-plane status adapter, so the stock launcher returns
-   `SCHEDULER_RUNTIME_IDENTITY_UNAVAILABLE` and cannot record retirement. Do
-   not substitute a file, process-list inference, or hand-written receipt.
+4. Retire both same-account Codex automations through the Codex automation
+   control plane, and wait for both to report `PAUSED` or `DISABLED` with zero
+   running executions:
+
+   - `robinhood-momentum-engine`
+   - `robinhood-titan-premarket-deep-dive`
+
+   Preserve any working broker-held protection; disabling a writer is not a
+   closeout. The new writer must still be stopped here so the activation
+   commands can prove exclusive ownership of the account lock. Do not edit an
+   `automation.toml`: it is configuration evidence only and cannot prove the
+   scheduler's loaded state or whether an execution is still running.
+
+   The owner-authorized control-plane bridge must query both exact automation
+   IDs in one operation and inject a canonical, HMAC-SHA256-signed snapshot at:
+
+   ```text
+   $INSTALL_ROOT/control/codex-scheduler-retirement-evidence.json
+   ```
+
+   The signer key is a minimum-256-bit generic-password value in macOS
+   Keychain service `titan-full-live-codex-scheduler-control-plane`, account
+   `ibkr-live-ending-3103`. The at-most-ten-second snapshot must bind the exact
+   release-manifest, configuration, policy, runtime, and account hashes/IDs and
+   must include, for each required automation, its scheduler runtime ID,
+   status, configuration hash, active-execution count, observation time, and
+   control-plane query-receipt hash. Its schema is
+   `titan_codex_scheduler_retirement_evidence_2026-09-14_v1`; the HMAC covers
+   the ASCII canonical JSON body (sorted keys, no insignificant whitespace),
+   excluding only the top-level `hmac_sha256`, and the private file ends in one
+   newline with mode `0400` or `0600`. The installed adapter only authenticates
+   and reads this evidence; it never pauses an automation or writes scheduler
+   configuration. Do not substitute a copied/hand-written JSON file, a process
+   inference, or a local TOML digest.
+
+   While the signed snapshot remains current, record the durable retirement
+   and broker-drain receipt:
+
+   ```sh
+   "$PYTHON" "$LAUNCHER" record-legacy-retirement \
+     --install-root "$INSTALL_ROOT"
+   ```
+
+   That command does not change either automation, signal a process, or mutate
+   the broker. Every later `readiness`, `prepare-activation`, and `activate`
+   invocation requires another fresh signed control-plane snapshot proving
+   both automations remain retired and their combined running-execution count
+   is zero.
 5. Stop every account writer, then ask the installed runtime to collect a fresh
    diagnostic attestation. There is no readiness-file input: the command takes
    the kernel account lock and matching database lease, attempts an actual
@@ -252,9 +375,10 @@ window. The supported sequence is:
    ```
 
    Review the full evidence and its `readiness_hash`. Current production
-   configuration must report blocked while the attended-only broker adapter,
-   unresolved signed policy gates, local-only notification sink, or active
-   legacy heartbeat remains. Do not edit or copy this output back as input.
+   configuration must report blocked while the staged broker adapter,
+   unresolved signed policy/provider gates, local-only notification sink, or
+   competing legacy writer remains. Do not edit or copy this output back as
+   input.
 6. Prepare a short-lived, one-use activation record. The command independently
    repeats the machine probes, embeds the complete evidence, binds its SHA-256
    into the activation ID, and stages nothing unless every hard gate passes:
@@ -276,7 +400,7 @@ window. The supported sequence is:
      "$PYTHON" "$LAUNCHER" activate \
      --install-root "$INSTALL_ROOT" \
      --activation-id "$ACTIVATION_ID" \
-     --confirm "ACTIVATE FULL LIVE ending-7153 $ACTIVATION_ID"
+     --confirm "ACTIVATE FULL LIVE ibkr-live-ending-3103 $ACTIVATION_ID"
    ```
 
    The activation command reacquires both writer authorities, repeats all
@@ -296,13 +420,13 @@ window. The supported sequence is:
 
    ```sh
    install -m 600 \
-     "$INSTALL_ROOT/launchd/com.harpcity.trader-brain-full-live.plist" \
-     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live.plist"
-   launchctl enable "gui/$(id -u)/com.harpcity.trader-brain-full-live"
+     "$INSTALL_ROOT/launchd/com.harpcity.trader-brain-full-live-ibkr-3103.plist" \
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-ibkr-3103.plist"
+   launchctl enable "gui/$(id -u)/com.harpcity.trader-brain-full-live-ibkr-3103"
    launchctl bootstrap "gui/$(id -u)" \
-     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live.plist"
+     "$HOME/Library/LaunchAgents/com.harpcity.trader-brain-full-live-ibkr-3103.plist"
    launchctl kickstart -k \
-     "gui/$(id -u)/com.harpcity.trader-brain-full-live"
+     "gui/$(id -u)/com.harpcity.trader-brain-full-live-ibkr-3103"
    "$PYTHON" "$LAUNCHER" status --install-root "$INSTALL_ROOT"
    ```
 8. Verify a single new account-writer lock holder, fresh reconciliation,
@@ -362,8 +486,8 @@ hash-bound, activation-bound control requests only after proving that the
 kernel account lock and database writer lease belong to the running service.
 `MANAGED_CLOSEOUT` additionally requires an HMAC-SHA256 generated by the
 manifest-bound runtime control authenticator; rehashing or rewriting the JSON
-is not authorization. The attended stock launcher has no such authenticator
-and therefore cannot queue autonomous closeout authority.
+is not authorization. A staged/read-only launcher has no such authenticator and
+therefore cannot queue autonomous closeout authority.
 Their output says `queued=true, applied=false`; wait for `status` and the audit
 chain to prove consumption. A rejected or expired request is quarantined and
 forces an active/reconciling runtime to pause new entries.
@@ -385,7 +509,7 @@ uncovered quantity, and a drained durable notification outbox may the owner:
      --install-root "$INSTALL_ROOT" \
      --flatness-snapshot-id "$FLAT_SNAPSHOT" \
      --reason "owner verified whole-broker flatness" \
-     --confirm "DEACTIVATE FULL LIVE ending-7153 FLAT $FLAT_SNAPSHOT"
+     --confirm "DEACTIVATE FULL LIVE ibkr-live-ending-3103 FLAT $FLAT_SNAPSHOT"
    ```
 
    The service accepts it only if the snapshot is authoritative, is strictly
@@ -395,12 +519,12 @@ uncovered quantity, and a drained durable notification outbox may the owner:
    deactivation proof.
 2. verify `status` reports an empty control inbox, no rejected request, revoked
    authority, and `PAUSED` mode;
-3. boot out and disable `com.harpcity.trader-brain-full-live`;
+3. boot out and disable `com.harpcity.trader-brain-full-live-ibkr-3103`;
 4. restore the old writer if still desired and if doing so cannot create a
    second account writer;
 5. after the durable outbox is drained or its unresolved provider state is
    explicitly retained as incident evidence, boot out and disable
-   `com.harpcity.trader-brain-full-live-notifications`;
+   `com.harpcity.trader-brain-full-live-ibkr-3103-notifications`;
 6. leave the full-live state database and audit/outbox evidence intact;
 7. retarget `current` only via the paused installer after it proves the database
    is unarmed `PAUSED`, all runtime leases are released, and the audit chain is

@@ -31,6 +31,8 @@ from .component_provenance import (
 from .control import ControlInbox, HmacControlAuthenticator
 from .discovery_composition import (
     SUPPORTED_DISCOVERY_COMPOSITION_ID,
+    SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID,
+    SupportedIbkrDiscoveryProviderComposition,
     SupportedDiscoveryProviderComposition,
 )
 from .notifications import (
@@ -52,6 +54,47 @@ _SAFE_ATTESTATION_ROLES = frozenset(
         "discovery_executor",
         "discovery_provider",
         "gmail_authorizer",
+        "ibkr_acceptance_verifier",
+        "ibkr_account_writer_lock",
+        "ibkr_account_snapshot_reader",
+        "ibkr_attended_plan_reader",
+        "ibkr_attended_preflight_delegate",
+        "ibkr_cancel_authorizer",
+        "ibkr_contract_factory",
+        "ibkr_contract_details_requester",
+        "ibkr_execution_ledger",
+        "ibkr_ledger_reconciler",
+        "ibkr_autonomous_authority_contract",
+        "ibkr_autonomous_authority_bindings",
+        "ibkr_autonomous_authority_clock",
+        "ibkr_autonomous_authority_key_loader",
+        "ibkr_autonomous_plan_clock",
+        "ibkr_autonomous_plan_reader",
+        "ibkr_autonomous_plan_sealer",
+        "ibkr_autonomous_plan_state",
+        "ibkr_execution_filter_factory",
+        "ibkr_instrument_clock",
+        "ibkr_instrument_contract_factory",
+        "ibkr_instrument_provider",
+        "ibkr_order_factory",
+        "ibkr_preflight_bridge",
+        "ibkr_preflight_clock",
+        "ibkr_read_callback_router",
+        "ibkr_read_bridge",
+        "ibkr_read_clock",
+        "ibkr_read_requester",
+        "ibkr_revalidation_callback",
+        "ibkr_risk_policy_check",
+        "ibkr_durable_risk_policy_check",
+        "ibkr_sdk_cancel_factory",
+        "ibkr_sdk_client",
+        "ibkr_sdk_clock",
+        "ibkr_sdk_dispatch_authorizer",
+        "ibkr_sdk_mutation_interlock",
+        "ibkr_sdk_session",
+        "ibkr_session_eligibility_check",
+        "ibkr_stable_account_clock",
+        "ibkr_command_callback_router",
         "instrument_evidence_provider",
         "market_source",
         "massive_candidate_provider",
@@ -165,6 +208,7 @@ class DiscoveryProviderComposition(Protocol):
         writer_lock: object,
         latency: object,
         authority: object,
+        plan_sealer: object | None = None,
     ) -> object: ...
 
 
@@ -177,12 +221,21 @@ class RuntimeComposition:
         production_transport: ProductionTransport | None = None,
         discovery_provider: DiscoveryProviderComposition | None = None,
         notification_provider: GmailProviderBinding | None = None,
+        autonomous_plan_sealer: object | None = None,
         control_authentication_key: bytes | None = None,
         control_authorization_binding_id: str | None = None,
     ) -> None:
         self.production_transport = production_transport
         self.discovery_provider = discovery_provider
         self.notification_provider = notification_provider
+        if autonomous_plan_sealer is not None and (
+            not callable(autonomous_plan_sealer)
+            or not callable(getattr(autonomous_plan_sealer, "release_components", None))
+        ):
+            raise ValueError(
+                "autonomous plan sealer must be a callable release component"
+            )
+        self.autonomous_plan_sealer = autonomous_plan_sealer
         if (control_authentication_key is None) != (
             control_authorization_binding_id is None
         ):
@@ -214,6 +267,23 @@ class RuntimeComposition:
         self._bound_manifest: Mapping[str, object] | None = None
         self._static_component_roles: set[str] = set()
         self._bound_runtime_profile_hash: str | None = None
+
+    def managed_control_ready(
+        self, execution_config: Mapping[str, object]
+    ) -> bool:
+        """Report authenticated managed-closeout control without creating a spool."""
+
+        if (
+            execution_config.get("broker_adapter")
+            != "supported_production_transport"
+        ):
+            return self._control_authenticator is None
+        authenticator = self._control_authenticator
+        return bool(
+            authenticator is not None
+            and authenticator.authorization_binding_id
+            == str(execution_config.get("production_authorization_binding_id", ""))
+        )
 
     def control_inbox(
         self,
@@ -291,20 +361,51 @@ class RuntimeComposition:
         manifest_hash = str(manifest.get("release_manifest_hash", ""))
         root = Path(release_root).resolve()
         binding = (manifest_hash, root)
+        transport_members = (
+            "descriptor",
+            "release_components",
+            "get_account_base",
+            "list_order_family_page",
+            "lookup_equity_orders_by_client_ref",
+            "review_equity_order",
+            "place_equity_order",
+            "cancel_equity_order",
+        )
+        # Protection derivation is an IBKR attended-transport extension rather
+        # than part of the generic ProductionTransport protocol.  Bind it when
+        # the concrete implementation declares it, without making unrelated
+        # supported transports implement or fabricate that broker-specific
+        # surface.
+        if self.production_transport is not None:
+            try:
+                inspect.getattr_static(
+                    type(self.production_transport),
+                    "review_protection_equity_order",
+                )
+            except AttributeError:
+                pass
+            else:
+                transport_members = (
+                    *transport_members,
+                    "review_protection_equity_order",
+                )
+            try:
+                inspect.getattr_static(
+                    type(self.production_transport),
+                    "bind_entry_risk_activation",
+                )
+            except AttributeError:
+                pass
+            else:
+                transport_members = (
+                    *transport_members,
+                    "bind_entry_risk_activation",
+                )
         components = (
             (
                 "production_transport",
                 self.production_transport,
-                (
-                    "descriptor",
-                    "release_components",
-                    "get_account_base",
-                    "list_order_family_page",
-                    "lookup_equity_orders_by_client_ref",
-                    "review_equity_order",
-                    "place_equity_order",
-                    "cancel_equity_order",
-                ),
+                transport_members,
             ),
             (
                 "discovery_provider",
@@ -337,6 +438,10 @@ class RuntimeComposition:
             for role, component, _members in components
             if component is not None
         }
+        if self.autonomous_plan_sealer is not None:
+            component_ids["ibkr_autonomous_plan_sealer"] = id(
+                self.autonomous_plan_sealer
+            )
         if self._release_binding is not None:
             if (
                 self._release_binding != binding
@@ -358,6 +463,14 @@ class RuntimeComposition:
                     component,
                     role=role,
                     semantic_members=members,
+                    manifest=manifest,
+                    release_root=root,
+                    evidence=evidence,
+                    component_ids=release_component_ids,
+                )
+            if self.autonomous_plan_sealer is not None:
+                self._bind_shared_autonomous_plan_sealer(
+                    self.autonomous_plan_sealer,
                     manifest=manifest,
                     release_root=root,
                     evidence=evidence,
@@ -494,6 +607,61 @@ class RuntimeComposition:
                 component_ids=component_ids,
             )
 
+    def _bind_shared_autonomous_plan_sealer(
+        self,
+        sealer: object,
+        *,
+        manifest: Mapping[str, object],
+        release_root: Path,
+        evidence: dict[str, ReleaseBoundComponentEvidence],
+        component_ids: dict[str, int],
+    ) -> None:
+        """Bind the sealer while preserving one owner for its shared reader.
+
+        The production transport's preflight graph owns the exact durable plan
+        reader, state and clock.  The sealer retains that same reader by
+        design.  Recursively binding the sealer would therefore either alias
+        one object under a second role or duplicate its role.  Verify the
+        sealer implementation first, then prove its sole declared dependency
+        is the reader already owned by the transport graph.
+        """
+
+        role = "ibkr_autonomous_plan_sealer"
+        if role in evidence:
+            raise UnsignedCompositionError(role, "DEPENDENCY_ROLE_DUPLICATE")
+        if id(sealer) in component_ids.values():
+            raise UnsignedCompositionError(
+                role, "DEPENDENCY_OBJECT_REUSED_UNDER_ANOTHER_ROLE"
+            )
+        item_evidence = verify_release_bound_component(
+            sealer,
+            role=role,
+            semantic_members=("release_components", "__call__"),
+            manifest=manifest,
+            release_root=release_root,
+        )
+        try:
+            nested = tuple(sealer.release_components())
+        except Exception as exc:
+            raise UnsignedCompositionError(
+                role, f"DEPENDENCY_ENUMERATION_FAILED:{type(exc).__name__}"
+            ) from exc
+        if (
+            len(nested) != 1
+            or not isinstance(nested[0], tuple)
+            or len(nested[0]) != 3
+            or nested[0][0] != "ibkr_autonomous_plan_reader"
+            or nested[0][2] != ("release_components", "__call__")
+        ):
+            raise UnsignedCompositionError(role, "DEPENDENCY_INVENTORY_INVALID")
+        reader = nested[0][1]
+        if component_ids.get("ibkr_autonomous_plan_reader") != id(reader):
+            raise UnsignedCompositionError(
+                role, "DEPENDENCY_SHARED_READER_BINDING_MISMATCH"
+            )
+        evidence[role] = item_evidence
+        component_ids[role] = id(sealer)
+
     def _runtime_profile_facts(self) -> Mapping[str, object]:
         facts: dict[str, object] = {}
         if self.production_transport is not None:
@@ -528,7 +696,13 @@ class RuntimeComposition:
                 "timeout_seconds": getattr(provider, "timeout_seconds", None),
             }
             source = provider.market_source
-            if isinstance(provider, SupportedDiscoveryProviderComposition):
+            if isinstance(
+                provider,
+                (
+                    SupportedDiscoveryProviderComposition,
+                    SupportedIbkrDiscoveryProviderComposition,
+                ),
+            ):
                 rest_authorization = getattr(
                     getattr(source, "rest", None), "authorization", None
                 )
@@ -574,6 +748,31 @@ class RuntimeComposition:
                     self._control_authenticator.authorization_binding_id
                 ),
                 "key_fingerprint": self._control_key_fingerprint,
+            }
+        if self.autonomous_plan_sealer is not None:
+            self._require_release_bound(
+                "ibkr_autonomous_plan_sealer", self.autonomous_plan_sealer
+            )
+            try:
+                nested = tuple(self.autonomous_plan_sealer.release_components())
+            except Exception as exc:
+                raise RuntimeCompositionError(
+                    "UNSIGNED_COMPOSITION:ibkr_autonomous_plan_sealer:dependency enumeration failed"
+                ) from exc
+            if (
+                len(nested) != 1
+                or not isinstance(nested[0], tuple)
+                or len(nested[0]) != 3
+                or nested[0][0] != "ibkr_autonomous_plan_reader"
+                or nested[0][2] != ("release_components", "__call__")
+                or self._release_component_ids.get("ibkr_autonomous_plan_reader")
+                != id(nested[0][1])
+            ):
+                raise RuntimeCompositionError(
+                    "UNSIGNED_COMPOSITION:ibkr_autonomous_plan_sealer:shared reader binding changed"
+                )
+            facts["ibkr_autonomous_plan_sealer"] = {
+                "shared_reader_role": "ibkr_autonomous_plan_reader"
             }
         return facts
 
@@ -633,9 +832,21 @@ class RuntimeComposition:
                 self._require_release_bound(
                     "production_transport", self.production_transport
                 )
+            transport_account = account_masked
+            if self.production_transport is not None:
+                supplied = str(account_masked)
+                bound = self.production_transport.descriptor.capabilities.account_masked
+                if (
+                    not re.fullmatch(r"(?:\*{4}|•{4})[0-9]{4}", supplied)
+                    or supplied[-4:] != bound[-4:]
+                ):
+                    raise RuntimeCompositionError(
+                        "runtime broker account mask differs from signed transport"
+                    )
+                transport_account = bound
             self._broker = build_broker_client(
                 execution_config,
-                account_masked=account_masked,
+                account_masked=transport_account,
                 production_transport=self.production_transport,
             )
             self._broker_key = key
@@ -670,7 +881,15 @@ class RuntimeComposition:
         writer_lock: object,
         latency: object,
         authority: object,
+        plan_sealer: object | None = None,
     ) -> object | None:
+        configured_sealer = self.autonomous_plan_sealer
+        if plan_sealer is not configured_sealer:
+            raise RuntimeCompositionError(
+                "UNSIGNED_COMPOSITION:ibkr_autonomous_plan_sealer:runtime implementation changed"
+            )
+        if plan_sealer is not None:
+            self._require_release_bound("ibkr_autonomous_plan_sealer", plan_sealer)
         discovery_config = policy.config["discovery"]
         provider = self._bound_discovery_provider(discovery_config)
         if provider is None:
@@ -687,14 +906,27 @@ class RuntimeComposition:
                 writer_lock=writer_lock,
                 latency=latency,
                 authority=authority,
+                plan_sealer=plan_sealer,
             )
             self._verify_dynamic_component(
                 executor,
                 role="discovery_executor",
-                semantic_members=("execute", "final_entry_evidence_failures"),
+                semantic_members=(
+                    "execute",
+                    "final_entry_evidence_failures",
+                    "analyze",
+                    "premarket_analysis_due",
+                    "target_evidence_snapshot",
+                ),
             )
             pipeline = getattr(executor, "pipeline", None)
-            if isinstance(provider, SupportedDiscoveryProviderComposition):
+            if isinstance(
+                provider,
+                (
+                    SupportedDiscoveryProviderComposition,
+                    SupportedIbkrDiscoveryProviderComposition,
+                ),
+            ):
                 instrument = getattr(pipeline, "instrument_evidence", None)
                 quality = getattr(pipeline, "quality_evidence", None)
                 if instrument is None or quality is None:
@@ -711,9 +943,18 @@ class RuntimeComposition:
                     role="quality_evidence_provider",
                     semantic_members=("revalidate_structure",),
                 )
-            if not callable(getattr(executor, "execute", None)):
+            if any(
+                not callable(getattr(executor, member, None))
+                for member in (
+                    "execute",
+                    "final_entry_evidence_failures",
+                    "analyze",
+                    "premarket_analysis_due",
+                    "target_evidence_snapshot",
+                )
+            ):
                 raise RuntimeCompositionError(
-                    "discovery provider returned no lifecycle-compatible executor"
+                    "discovery provider returned an incomplete lifecycle/analysis executor"
                 )
             self._discovery = executor
         return self._discovery
@@ -845,7 +1086,16 @@ class RuntimeComposition:
             raise RuntimeCompositionError(
                 "supported production discovery identity requires the release-shipped composition"
             )
-        if expected == SUPPORTED_DISCOVERY_COMPOSITION_ID:
+        if expected == SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID and not isinstance(
+            provider, SupportedIbkrDiscoveryProviderComposition
+        ):
+            raise RuntimeCompositionError(
+                "supported IBKR discovery identity requires the release-shipped composition"
+            )
+        if expected in {
+            SUPPORTED_DISCOVERY_COMPOSITION_ID,
+            SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID,
+        }:
             expected_binding = str(
                 discovery_config.get("provider_binding_id", "")
             ).strip()
@@ -901,6 +1151,10 @@ class RuntimeComposition:
                     f"UNSIGNED_COMPOSITION:{role}:runtime implementation changed"
                 )
             return
+        if id(component) in self._release_component_ids.values():
+            raise RuntimeCompositionError(
+                f"UNSIGNED_COMPOSITION:{role}:dependency object reused under another role"
+            )
         manifest_hash, release_root = self._release_binding
         # Reuse the exact inventory supplied during the original binding.  A
         # private copy prevents an external launcher from swapping mappings
@@ -931,6 +1185,8 @@ class RuntimeComposition:
 __all__ = [
     "DiscoveryProviderComposition",
     "SUPPORTED_DISCOVERY_COMPOSITION_ID",
+    "SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID",
+    "SupportedIbkrDiscoveryProviderComposition",
     "SupportedDiscoveryProviderComposition",
     "RuntimeComposition",
     "RuntimeCompositionError",

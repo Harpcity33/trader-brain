@@ -4,6 +4,7 @@ import copy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -31,6 +32,11 @@ from titan_brain.live.execution import (
 )
 from titan_brain.live.authority import MutationAuthorityDenied
 from titan_brain.live.latency import LatencyRecorder
+from titan_brain.live.ibkr_autonomous_plans import (
+    AUTONOMOUS_IBKR_PLAN_EVENT,
+    AutonomousIbkrPlanBindings,
+    StateBackedAutonomousIbkrPlanProducer,
+)
 from titan_brain.live.market_data import CompletedBar, MarketDataCache, Quote
 from titan_brain.live.models import BrokerOrderState, IntentKind
 from titan_brain.live.plans import ExpiringPlan
@@ -70,6 +76,25 @@ class ExplicitTestMutationAuthority:
             raise MutationAuthorityDenied(*self.denied)
 
 
+class RaisingPlanSealer:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, **kwargs) -> None:
+        self.calls.append(dict(kwargs))
+        raise RuntimeError("synthetic exact-plan seal denial")
+
+
+class CrashOncePlanSealer:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, **kwargs) -> None:
+        self.calls.append(dict(kwargs))
+        if len(self.calls) == 1:
+            raise KeyboardInterrupt("synthetic process death after prepare")
+
+
 class MemoryLatencyStore:
     def __init__(self) -> None:
         self.rows: list[tuple[object, ...]] = []
@@ -86,6 +111,15 @@ def enabled_policy() -> PolicyBundle:
     config["execution"]["supported_unattended_mutation"] = True
     config["execution"]["per_mutation_user_confirmation_required"] = False
     config["execution"]["local_mutation_interlock_enabled"] = True
+    config["exits"] = {
+        "target_exit_mode": "first_target_completed_minute_full_exit",
+        "target_index": 0,
+        "target_trigger": "fresh_aligned_completed_one_minute_close_at_or_above_target",
+        "quantity": "full_broker_confirmed_sellable_position",
+        "cancel_working_sells_before_exit": True,
+        "require_strictly_newer_cancel_evidence": True,
+        "deadline_feasibility_gate": True,
+    }
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
@@ -131,6 +165,22 @@ def enabled_policy() -> PolicyBundle:
         config=config,
         config_hash=config_hash,
         policy_hash=policy_hash,
+    )
+    policy.validate()
+    policy.require_activation_ready()
+    return policy
+
+
+def enabled_policy_with_commission_reserve() -> PolicyBundle:
+    base = enabled_policy()
+    config = copy.deepcopy(base.config)
+    config["execution"][
+        "minimum_commission_reserve_per_order_dollars"
+    ] = "1.00"
+    policy = replace(
+        base,
+        config=config,
+        config_hash=sha256_json(config),
     )
     policy.validate()
     policy.require_activation_ready()
@@ -211,6 +261,7 @@ def allowed_risk(plan: ExpiringPlan) -> RiskDecision:
         remaining_portfolio_headroom=Decimal("50.00"),
         remaining_stress_headroom=Decimal("50.00"),
         remaining_buying_power=Decimal("500.00"),
+        remaining_cash_headroom=Decimal("500.00"),
     )
 
 
@@ -415,6 +466,163 @@ class EntryExecutionTests(unittest.TestCase):
         intent = self.store.row("order_intents", "intent_id", result.intent_id)
         self.assertEqual(intent["state"], "ACKNOWLEDGED")
         self.assertEqual(intent["client_ref"], result.client_ref_id)
+
+    def test_plan_sealer_failure_is_terminal_releases_risk_and_never_calls_broker(self) -> None:
+        broker = FakeBrokerClient(clock=self.clock)
+        sealer = RaisingPlanSealer()
+        coordinator = EntryExecutionCoordinator(
+            policy=self.policy,
+            market_data=market_cache(),
+            state=self.store,
+            broker=broker,
+            authority=self.authority,
+            plan_sealer=sealer,
+            clock=self.clock,
+        )
+
+        result = coordinator.submit_entry(
+            plan=self.plan,
+            risk_decision=self.risk,
+        )
+
+        self.assertEqual(result.status, ExecutionStatus.FAILED)
+        self.assertEqual(result.failure_codes, ("AUTONOMOUS_PLAN_SEAL_FAILED",))
+        self.assertFalse(result.risk_reserved)
+        self.assertFalse(broker.calls)
+        self.assertEqual(len(sealer.calls), 1)
+        self.assertEqual(sealer.calls[0]["intent_id"], result.intent_id)
+        self.assertEqual(sealer.calls[0]["plan_id"], self.plan.plan_id)
+        self.assertEqual(sealer.calls[0]["kind"], IntentKind.ENTRY)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", result.intent_id)["state"],
+            "FAILED",
+        )
+        self.assertEqual(
+            self.store.row(
+                "risk_reservations",
+                "reservation_id",
+                result.reservation_id,
+            )["state"],
+            "RELEASED",
+        )
+
+    def test_process_death_during_seal_leaves_prepared_and_replays_once(self) -> None:
+        broker = FakeBrokerClient(clock=self.clock)
+        sealer = CrashOncePlanSealer()
+        coordinator = EntryExecutionCoordinator(
+            policy=self.policy,
+            market_data=market_cache(),
+            state=self.store,
+            broker=broker,
+            authority=self.authority,
+            plan_sealer=sealer,
+            clock=self.clock,
+        )
+
+        with self.assertRaises(KeyboardInterrupt):
+            coordinator.submit_entry(plan=self.plan, risk_decision=self.risk)
+        intent = self.store.rows("SELECT * FROM order_intents")[0]
+        reservation = self.store.rows("SELECT * FROM risk_reservations")[0]
+        self.assertEqual(intent["state"], "PREPARED")
+        self.assertEqual(reservation["state"], "RESERVED")
+        self.assertFalse(broker.calls)
+
+        replay = coordinator.submit_entry(plan=self.plan, risk_decision=self.risk)
+        self.assertEqual(replay.status, ExecutionStatus.ACKNOWLEDGED)
+        self.assertEqual(len(sealer.calls), 2)
+        self.assertEqual(sealer.calls[0], sealer.calls[1])
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.PLACE for call in broker.calls),
+            1,
+        )
+
+    def test_policy_bound_fee_reserve_is_part_of_exact_stress_match(self) -> None:
+        policy = enabled_policy_with_commission_reserve()
+        plan = plan_for(policy)
+        legacy_risk = allowed_risk(plan)
+        broker = FakeBrokerClient(clock=self.clock)
+        coordinator = EntryExecutionCoordinator(
+            policy=policy,
+            market_data=market_cache(),
+            state=self.store,
+            broker=broker,
+            authority=self.authority,
+            clock=self.clock,
+        )
+
+        denied = coordinator.submit_entry(
+            plan=plan,
+            risk_decision=legacy_risk,
+        )
+        self.assertEqual(denied.status, ExecutionStatus.BLOCKED)
+        self.assertIn("RISK_STRESS_MISMATCH", denied.failure_codes)
+        self.assertFalse(broker.calls)
+
+        reserved = replace(
+            legacy_risk,
+            proposal_stress_risk=plan.stress_risk + Decimal("4.00"),
+        )
+        accepted = coordinator.submit_entry(plan=plan, risk_decision=reserved)
+        self.assertEqual(accepted.status, ExecutionStatus.ACKNOWLEDGED)
+
+    def test_real_producer_seals_quantity_aware_fee_before_broker_review(self) -> None:
+        policy = enabled_policy_with_commission_reserve()
+        plan = plan_for(policy)
+        risk = replace(
+            allowed_risk(plan),
+            proposal_stress_risk=plan.stress_risk + Decimal("4.00"),
+        )
+        release_hash = "a" * 64
+        self.store.initialize_runtime(
+            runtime_id=policy.runtime_id,
+            account_key=policy.account_key,
+            release_manifest_hash=release_hash,
+            config_hash=policy.config_hash,
+            policy_hash=policy.policy_hash,
+            initialized_at=NOW - timedelta(seconds=5),
+        )
+        producer = StateBackedAutonomousIbkrPlanProducer(
+            state=self.store,
+            bindings=AutonomousIbkrPlanBindings(
+                runtime_id=policy.runtime_id,
+                release_manifest_hash=release_hash,
+                account_key=policy.account_key,
+                account_masked="••••7153",
+                strategy_id=policy.strategy_id,
+                policy_hash=policy.policy_hash,
+                config_hash=policy.config_hash,
+            ),
+            clock=self.clock,
+            seal_ttl_seconds=5,
+        )
+        broker = FakeBrokerClient(clock=self.clock)
+        result = EntryExecutionCoordinator(
+            policy=policy,
+            market_data=market_cache(),
+            state=self.store,
+            broker=broker,
+            authority=self.authority,
+            plan_sealer=producer,
+            clock=self.clock,
+        ).submit_entry(plan=plan, risk_decision=risk)
+
+        self.assertEqual(result.status, ExecutionStatus.ACKNOWLEDGED)
+        seals = self.store.rows(
+            "SELECT * FROM audit_events WHERE event_type=?",
+            (AUTONOMOUS_IBKR_PLAN_EVENT,),
+        )
+        self.assertEqual(len(seals), 1)
+        payload = json.loads(seals[0]["payload_json"])
+        self.assertEqual(payload["fee_reserve"], "4.00")
+        self.assertEqual(payload["execution_reserve"], "0.10")
+        self.assertEqual(
+            payload["required_stop_request"]["order_type"],
+            EquityOrderType.STOP_MARKET.value,
+        )
+        self.assertEqual(
+            [call[0] for call in broker.calls],
+            [FakeBrokerClient.REVIEW, FakeBrokerClient.PLACE],
+        )
 
     def test_ack_records_only_completed_durable_and_submit_stages(self) -> None:
         broker = FakeBrokerClient(clock=self.clock)
@@ -723,6 +931,45 @@ class SafetyExecutionTests(unittest.TestCase):
             "RESERVED",
         )
 
+    def test_safety_plan_sealer_failure_is_terminal_and_never_calls_broker(self) -> None:
+        broker = FakeBrokerClient(clock=self.clock)
+        entry = self.entry(broker)
+        calls_before = tuple(broker.calls)
+        sealer = RaisingPlanSealer()
+        coordinator = SafetyExecutionCoordinator(
+            policy=self.policy,
+            state=self.store,
+            broker=broker,
+            authority=self.authority,
+            plan_sealer=sealer,
+            clock=self.clock,
+        )
+
+        result = coordinator.submit_sell(
+            plan_id=self.plan.plan_id,
+            kind=IntentKind.PROTECTION,
+            operation_key="protect-seal-failure",
+            request=protection_request(),
+        )
+
+        self.assertEqual(result.status, ExecutionStatus.FAILED)
+        self.assertEqual(result.failure_codes, ("AUTONOMOUS_PLAN_SEAL_FAILED",))
+        self.assertTrue(result.exposure_reserved)
+        self.assertEqual(tuple(broker.calls), calls_before)
+        self.assertEqual(len(sealer.calls), 1)
+        self.assertEqual(sealer.calls[0]["intent_id"], result.intent_id)
+        self.assertEqual(sealer.calls[0]["kind"], IntentKind.PROTECTION)
+        self.assertEqual(
+            self.store.row("order_intents", "intent_id", result.intent_id)["state"],
+            "FAILED",
+        )
+        self.assertEqual(
+            self.store.row(
+                "risk_reservations", "reservation_id", entry.reservation_id
+            )["state"],
+            "RESERVED",
+        )
+
     def test_protection_records_durable_write_and_exact_ack_only(self) -> None:
         broker = FakeBrokerClient(clock=self.clock)
         self.entry(broker)
@@ -987,6 +1234,122 @@ class SafetyExecutionTests(unittest.TestCase):
             cancel_calls,
         )
         self.assertEqual(len(self.store.rows("SELECT * FROM incidents")), 1)
+
+    def test_unknown_cancel_retries_only_after_two_new_positive_working_receipts(self) -> None:
+        broker = UnknownAfterCancelBroker(clock=self.clock)
+        self.entry(broker)
+        target = broker.get_account_snapshot("••••7153").equity_orders[0]
+        self.clock.advance(1)
+        coordinator = self.safety(broker)
+        first = coordinator.cancel_order(plan_id=self.plan.plan_id, target=target)
+        self.assertEqual(first.status, ExecutionStatus.UNKNOWN)
+        calls = sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls)
+
+        self.clock.advance(1)
+        positive = replace(
+            target,
+            state=BrokerOrderState.CONFIRMED,
+            broker_updated_at=self.clock(),
+            received_at=self.clock(),
+        )
+        reconciled = coordinator.reconcile_cancel(
+            intent_id=first.intent_id,
+            order=positive,
+        )
+        self.assertEqual(reconciled.status, ExecutionStatus.FAILED)
+        self.assertIn(
+            "CANCEL_PREVIOUS_ATTEMPT_INEFFECTIVE", reconciled.failure_codes
+        )
+        same_receipt = coordinator.cancel_order(
+            plan_id=self.plan.plan_id,
+            target=positive,
+        )
+        self.assertEqual(same_receipt.status, ExecutionStatus.BLOCKED)
+        self.assertIn(
+            "CANCEL_RETRY_REQUIRES_STRICTLY_NEWER_BROKER_RECEIPT",
+            same_receipt.failure_codes,
+        )
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls), calls
+        )
+
+        self.clock.advance(1)
+        second_receipt = replace(
+            positive,
+            broker_updated_at=self.clock(),
+            received_at=self.clock(),
+        )
+        second = coordinator.cancel_order(
+            plan_id=self.plan.plan_id,
+            target=second_receipt,
+        )
+        self.assertEqual(second.status, ExecutionStatus.UNKNOWN)
+        self.assertNotEqual(second.intent_id, first.intent_id)
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls), calls + 1
+        )
+
+    def test_known_no_accept_cancel_gets_one_new_identity_only_after_new_receipt(self) -> None:
+        broker = FakeBrokerClient(clock=self.clock)
+        self.entry(broker)
+        target = broker.get_account_snapshot("••••7153").equity_orders[0]
+        self.clock.advance(1)
+        broker.inject_fault(FakeBrokerClient.CANCEL, FakeFault.AUTHENTICATION)
+        coordinator = self.safety(broker)
+
+        first = coordinator.cancel_order(plan_id=self.plan.plan_id, target=target)
+        self.assertEqual(first.status, ExecutionStatus.FAILED)
+        calls = sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls)
+
+        same_receipt = coordinator.cancel_order(
+            plan_id=self.plan.plan_id, target=target
+        )
+        self.assertEqual(same_receipt.status, ExecutionStatus.BLOCKED)
+        self.assertIn(
+            "CANCEL_RETRY_REQUIRES_STRICTLY_NEWER_BROKER_RECEIPT",
+            same_receipt.failure_codes,
+        )
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls), calls
+        )
+
+        self.clock.advance(1)
+        newer = replace(target, received_at=self.clock())
+        second = coordinator.cancel_order(
+            plan_id=self.plan.plan_id, target=newer
+        )
+        self.assertEqual(second.status, ExecutionStatus.ACKNOWLEDGED)
+        self.assertNotEqual(second.intent_id, first.intent_id)
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls), calls + 1
+        )
+
+    def test_known_no_accept_cancel_attempts_are_bounded(self) -> None:
+        broker = FakeBrokerClient(clock=self.clock)
+        self.entry(broker)
+        target = broker.get_account_snapshot("••••7153").equity_orders[0]
+        coordinator = self.safety(broker)
+        outcomes = []
+        for _attempt in range(3):
+            self.clock.advance(1)
+            target = replace(target, received_at=self.clock())
+            broker.inject_fault(FakeBrokerClient.CANCEL, FakeFault.AUTHENTICATION)
+            outcomes.append(
+                coordinator.cancel_order(plan_id=self.plan.plan_id, target=target)
+            )
+        self.assertTrue(all(item.status is ExecutionStatus.FAILED for item in outcomes))
+        self.clock.advance(1)
+        blocked = coordinator.cancel_order(
+            plan_id=self.plan.plan_id,
+            target=replace(target, received_at=self.clock()),
+        )
+        self.assertEqual(blocked.status, ExecutionStatus.BLOCKED)
+        self.assertIn(
+            "CANCEL_KNOWN_NO_ACCEPT_ATTEMPTS_EXHAUSTED", blocked.failure_codes
+        )
+        self.assertEqual(
+            sum(call[0] == FakeBrokerClient.CANCEL for call in broker.calls), 3
+        )
 
     def test_cancel_requires_local_ownership_and_unattended_capability(self) -> None:
         broker = FakeBrokerClient(clock=self.clock)

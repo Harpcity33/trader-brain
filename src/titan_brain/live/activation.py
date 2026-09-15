@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from math import isfinite
 import re
 from typing import Any, Mapping
 
 from .policy import PolicyBundle, sha256_json
+from .risk_evidence_binding import risk_high_water_receipt_hash
 
 
 READINESS_SCHEMA = "titan_full_live_readiness_2026-09-08_v2"
@@ -21,6 +23,7 @@ ACTIVATION_SCHEMA = "titan_full_live_activation_2026-09-08_v2"
 MACHINE_EVIDENCE_SOURCE = "installed_runtime_machine_probe"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUNTIME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+_POSITIVE_DECIMAL = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\Z")
 
 
 def _aware(value: datetime, field: str) -> datetime:
@@ -88,6 +91,30 @@ def _required_text(value: object, field: str) -> str:
 
 def _optional_text(value: object, field: str) -> str | None:
     return None if value is None else _required_text(value, field)
+
+
+def _risk_peak(value: object, field: str) -> Decimal:
+    if not isinstance(value, str) or _POSITIVE_DECIMAL.fullmatch(value) is None:
+        raise ValueError(f"{field} must be a canonical positive decimal string")
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise ValueError(
+            f"{field} must be a canonical positive decimal string"
+        ) from None
+    canonical = format(parsed, "f")
+    if "." in canonical:
+        canonical = canonical.rstrip("0").rstrip(".")
+    if not parsed.is_finite() or parsed <= 0 or canonical != value:
+        raise ValueError(f"{field} must be a canonical positive decimal string")
+    return parsed
+
+
+def _optional_risk_peak(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    _risk_peak(value, field)
+    return str(value)
 
 
 def _string_tuple(value: object, field: str) -> tuple[str, ...]:
@@ -171,6 +198,24 @@ class ReadinessEvidence:
     broker_account_binding_fingerprint: str | None = None
     broker_authorization_binding_id: str | None = None
     component_provenance_hash: str | None = None
+    coordinator_component_provenance_hash: str | None = None
+    execution_authority_mode: str | None = None
+    attended_mutation_supported: bool | None = None
+    broker_command_connected: bool | None = None
+    broker_command_next_valid_id_received: bool | None = None
+    broker_command_account_authenticated: bool | None = None
+    broker_command_write_authority_granted: bool | None = None
+    entry_risk_evidence_ready: bool | None = None
+    weekly_realized_pnl_complete: bool | None = None
+    peak_equity_complete: bool | None = None
+    risk_evidence_as_of: datetime | None = None
+    risk_evidence_age_seconds: float | None = None
+    risk_baseline_identity_hash: str | None = None
+    risk_baseline_receipt_hash: str | None = None
+    risk_high_water_identity_hash: str | None = None
+    risk_high_water_lineage_hash: str | None = None
+    risk_high_water_peak_equity: str | None = None
+    risk_high_water_receipt_hash: str | None = None
     schema_version: str = READINESS_SCHEMA
 
     def __post_init__(self) -> None:
@@ -181,6 +226,7 @@ class ReadinessEvidence:
             "notification_delivered_at",
             "probe_started_at",
             "probe_completed_at",
+            "risk_evidence_as_of",
         ):
             object.__setattr__(self, field, _optional_aware(getattr(self, field), field))
         if self.schema_version != READINESS_SCHEMA:
@@ -195,8 +241,10 @@ class ReadinessEvidence:
         _positive_int(self.database_schema_version, "database_schema_version")
         if not re.fullmatch(r"[0-9]{4}", self.account_last4):
             raise ValueError("account_last4 must contain exactly four digits")
-        if self.account_key != f"ending-{self.account_last4}":
-            raise ValueError("account_key is not canonical for account_last4")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{2,127}", self.account_key):
+            raise ValueError("account_key is invalid")
+        if re.search(r"[0-9]{5,}", self.account_key):
+            raise ValueError("account_key exposes a broker identifier")
         if self.broker_account_last4 is not None and not re.fullmatch(
             r"[0-9]{4}", self.broker_account_last4
         ):
@@ -243,6 +291,7 @@ class ReadinessEvidence:
             "quote_age_seconds",
             "completed_bar_age_seconds",
             "probe_elapsed_monotonic_seconds",
+            "risk_evidence_age_seconds",
         ):
             object.__setattr__(self, field, _optional_age(getattr(self, field), field))
         timing = (
@@ -274,10 +323,115 @@ class ReadinessEvidence:
             "broker_account_binding_fingerprint",
             "broker_authorization_binding_id",
             "component_provenance_hash",
+            "coordinator_component_provenance_hash",
         ):
             value = getattr(self, field)
             if value is not None and not _SHA256.fullmatch(str(value)):
                 raise ValueError(f"{field} must be lowercase SHA-256 or null")
+        authority_contract = (
+            self.execution_authority_mode,
+            self.attended_mutation_supported,
+        )
+        if any(value is not None for value in authority_contract) and any(
+            value is None for value in authority_contract
+        ):
+            raise ValueError("readiness authority contract fields must be populated together")
+        if self.execution_authority_mode is not None:
+            if self.execution_authority_mode not in {"unattended", "attended_only"}:
+                raise ValueError("readiness execution authority mode is invalid")
+            _strict_bool(
+                self.attended_mutation_supported,
+                "attended_mutation_supported",
+            )
+        command_lane = (
+            self.broker_command_connected,
+            self.broker_command_next_valid_id_received,
+            self.broker_command_account_authenticated,
+            self.broker_command_write_authority_granted,
+        )
+        if any(value is not None for value in command_lane) and any(
+            value is None for value in command_lane
+        ):
+            raise ValueError(
+                "readiness broker command-lane fields must be populated together"
+            )
+        for field in _OPTIONAL_COMMAND_LANE_FIELDS:
+            value = getattr(self, field)
+            if value is not None:
+                _strict_bool(value, field)
+        risk_evidence = (
+            self.entry_risk_evidence_ready,
+            self.weekly_realized_pnl_complete,
+            self.peak_equity_complete,
+            self.risk_evidence_as_of,
+            self.risk_evidence_age_seconds,
+            self.risk_baseline_identity_hash,
+            self.risk_baseline_receipt_hash,
+            self.risk_high_water_identity_hash,
+            self.risk_high_water_lineage_hash,
+            self.risk_high_water_peak_equity,
+            self.risk_high_water_receipt_hash,
+        )
+        if any(value is not None for value in risk_evidence):
+            for field in (
+                "entry_risk_evidence_ready",
+                "weekly_realized_pnl_complete",
+                "peak_equity_complete",
+            ):
+                value = getattr(self, field)
+                if value is None:
+                    raise ValueError(
+                        "readiness entry-risk completeness fields must be populated together"
+                    )
+                _strict_bool(value, field)
+        if (
+            self.risk_evidence_as_of is not None
+            and self.risk_evidence_age_seconds is not None
+        ):
+            expected_risk_age = (
+                self.collected_at - self.risk_evidence_as_of
+            ).total_seconds()
+            if abs(expected_risk_age - self.risk_evidence_age_seconds) > 1e-6:
+                raise ValueError(
+                    "risk_evidence_age_seconds must match collected_at and risk_evidence_as_of"
+                )
+        for field in (
+            "risk_baseline_identity_hash",
+            "risk_baseline_receipt_hash",
+            "risk_high_water_identity_hash",
+            "risk_high_water_lineage_hash",
+            "risk_high_water_receipt_hash",
+        ):
+            value = getattr(self, field)
+            if value is not None and not _SHA256.fullmatch(str(value)):
+                raise ValueError(f"{field} must be lowercase SHA-256 or null")
+        peak = (
+            None
+            if self.risk_high_water_peak_equity is None
+            else _risk_peak(
+                self.risk_high_water_peak_equity,
+                "risk_high_water_peak_equity",
+            )
+        )
+        receipt_inputs = (
+            self.risk_high_water_identity_hash,
+            self.risk_baseline_receipt_hash,
+            self.risk_high_water_lineage_hash,
+            peak,
+            self.risk_high_water_receipt_hash,
+        )
+        if all(value is not None for value in receipt_inputs):
+            assert peak is not None
+            expected_receipt = risk_high_water_receipt_hash(
+                identity_hash=str(self.risk_high_water_identity_hash),
+                baseline_receipt_hash=str(self.risk_baseline_receipt_hash),
+                lineage_hash=str(self.risk_high_water_lineage_hash),
+                peak_equity=peak,
+            )
+            if self.risk_high_water_receipt_hash != expected_receipt:
+                raise ValueError(
+                    "risk_high_water_receipt_hash does not bind the current peak and lineage"
+                )
         for field in (
             "broker_connector",
             "legacy_heartbeat_id",
@@ -324,7 +478,7 @@ class ReadinessEvidence:
             self.policy_hash == policy.policy_hash,
             self.runtime_id == policy.runtime_id,
             self.database_schema_version == database_schema_version,
-            self.account_key == str(policy.config["account"]["masked_identifier"]),
+            self.account_key == policy.account_key,
             self.account_last4 == policy.account_last4,
         )
         if not all(bindings):
@@ -332,6 +486,11 @@ class ReadinessEvidence:
         if self.broker_account_last4 not in (None, policy.account_last4):
             raise ValueError("readiness evidence crosses broker accounts")
         execution = policy.config["execution"]
+        readiness_mode = self.execution_authority_mode
+        if readiness_mode is None:
+            raise ValueError("readiness execution authority mode is missing")
+        if readiness_mode != policy.execution_authority_mode:
+            raise ValueError("readiness execution authority mode differs from policy")
         if execution.get("broker_adapter") == "supported_production_transport":
             if (
                 self.broker_account_binding_fingerprint
@@ -339,6 +498,7 @@ class ReadinessEvidence:
                 or self.broker_authorization_binding_id
                 != execution.get("production_authorization_binding_id")
                 or self.component_provenance_hash is None
+                or self.coordinator_component_provenance_hash is None
             ):
                 raise ValueError(
                     "readiness production account/authorization provenance differs"
@@ -365,10 +525,51 @@ class ReadinessEvidence:
             failures.append("BROKER_ACCOUNT_OR_AUTH_NOT_READY")
         if not self.daemon_accessible_supported_client:
             failures.append("DAEMON_BROKER_CLIENT_UNAVAILABLE")
-        if not self.unattended_mutation_supported:
-            failures.append("UNATTENDED_MUTATION_UNSUPPORTED")
-        if self.per_mutation_confirmation_required:
-            failures.append("PER_MUTATION_CONFIRMATION_REQUIRED")
+        if (
+            policy.config["execution"].get("broker_adapter")
+            == "supported_production_transport"
+        ):
+            if self.broker_command_connected is not True:
+                failures.append("BROKER_COMMAND_LANE_DISCONNECTED")
+            if self.broker_command_next_valid_id_received is not True:
+                failures.append("BROKER_COMMAND_NEXT_VALID_ID_MISSING")
+            if self.broker_command_account_authenticated is not True:
+                failures.append("BROKER_COMMAND_ACCOUNT_UNAUTHENTICATED")
+            if self.broker_command_write_authority_granted is not False:
+                failures.append("BROKER_COMMAND_WRITE_AUTHORITY_NOT_DISABLED")
+        if self.entry_risk_evidence_ready is not True:
+            failures.append("ENTRY_RISK_EVIDENCE_UNAVAILABLE")
+        if self.weekly_realized_pnl_complete is not True:
+            failures.append("WEEKLY_REALIZED_PNL_EVIDENCE_INCOMPLETE")
+        if self.peak_equity_complete is not True:
+            failures.append("PEAK_EQUITY_EVIDENCE_INCOMPLETE")
+        for value, failure in (
+            (self.risk_baseline_identity_hash, "RISK_BASELINE_IDENTITY_MISSING"),
+            (self.risk_baseline_receipt_hash, "RISK_BASELINE_RECEIPT_MISSING"),
+            (self.risk_high_water_identity_hash, "RISK_HIGH_WATER_IDENTITY_MISSING"),
+            (self.risk_high_water_lineage_hash, "RISK_HIGH_WATER_LINEAGE_MISSING"),
+            (self.risk_high_water_peak_equity, "RISK_HIGH_WATER_VALUE_MISSING"),
+            (self.risk_high_water_receipt_hash, "RISK_HIGH_WATER_RECEIPT_MISSING"),
+        ):
+            if value is None:
+                failures.append(failure)
+        if self.risk_evidence_as_of is None:
+            failures.append("RISK_EVIDENCE_TIMESTAMP_MISSING")
+        authority_mode = self.execution_authority_mode
+        if authority_mode is None:
+            failures.append("EXECUTION_AUTHORITY_MODE_MISSING")
+        elif authority_mode == "unattended":
+            if not self.unattended_mutation_supported:
+                failures.append("UNATTENDED_MUTATION_UNSUPPORTED")
+            if self.per_mutation_confirmation_required:
+                failures.append("PER_MUTATION_CONFIRMATION_REQUIRED")
+        else:
+            if self.attended_mutation_supported is not True:
+                failures.append("ATTENDED_MUTATION_CONTRACT_UNSUPPORTED")
+            if self.unattended_mutation_supported:
+                failures.append("ATTENDED_MODE_EXPOSES_UNATTENDED_MUTATION")
+            if not self.per_mutation_confirmation_required:
+                failures.append("ATTENDED_CONFIRMATION_NOT_REQUIRED")
         if not all(
             (
                 self.standard_orders_reconciled,
@@ -424,6 +625,11 @@ class ReadinessEvidence:
         for value, maximum, failure in (
             (self.broker_snapshot_age_seconds, max_broker_age, "BROKER_SNAPSHOT_STALE"),
             (
+                self.risk_evidence_age_seconds,
+                max_broker_age,
+                "RISK_EVIDENCE_STALE",
+            ),
+            (
                 self.durable_snapshot_age_seconds,
                 max_broker_age,
                 "DURABLE_BROKER_SNAPSHOT_STALE",
@@ -451,6 +657,7 @@ class ReadinessEvidence:
                     self.broker_account_binding_fingerprint,
                     self.broker_authorization_binding_id,
                     self.component_provenance_hash,
+                    self.coordinator_component_provenance_hash,
                 )
             )
         ):
@@ -549,6 +756,54 @@ class ReadinessEvidence:
                     "component_provenance_hash": self.component_provenance_hash,
                 }
             )
+        if self.coordinator_component_provenance_hash is not None:
+            payload["coordinator_component_provenance_hash"] = (
+                self.coordinator_component_provenance_hash
+            )
+        if self.execution_authority_mode is not None:
+            payload.update(
+                {
+                    "execution_authority_mode": self.execution_authority_mode,
+                    "attended_mutation_supported": self.attended_mutation_supported,
+                }
+            )
+        if self.broker_command_connected is not None:
+            payload.update(
+                {
+                    "broker_command_connected": self.broker_command_connected,
+                    "broker_command_next_valid_id_received": (
+                        self.broker_command_next_valid_id_received
+                    ),
+                    "broker_command_account_authenticated": (
+                        self.broker_command_account_authenticated
+                    ),
+                    "broker_command_write_authority_granted": (
+                        self.broker_command_write_authority_granted
+                    ),
+                }
+            )
+        if self.entry_risk_evidence_ready is not None:
+            payload.update(
+                {
+                    "entry_risk_evidence_ready": self.entry_risk_evidence_ready,
+                    "weekly_realized_pnl_complete": (
+                        self.weekly_realized_pnl_complete
+                    ),
+                    "peak_equity_complete": self.peak_equity_complete,
+                    "risk_evidence_as_of": (
+                        self.risk_evidence_as_of.isoformat()
+                        if self.risk_evidence_as_of is not None
+                        else None
+                    ),
+                    "risk_evidence_age_seconds": self.risk_evidence_age_seconds,
+                    "risk_baseline_identity_hash": self.risk_baseline_identity_hash,
+                    "risk_baseline_receipt_hash": self.risk_baseline_receipt_hash,
+                    "risk_high_water_identity_hash": self.risk_high_water_identity_hash,
+                    "risk_high_water_lineage_hash": self.risk_high_water_lineage_hash,
+                    "risk_high_water_peak_equity": self.risk_high_water_peak_equity,
+                    "risk_high_water_receipt_hash": self.risk_high_water_receipt_hash,
+                }
+            )
         return payload
 
     @classmethod
@@ -556,7 +811,14 @@ class ReadinessEvidence:
         if not isinstance(raw, Mapping):
             raise ValueError("readiness evidence must be an object")
         required = set(cls._payload_fields())
-        optional = set(_OPTIONAL_READINESS_FIELDS) | set(_OPTIONAL_BINDING_FIELDS)
+        optional = (
+            set(_OPTIONAL_READINESS_FIELDS)
+            | set(_OPTIONAL_BINDING_FIELDS)
+            | {"coordinator_component_provenance_hash"}
+            | set(_OPTIONAL_AUTHORITY_FIELDS)
+            | set(_OPTIONAL_COMMAND_LANE_FIELDS)
+            | set(_OPTIONAL_RISK_EVIDENCE_FIELDS)
+        )
         if not required.issubset(raw) or not set(raw).issubset(required | optional):
             raise ValueError(
                 "readiness evidence fields differ; "
@@ -569,6 +831,25 @@ class ReadinessEvidence:
         supplied_bindings = set(_OPTIONAL_BINDING_FIELDS).intersection(raw)
         if supplied_bindings and supplied_bindings != set(_OPTIONAL_BINDING_FIELDS):
             raise ValueError("readiness production binding fields must be supplied together")
+        supplied_authority = set(_OPTIONAL_AUTHORITY_FIELDS).intersection(raw)
+        if supplied_authority and supplied_authority != set(_OPTIONAL_AUTHORITY_FIELDS):
+            raise ValueError("readiness authority contract fields must be supplied together")
+        supplied_command_lane = set(_OPTIONAL_COMMAND_LANE_FIELDS).intersection(raw)
+        if supplied_command_lane and supplied_command_lane != set(
+            _OPTIONAL_COMMAND_LANE_FIELDS
+        ):
+            raise ValueError(
+                "readiness broker command-lane fields must be supplied together"
+            )
+        supplied_risk_evidence = set(_OPTIONAL_RISK_EVIDENCE_FIELDS).intersection(
+            raw
+        )
+        if supplied_risk_evidence and supplied_risk_evidence != set(
+            _OPTIONAL_RISK_EVIDENCE_FIELDS
+        ):
+            raise ValueError(
+                "readiness entry-risk evidence fields must be supplied together"
+            )
         return cls(
             schema_version=_required_text(raw["schema_version"], "schema_version"),
             evidence_source=_required_text(raw["evidence_source"], "evidence_source"),
@@ -653,6 +934,109 @@ class ReadinessEvidence:
                 raw.get("component_provenance_hash"),
                 "component_provenance_hash",
             ),
+            coordinator_component_provenance_hash=_optional_text(
+                raw.get("coordinator_component_provenance_hash"),
+                "coordinator_component_provenance_hash",
+            ),
+            execution_authority_mode=_optional_text(
+                raw.get("execution_authority_mode"),
+                "execution_authority_mode",
+            ),
+            attended_mutation_supported=(
+                None
+                if "attended_mutation_supported" not in raw
+                else _strict_bool(
+                    raw["attended_mutation_supported"],
+                    "attended_mutation_supported",
+                )
+            ),
+            broker_command_connected=(
+                None
+                if "broker_command_connected" not in raw
+                else _strict_bool(
+                    raw["broker_command_connected"],
+                    "broker_command_connected",
+                )
+            ),
+            broker_command_next_valid_id_received=(
+                None
+                if "broker_command_next_valid_id_received" not in raw
+                else _strict_bool(
+                    raw["broker_command_next_valid_id_received"],
+                    "broker_command_next_valid_id_received",
+                )
+            ),
+            broker_command_account_authenticated=(
+                None
+                if "broker_command_account_authenticated" not in raw
+                else _strict_bool(
+                    raw["broker_command_account_authenticated"],
+                    "broker_command_account_authenticated",
+                )
+            ),
+            broker_command_write_authority_granted=(
+                None
+                if "broker_command_write_authority_granted" not in raw
+                else _strict_bool(
+                    raw["broker_command_write_authority_granted"],
+                    "broker_command_write_authority_granted",
+                )
+            ),
+            entry_risk_evidence_ready=(
+                None
+                if "entry_risk_evidence_ready" not in raw
+                else _strict_bool(
+                    raw["entry_risk_evidence_ready"],
+                    "entry_risk_evidence_ready",
+                )
+            ),
+            weekly_realized_pnl_complete=(
+                None
+                if "weekly_realized_pnl_complete" not in raw
+                else _strict_bool(
+                    raw["weekly_realized_pnl_complete"],
+                    "weekly_realized_pnl_complete",
+                )
+            ),
+            peak_equity_complete=(
+                None
+                if "peak_equity_complete" not in raw
+                else _strict_bool(
+                    raw["peak_equity_complete"],
+                    "peak_equity_complete",
+                )
+            ),
+            risk_evidence_as_of=_optional_time(
+                raw.get("risk_evidence_as_of"), "risk_evidence_as_of"
+            ),
+            risk_evidence_age_seconds=_optional_age(
+                raw.get("risk_evidence_age_seconds"),
+                "risk_evidence_age_seconds",
+            ),
+            risk_baseline_identity_hash=_optional_text(
+                raw.get("risk_baseline_identity_hash"),
+                "risk_baseline_identity_hash",
+            ),
+            risk_baseline_receipt_hash=_optional_text(
+                raw.get("risk_baseline_receipt_hash"),
+                "risk_baseline_receipt_hash",
+            ),
+            risk_high_water_identity_hash=_optional_text(
+                raw.get("risk_high_water_identity_hash"),
+                "risk_high_water_identity_hash",
+            ),
+            risk_high_water_lineage_hash=_optional_text(
+                raw.get("risk_high_water_lineage_hash"),
+                "risk_high_water_lineage_hash",
+            ),
+            risk_high_water_peak_equity=_optional_risk_peak(
+                raw.get("risk_high_water_peak_equity"),
+                "risk_high_water_peak_equity",
+            ),
+            risk_high_water_receipt_hash=_optional_text(
+                raw.get("risk_high_water_receipt_hash"),
+                "risk_high_water_receipt_hash",
+            ),
         )
 
     @classmethod
@@ -697,6 +1081,29 @@ _OPTIONAL_BINDING_FIELDS = (
     "broker_authorization_binding_id",
     "component_provenance_hash",
 )
+_OPTIONAL_AUTHORITY_FIELDS = (
+    "execution_authority_mode",
+    "attended_mutation_supported",
+)
+_OPTIONAL_COMMAND_LANE_FIELDS = (
+    "broker_command_connected",
+    "broker_command_next_valid_id_received",
+    "broker_command_account_authenticated",
+    "broker_command_write_authority_granted",
+)
+_OPTIONAL_RISK_EVIDENCE_FIELDS = (
+    "entry_risk_evidence_ready",
+    "weekly_realized_pnl_complete",
+    "peak_equity_complete",
+    "risk_evidence_as_of",
+    "risk_evidence_age_seconds",
+    "risk_baseline_identity_hash",
+    "risk_baseline_receipt_hash",
+    "risk_high_water_identity_hash",
+    "risk_high_water_lineage_hash",
+    "risk_high_water_peak_equity",
+    "risk_high_water_receipt_hash",
+)
 @dataclass(frozen=True)
 class ActivationRecord:
     activation_id: str
@@ -736,7 +1143,7 @@ class ActivationRecord:
             "release_manifest_hash": release_manifest_hash,
             "config_hash": policy.config_hash,
             "policy_hash": policy.policy_hash,
-            "account_key": str(policy.config["account"]["masked_identifier"]),
+            "account_key": policy.account_key,
             "account_last4": policy.account_last4,
             "runtime_id": policy.runtime_id,
             "database_schema_version": database_schema_version,
@@ -827,13 +1234,15 @@ class ActivationRecord:
             raise ValueError("activation record was already consumed")
         if self.requested_mode != "live" or self.owner_acknowledged_blockers:
             raise ValueError("blockers cannot be acknowledged away")
-        if self.account_key != f"ending-{self.account_last4}":
-            raise ValueError("activation account identity is not canonical")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{2,127}", self.account_key):
+            raise ValueError("activation account identity is invalid")
+        if re.search(r"[0-9]{5,}", self.account_key):
+            raise ValueError("activation account identity exposes a broker identifier")
         bindings = (
             self.release_manifest_hash == release_manifest_hash,
             self.config_hash == policy.config_hash,
             self.policy_hash == policy.policy_hash,
-            self.account_key == str(policy.config["account"]["masked_identifier"]),
+            self.account_key == policy.account_key,
             self.account_last4 == policy.account_last4,
             self.runtime_id == policy.runtime_id,
             self.database_schema_version == database_schema_version,
@@ -855,6 +1264,14 @@ class ActivationRecord:
             current_profile = current_readiness.component_provenance_hash
             if prepared_profile != current_profile:
                 raise ValueError("ACTIVATION_CURRENT_RUNTIME_PROFILE_CHANGED")
+            prepared_coordinator_profile = (
+                self.readiness_evidence.coordinator_component_provenance_hash
+            )
+            current_coordinator_profile = (
+                current_readiness.coordinator_component_provenance_hash
+            )
+            if prepared_coordinator_profile != current_coordinator_profile:
+                raise ValueError("ACTIVATION_CURRENT_COORDINATOR_PROFILE_CHANGED")
         policy.require_activation_ready()
         bound_blockers = self.readiness_evidence.blockers(policy, now=self.created_at)
         if bound_blockers:
@@ -863,6 +1280,38 @@ class ActivationRecord:
             current_blockers = current_readiness.blockers(policy, now=current)
             if current_blockers:
                 raise ValueError("ACTIVATION_CURRENT_READINESS_BLOCKED: " + ",".join(current_blockers))
+            prepared_risk_identity = (
+                self.readiness_evidence.risk_baseline_identity_hash,
+                self.readiness_evidence.risk_baseline_receipt_hash,
+                self.readiness_evidence.risk_high_water_identity_hash,
+                self.readiness_evidence.risk_high_water_lineage_hash,
+            )
+            current_risk_identity = (
+                current_readiness.risk_baseline_identity_hash,
+                current_readiness.risk_baseline_receipt_hash,
+                current_readiness.risk_high_water_identity_hash,
+                current_readiness.risk_high_water_lineage_hash,
+            )
+            if prepared_risk_identity != current_risk_identity:
+                raise ValueError("ACTIVATION_CURRENT_RISK_EVIDENCE_CHANGED")
+            prepared_peak = _risk_peak(
+                self.readiness_evidence.risk_high_water_peak_equity,
+                "risk_high_water_peak_equity",
+            )
+            current_peak = _risk_peak(
+                current_readiness.risk_high_water_peak_equity,
+                "risk_high_water_peak_equity",
+            )
+            if current_peak < prepared_peak:
+                raise ValueError("ACTIVATION_CURRENT_RISK_HIGH_WATER_REGRESSED")
+            prepared_receipt = (
+                self.readiness_evidence.risk_high_water_receipt_hash
+            )
+            current_receipt = current_readiness.risk_high_water_receipt_hash
+            if (current_peak == prepared_peak) != (
+                current_receipt == prepared_receipt
+            ):
+                raise ValueError("ACTIVATION_CURRENT_RISK_RECEIPT_CHANGED")
 
 
 __all__ = [

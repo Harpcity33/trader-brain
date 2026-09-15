@@ -14,7 +14,7 @@ review/submission boundary in ``execution.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -42,10 +42,12 @@ from .authority import (
 from .calendar import NEW_YORK
 from .execution import (
     ExecutionStatus,
+    PreparedOrderPlanSealer,
     SafetyExecutionCoordinator,
     SafetyExecutionOutcome,
 )
 from .latency import LatencyRecorder
+from .market_data import CompletedBar
 from .exits import (
     ExitAction,
     ExitCapacityError,
@@ -57,6 +59,8 @@ from .exits import (
 from .models import (
     BrokerOrderState,
     EngineMode,
+    Incident,
+    IncidentSeverity,
     IntentKind,
     IntentState,
     ProtectionObligation,
@@ -78,10 +82,16 @@ from .risk_runtime import (
     evaluate_entry,
 )
 from .state import LiveStateStore
-from .writer_lock import AccountWriterLock, account_writer_fingerprint
+from .writer_lock import (
+    AccountWriterLock,
+    account_writer_fingerprint,
+    attended_coordinator_lock_key,
+)
 
 
 _PLACEHOLDER_CLIENT_REF = str(UUID(int=0))
+_TARGET_EXIT_MODE = "first_target_completed_minute_full_exit"
+_TARGET_EXIT_LATCH_CATEGORY = "AUTONOMOUS_PROFIT_TARGET_EXIT_LATCH"
 _MUTATION_MODES = frozenset(
     {
         EngineMode.RECONCILING,
@@ -119,15 +129,39 @@ class DiscoveryExecutor(Protocol):
         self, *, snapshot: AccountSnapshot, now: datetime
     ) -> tuple[str, ...]: ...
 
+    def analyze(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None = None,
+    ) -> object: ...
+
     def final_entry_evidence_failures(
         self, *, plan: object, request: OrderRequest, now: datetime
     ) -> tuple[str, ...]: ...
+
+    def target_evidence_snapshot(self, symbol: str, *, now: datetime) -> object: ...
 
 
 @dataclass(frozen=True)
 class LifecycleReconcileResult:
     """Read-only-broker lifecycle convergence result for one service tick."""
 
+    actions: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TargetExitAssessment:
+    """Durable target-exit decisions derived from completed market evidence.
+
+    ``actions`` is intentionally evidence-rich but non-authoritative.  A
+    decision still has to pass the ordinary closeout path, which cancels any
+    working protection before a full-position market exit and consumes at
+    most one current broker snapshot for a mutation.
+    """
+
+    decisions: tuple[SafeCloseDecision, ...] = ()
     actions: tuple[str, ...] = ()
     blockers: tuple[str, ...] = ()
 
@@ -156,6 +190,7 @@ class ProductionLifecycleActions:
         broker: BrokerClient,
         writer_lock: AccountWriterLock | None = None,
         discovery: DiscoveryExecutor | None = None,
+        plan_sealer: PreparedOrderPlanSealer | None = None,
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
         allow_mutations: bool = False,
@@ -169,13 +204,14 @@ class ProductionLifecycleActions:
         self.discovery = discovery
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.allow_mutations = allow_mutations
-        self.account_key = str(policy.config["account"]["masked_identifier"])
+        self.account_key = policy.account_key
         self.account_masked = f"••••{policy.account_last4}"
         self.safety = SafetyExecutionCoordinator(
             policy=policy,
             state=state,
             broker=broker,
             authority=self,
+            plan_sealer=plan_sealer,
             clock=self._clock,
             latency=latency,
         )
@@ -664,7 +700,11 @@ class ProductionLifecycleActions:
                     if intent_state.terminal:
                         continue
                     if intent_state is IntentState.PREPARED:
-                        blockers.append(f"UNRESOLVED_{kind.value}_INTENT")
+                        # PREPARED is durable proof that this exact operation
+                        # has not crossed the broker send boundary.  Replaying
+                        # the same deterministic intent is safe; unlike
+                        # SUBMITTING/UNKNOWN it must not wedge protection.
+                        actions.append(f"REPLAYABLE_{kind.value}_PREPARED")
                         continue
                     order = by_ref.get(str(row["client_ref"]))
                     if order is not None:
@@ -808,20 +848,10 @@ class ProductionLifecycleActions:
                     obligation=obligation, outcome=outcome, now=current
                 )
                 self._reserve_snapshot_if_needed(snapshot, outcome)
-                if outcome.status in {ExecutionStatus.REJECTED, ExecutionStatus.FAILED}:
-                    close_decision = plan_safe_close(
-                        position=position,
-                        orders=snapshot.equity_orders,
-                        symbol=decision.symbol,
-                        snapshot_received_at=snapshot.observed_at,
-                    )
-                    if close_decision.action is ExitAction.SUBMIT_SAFE_CLOSE:
-                        return self._advance_closeout(
-                            snapshot=snapshot,
-                            decision=close_decision,
-                            now=current,
-                            owned=owned,
-                        )
+                # Even a conclusive rejection/no-accept changes the durable
+                # action floor.  Do not pivot to a safe-close using the
+                # pre-mutation account envelope; the service requests an
+                # immediate fresh exhaustive snapshot first.
                 return self._format_outcome("PROTECTION", outcome)
 
             if ProtectionAction.SAFE_CLOSE in decision.actions:
@@ -880,6 +910,246 @@ class ProductionLifecycleActions:
         except Exception as exc:
             return f"BLOCKED:LIFECYCLE_CLOSEOUT_FAILED:{type(exc).__name__}"
 
+    def target_exits(
+        self, *, snapshot: AccountSnapshot, now: datetime
+    ) -> TargetExitAssessment:
+        """Latch and plan full exits at an explicitly approved first target.
+
+        Target selection comes only from the immutable durable entry plan.
+        Price confirmation comes only from the completed one-minute bar
+        exposed by the already-bound production discovery source.  A target
+        crossing is durably latched before any protection cancellation so a
+        later bar cannot silently abandon the exit after its stop was
+        cancelled.  The latch is represented by an append-audited incident;
+        it is resolved only after a later exhaustive broker snapshot is flat.
+
+        This method never calls a broker mutation.  It returns the ordinary
+        :func:`plan_safe_close` decision, leaving all cancellation, capacity,
+        exact-reference, and strictly-newer-snapshot checks in ``closeout``.
+        """
+
+        current = self._aware(now, "now")
+        guard_failures = self._state_write_guard(snapshot=snapshot, now=current)
+        if guard_failures:
+            return TargetExitAssessment(
+                blockers=tuple(
+                    f"TARGET_EXIT_{failure}" for failure in guard_failures
+                )
+            )
+
+        positions = {
+            item.symbol: item
+            for item in snapshot.equity_positions
+            if whole_shares(item.quantity, allow_zero=True) > 0
+        }
+        actions: list[str] = []
+        blockers: list[str] = []
+        decisions: list[SafeCloseDecision] = []
+        latched_symbols: set[str] = set()
+
+        # A previously crossed target remains an exit obligation independent
+        # of subsequent price or provider health.  This is what makes
+        # cancellation-before-exit safe across process restarts and pullbacks.
+        latch_rows = self.state.rows(
+            "SELECT * FROM incidents WHERE account_key=? AND category=? "
+            "AND resolved_at IS NULL ORDER BY opened_at,incident_id",
+            (self.account_key, _TARGET_EXIT_LATCH_CATEGORY),
+        )
+        for row in latch_rows:
+            try:
+                detail = json.loads(str(row["detail_json"]))
+                symbol = str(detail["symbol"]).strip().upper()
+                plan_id = str(detail["plan_id"])
+                target = Decimal(str(detail["target"]))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                blockers.append("TARGET_EXIT_LATCH_INVALID")
+                continue
+            if symbol in latched_symbols:
+                blockers.append(f"TARGET_EXIT_MULTIPLE_OPEN_LATCHES:{symbol}")
+                continue
+            latched_symbols.add(symbol)
+            position = positions.get(symbol)
+            if position is None:
+                flat_decision = plan_safe_close(
+                    position=None,
+                    orders=snapshot.equity_orders,
+                    symbol=symbol,
+                    snapshot_received_at=snapshot.observed_at,
+                )
+                unresolved = self._unresolved_safety_failures(
+                    snapshot=snapshot, symbol=symbol
+                )
+                if flat_decision.action is not ExitAction.FLAT:
+                    decisions.append(flat_decision)
+                    actions.append(
+                        f"TARGET_EXIT_LATCH_ACTIVE_DANGLING_ORDER:{symbol}:plan={plan_id}"
+                    )
+                elif unresolved:
+                    blockers.extend(
+                        f"TARGET_EXIT_FLATNESS_{failure}" for failure in unresolved
+                    )
+                else:
+                    try:
+                        owned_flat = self._require_owned_exposure(
+                            position=None, symbol=symbol, allow_flat=True
+                        )
+                    except Exception as exc:
+                        blockers.append(
+                            "TARGET_EXIT_FLATNESS_OWNERSHIP_UNRESOLVED:"
+                            f"{symbol}:{type(exc).__name__}"
+                        )
+                    else:
+                        if owned_flat.plan_id != plan_id:
+                            blockers.append(
+                                f"TARGET_EXIT_FLATNESS_PLAN_MISMATCH:{symbol}"
+                            )
+                        else:
+                            self.state.resolve_incident(
+                                str(row["incident_id"]), resolved_at=current
+                            )
+                            actions.append(
+                                f"TARGET_EXIT_LATCH_RESOLVED_FLAT:{symbol}:{plan_id}"
+                            )
+                continue
+            try:
+                owned = self._require_owned_exposure(
+                    position=position, symbol=symbol
+                )
+            except Exception as exc:
+                blockers.append(
+                    f"TARGET_EXIT_OWNERSHIP_UNRESOLVED:{symbol}:{type(exc).__name__}"
+                )
+                continue
+            if owned.plan_id != plan_id:
+                blockers.append(f"TARGET_EXIT_LATCH_PLAN_MISMATCH:{symbol}")
+                continue
+            decisions.append(
+                plan_safe_close(
+                    position=position,
+                    orders=snapshot.equity_orders,
+                    symbol=symbol,
+                    snapshot_received_at=snapshot.observed_at,
+                )
+            )
+            actions.append(
+                f"TARGET_EXIT_LATCH_ACTIVE:{symbol}:plan={plan_id}:target={target}"
+            )
+
+        # Timed/hard-kill closeout owns the same safe-close path and has higher
+        # priority.  Do not create a fresh market trigger once that lane starts.
+        if self.policy.calendar.lane(current) not in {
+            "regular_entry",
+            "manage_only",
+        }:
+            return TargetExitAssessment(
+                decisions=tuple(decisions),
+                actions=tuple(actions),
+                blockers=tuple(dict.fromkeys(blockers)),
+            )
+
+        exit_config = self.policy.config.get("exits", {})
+        target_mode = (
+            exit_config.get("target_exit_mode")
+            if isinstance(exit_config, Mapping)
+            else None
+        )
+        unlatched = tuple(
+            symbol for symbol in sorted(positions) if symbol not in latched_symbols
+        )
+        if unlatched and target_mode != _TARGET_EXIT_MODE:
+            blockers.append("TARGET_EXIT_POLICY_OWNER_APPROVAL_REQUIRED")
+            return TargetExitAssessment(
+                decisions=tuple(decisions),
+                actions=tuple(actions),
+                blockers=tuple(dict.fromkeys(blockers)),
+            )
+
+        evidence_snapshot = getattr(self.discovery, "target_evidence_snapshot", None)
+        if unlatched and not callable(evidence_snapshot):
+            blockers.append("TARGET_EXIT_COMPLETED_BAR_PROVIDER_UNAVAILABLE")
+            return TargetExitAssessment(
+                decisions=tuple(decisions),
+                actions=tuple(actions),
+                blockers=tuple(dict.fromkeys(blockers)),
+            )
+
+        for symbol in unlatched:
+            position = positions[symbol]
+            try:
+                owned = self._require_owned_exposure(
+                    position=position, symbol=symbol
+                )
+                plan_row = self._target_plan_row(
+                    plan_id=owned.plan_id, symbol=symbol
+                )
+                target = self._first_target(plan_row)
+            except Exception as exc:
+                blockers.append(
+                    f"TARGET_EXIT_DURABLE_PLAN_INVALID:{symbol}:{type(exc).__name__}"
+                )
+                continue
+
+            try:
+                evidence = evidence_snapshot(symbol, now=current)
+                bar = self._validated_target_bar(
+                    evidence=evidence,
+                    symbol=symbol,
+                    now=current,
+                )
+            except Exception as exc:
+                blockers.append(
+                    f"TARGET_EXIT_COMPLETED_BAR_INVALID:{symbol}:{type(exc).__name__}"
+                )
+                continue
+
+            actions.append(
+                "TARGET_EXIT_EVIDENCE:"
+                f"{symbol}:bar_end={bar.end_at.isoformat()}:"
+                f"close={bar.close}:target={target}:event={bar.source_event_id}"
+            )
+            if bar.close < target:
+                actions.append(f"TARGET_EXIT_NOT_REACHED:{symbol}")
+                continue
+
+            incident_id = "profit-target-" + hashlib.sha256(
+                f"{self.account_key}\n{owned.plan_id}\n{target}".encode("utf-8")
+            ).hexdigest()
+            self.state.record_incident(
+                Incident(
+                    incident_id=incident_id,
+                    account_key=self.account_key,
+                    category=_TARGET_EXIT_LATCH_CATEGORY,
+                    severity=IncidentSeverity.WARNING,
+                    opened_at=current,
+                    detail={
+                        "symbol": symbol,
+                        "plan_id": owned.plan_id,
+                        "target": format(target, "f"),
+                        "completed_bar_end": bar.end_at.isoformat(),
+                        "completed_bar_close": format(bar.close, "f"),
+                        "source_event_id": bar.source_event_id,
+                        "trigger": _TARGET_EXIT_MODE,
+                    },
+                )
+            )
+            decisions.append(
+                plan_safe_close(
+                    position=position,
+                    orders=snapshot.equity_orders,
+                    symbol=symbol,
+                    snapshot_received_at=snapshot.observed_at,
+                )
+            )
+            actions.append(
+                f"TARGET_EXIT_LATCHED:{symbol}:plan={owned.plan_id}:target={target}"
+            )
+
+        return TargetExitAssessment(
+            decisions=tuple(decisions),
+            actions=tuple(actions),
+            blockers=tuple(dict.fromkeys(blockers)),
+        )
+
     def discover_and_execute(
         self, *, snapshot: AccountSnapshot, now: datetime
     ) -> tuple[str, ...]:
@@ -897,6 +1167,31 @@ class ProductionLifecycleActions:
         if self.discovery is None:
             return ("DISCOVERY_EXECUTION_PATH_NOT_CONFIGURED",)
         return self.discovery.execute(snapshot=snapshot, now=current)
+
+    def analyze_premarket(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None,
+    ) -> object:
+        """Delegate only to the read-only analysis surface.
+
+        Deliberately do not invoke the mutation guard: premarket analysis must
+        work while the runtime is safely PAUSED.  The discovery implementation
+        receives neither a broker snapshot nor an order request through this
+        method, and the service validates the returned no-authority flags.
+        """
+
+        current = self._aware(now, "premarket analysis time")
+        if self.discovery is None:
+            raise RuntimeError("PREMARKET_ANALYSIS_PATH_NOT_CONFIGURED")
+        analyzer = getattr(self.discovery, "analyze", None)
+        if not callable(analyzer):
+            raise RuntimeError("PREMARKET_ANALYSIS_PATH_NOT_CONFIGURED")
+        return analyzer(
+            now=current,
+            last_completed_slot=last_completed_slot,
+        )
 
     def _advance_closeout(
         self,
@@ -968,7 +1263,6 @@ class ProductionLifecycleActions:
             symbol=decision.symbol,
         )
         require_exit_capacity(capacity, decision.quantity)
-        ordinal = self._next_exit_ordinal(decision.symbol)
         request = OrderRequest(
             account_masked=self.account_masked,
             symbol=decision.symbol,
@@ -979,10 +1273,17 @@ class ProductionLifecycleActions:
             time_in_force=TimeInForce.GFD,
             client_ref_id=_PLACEHOLDER_CLIENT_REF,
         )
+        operation_key = self._prepared_exit_operation_key(
+            plan_id=owned.plan_id,
+            request=request,
+        )
+        if operation_key is None:
+            ordinal = self._next_exit_ordinal(decision.symbol)
+            operation_key = f"safe-close:{owned.plan_id}:{ordinal}"
         outcome = self.safety.submit_sell(
             plan_id=owned.plan_id,
             kind=IntentKind.EXIT,
-            operation_key=f"safe-close:{owned.plan_id}:{ordinal}",
+            operation_key=operation_key,
             request=request,
             broker_snapshot=snapshot,
             now=now,
@@ -1309,7 +1610,18 @@ class ProductionLifecycleActions:
         if self.writer_lock is None or not self.writer_lock.held:
             return ("ACCOUNT_WRITER_KERNEL_LOCK_NOT_HELD",)
         execution = self.policy.config["execution"]
+        # In attended-only mode the persistent process is a read/reconciliation
+        # coordinator and is structurally incapable of broker mutations.  It
+        # owns the unprivileged account process/DB lease while each exact
+        # confirmed command separately acquires the broker-bound global lock.
+        # Unattended mode continues to require one lock to satisfy both roles.
+        attended_read_coordinator = (
+            self.policy.execution_authority_mode == "attended_only"
+            and not self.allow_mutations
+        )
         production = (
+            not attended_read_coordinator
+            and
             execution.get("broker_adapter") == "supported_production_transport"
         )
         account_binding = (
@@ -1324,7 +1636,11 @@ class ProductionLifecycleActions:
         )
         try:
             expected_fingerprint = account_writer_fingerprint(
-                self.account_key,
+                (
+                    attended_coordinator_lock_key(self.account_key)
+                    if attended_read_coordinator
+                    else self.account_key
+                ),
                 broker_account_binding_fingerprint=account_binding,
                 authorization_binding_id=authorization_binding,
             )
@@ -1352,6 +1668,12 @@ class ProductionLifecycleActions:
                 failures.append("ACCOUNT_WRITER_DATABASE_LEASE_OWNER_MISMATCH")
             if int(lease["process_id"]) != os.getpid():
                 failures.append("ACCOUNT_WRITER_DATABASE_LEASE_PROCESS_MISMATCH")
+            expected_generation = self.writer_lock.writer_lease_generation
+            if (
+                expected_generation is not None
+                and int(lease["generation"]) != expected_generation
+            ):
+                failures.append("ACCOUNT_WRITER_DATABASE_LEASE_GENERATION_MISMATCH")
         return tuple(failures)
 
     def _snapshot_failures(
@@ -1486,6 +1808,89 @@ class ProductionLifecycleActions:
             fingerprint=self._fingerprint(facts),
         )
 
+    def _target_plan_row(
+        self, *, plan_id: str, symbol: str
+    ) -> Mapping[str, object]:
+        rows = self.state.rows(
+            "SELECT * FROM plans WHERE plan_id=? AND account_key=? AND symbol=?",
+            (plan_id, self.account_key, symbol),
+        )
+        if len(rows) != 1:
+            raise ValueError("target exit has no unique durable entry plan")
+        row = rows[0]
+        if (
+            str(row["state"]) != "VALIDATED"
+            or str(row["policy_hash"]) != self.policy.policy_hash
+            or str(row["config_hash"]) != self.policy.config_hash
+        ):
+            raise ValueError("target exit plan is not bound to active policy")
+        return row
+
+    @staticmethod
+    def _first_target(plan_row: Mapping[str, object]) -> Decimal:
+        try:
+            raw_targets = json.loads(str(plan_row["targets_json"]))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("durable target list is invalid") from exc
+        if not isinstance(raw_targets, list) or not raw_targets:
+            raise ValueError("durable target list is empty")
+        targets: list[Decimal] = []
+        for value in raw_targets:
+            if isinstance(value, bool):
+                raise ValueError("durable target is invalid")
+            target = Decimal(str(value))
+            if not target.is_finite() or target <= 0:
+                raise ValueError("durable target is invalid")
+            targets.append(target)
+        first = min(targets)
+        limit = Decimal(str(plan_row["limit_price"]))
+        if not limit.is_finite() or first <= limit:
+            raise ValueError("first target must exceed the entry limit")
+        return first
+
+    def _validated_target_bar(
+        self, *, evidence: object, symbol: str, now: datetime
+    ) -> CompletedBar:
+        if evidence is None:
+            raise ValueError("completed-bar evidence is missing")
+        sampled_at = self._aware(
+            getattr(evidence, "sampled_at", None), "target evidence sampled_at"
+        )
+        if sampled_at != now:
+            raise ValueError("completed-bar evidence was not sampled for this cycle")
+        if str(getattr(evidence, "symbol", "")).strip().upper() != symbol:
+            raise ValueError("completed-bar evidence symbol mismatch")
+        readiness = getattr(evidence, "readiness", None)
+        if (
+            readiness is None
+            or getattr(readiness, "ready", None) is not True
+            or getattr(readiness, "blocker", None) is not None
+            or str(getattr(readiness, "symbol", "")).strip().upper() != symbol
+        ):
+            raise ValueError("completed-bar provider is not ready")
+        bar = getattr(evidence, "latest_completed_bar", None)
+        if not isinstance(bar, CompletedBar) or bar.symbol != symbol:
+            raise ValueError("latest completed bar is not normalized")
+        if not bar.source_event_id.strip():
+            raise ValueError("completed bar has no exact source event")
+        if (
+            bar.end_at - bar.start_at != timedelta(minutes=1)
+            or bar.start_at.second != 0
+            or bar.start_at.microsecond != 0
+            or bar.end_at.second != 0
+            or bar.end_at.microsecond != 0
+        ):
+            raise ValueError("target evidence is not one aligned minute")
+        if getattr(readiness, "completed_bar_end", None) != bar.end_at:
+            raise ValueError("readiness and completed bar disagree")
+        age = (now - bar.end_at).total_seconds()
+        maximum = int(
+            self.policy.config["evidence"]["completed_bar_max_age_seconds"]
+        )
+        if age < 0 or age > maximum:
+            raise ValueError("completed bar is stale or future-dated")
+        return bar
+
     def _unresolved_safety_failures(
         self, *, snapshot: AccountSnapshot, symbol: str
     ) -> tuple[str, ...]:
@@ -1515,7 +1920,6 @@ class ProductionLifecycleActions:
                     target_tuple = json.loads(str(target_rows[0]["order_tuple_json"]))
                     row_symbol = str(target_tuple.get("symbol", "")).upper()
                 if row_symbol == symbol.upper() and IntentState(row["state"]) in {
-                    IntentState.PREPARED,
                     IntentState.SUBMITTING,
                     IntentState.UNKNOWN,
                     IntentState.ACKNOWLEDGED,
@@ -1526,7 +1930,7 @@ class ProductionLifecycleActions:
                 continue
             state = IntentState(row["state"])
             order = broker_by_ref.get(str(row["client_ref"]))
-            if state in {IntentState.PREPARED, IntentState.SUBMITTING, IntentState.UNKNOWN}:
+            if state in {IntentState.SUBMITTING, IntentState.UNKNOWN}:
                 failures.append(f"UNRESOLVED_{row['kind']}_INTENT")
             elif state is IntentState.ACKNOWLEDGED and order is None:
                 failures.append(f"ACKNOWLEDGED_{row['kind']}_ORDER_MISSING")
@@ -1534,14 +1938,24 @@ class ProductionLifecycleActions:
                 failures.append(f"UNKNOWN_{row['kind']}_BROKER_ORDER")
             elif (
                 state in {IntentState.REJECTED, IntentState.FAILED}
-                and IntentKind(row["kind"]) is IntentKind.EXIT
+                and IntentKind(row["kind"])
+                in {IntentKind.PROTECTION, IntentKind.EXIT}
             ):
                 durable_orders = self.state.rows(
                     "SELECT state FROM broker_orders WHERE intent_id=?",
                     (row["intent_id"],),
                 )
-                if not durable_orders:
+                if (
+                    not durable_orders
+                    and not self._terminal_known_no_accept(row)
+                ):
                     failures.append(f"FAILED_{row['kind']}_REQUIRES_OPERATOR_REVIEW")
+                elif (
+                    not durable_orders
+                    and snapshot.observed_at
+                    <= self._parse_time(str(row["updated_at"]), "intent updated_at")
+                ):
+                    failures.append("STRICTLY_NEWER_POST_MUTATION_SNAPSHOT_REQUIRED")
         return tuple(dict.fromkeys(failures))
 
     def _pending_cancel_failure(self, symbol: str) -> tuple[str, ...]:
@@ -1555,7 +1969,6 @@ class ProductionLifecycleActions:
             (self.account_key,),
         ):
             if IntentState(row["state"]) not in {
-                IntentState.PREPARED,
                 IntentState.SUBMITTING,
                 IntentState.UNKNOWN,
                 IntentState.ACKNOWLEDGED,
@@ -1578,7 +1991,7 @@ class ProductionLifecycleActions:
         floors: list[datetime] = []
         rows = self.state.rows(
             "SELECT * FROM order_intents WHERE account_key=? "
-            "AND kind IN ('EXIT','CANCEL')",
+            "AND kind IN ('PROTECTION','EXIT','CANCEL')",
             (self.account_key,),
         )
         for row in rows:
@@ -1594,10 +2007,39 @@ class ProductionLifecycleActions:
                 if target:
                     target_tuple = json.loads(str(target[0]["order_tuple_json"]))
                     row_symbol = str(target_tuple.get("symbol", "")).upper()
-            if row_symbol != symbol.upper() or IntentState(row["state"]) is not IntentState.RECONCILED:
+            state = IntentState(row["state"])
+            terminal_progress = state is IntentState.RECONCILED or (
+                state in {IntentState.REJECTED, IntentState.FAILED}
+                and self._terminal_known_no_accept(row)
+            )
+            if row_symbol != symbol.upper() or not terminal_progress:
                 continue
             floors.append(self._parse_time(str(row["updated_at"]), "intent updated_at"))
         return max(floors, default=None)
+
+    def _terminal_known_no_accept(self, row: Mapping[str, object]) -> bool:
+        """Require durable local proof that a terminal intent was never sent."""
+
+        state = IntentState(row["state"])
+        if state not in {IntentState.REJECTED, IntentState.FAILED}:
+            return False
+        events = self.state.rows(
+            "SELECT payload_json FROM audit_events WHERE entity_type='order_intent' "
+            "AND entity_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1",
+            (row["intent_id"], f"INTENT_{state.value}"),
+        )
+        if len(events) != 1:
+            return False
+        try:
+            detail = json.loads(str(events[0]["payload_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if state is IntentState.REJECTED:
+            return detail.get("known_reject") is True
+        return bool(
+            detail.get("known_no_accept") is True
+            or detail.get("phase") in {"review", "review_validation"}
+        )
 
     def _next_exit_ordinal(self, symbol: str) -> int:
         rows = self.state.rows(
@@ -1610,6 +2052,50 @@ class ProductionLifecycleActions:
             if str(payload.get("symbol", "")).upper() == symbol.upper():
                 count += 1
         return count + 1
+
+    def _prepared_exit_operation_key(
+        self, *, plan_id: str, request: OrderRequest
+    ) -> str | None:
+        """Find the one exact PREPARED safe-close for deterministic replay."""
+
+        matches: list[str] = []
+        rows = self.state.rows(
+            "SELECT order_tuple_json FROM order_intents WHERE account_key=? "
+            "AND plan_id=? AND kind='EXIT' AND state='PREPARED'",
+            (self.account_key, plan_id),
+        )
+        expected = {
+            "account_key": self.account_key,
+            "account_masked": request.account_masked,
+            "symbol": request.symbol,
+            "side": request.side.value,
+            "order_type": request.order_type.value,
+            "quantity": request.quantity,
+            "market_hours": request.market_hours.value,
+            "time_in_force": request.time_in_force.value,
+            "limit_price": (
+                format(request.limit_price, "f")
+                if request.limit_price is not None
+                else None
+            ),
+            "stop_price": (
+                format(request.stop_price, "f")
+                if request.stop_price is not None
+                else None
+            ),
+            "operation": "place_equity_order",
+            "plan_id": plan_id,
+            "kind": IntentKind.EXIT.value,
+        }
+        for row in rows:
+            payload = json.loads(str(row["order_tuple_json"]))
+            if all(payload.get(key) == value for key, value in expected.items()):
+                operation_key = payload.get("operation_key")
+                if isinstance(operation_key, str) and operation_key:
+                    matches.append(operation_key)
+        if len(matches) > 1:
+            raise ValueError("multiple exact PREPARED exits require operator review")
+        return matches[0] if matches else None
 
     def _plan_for_obligation(self, obligation_id: str) -> str:
         rows = self.state.rows(
@@ -1714,4 +2200,5 @@ __all__ = [
     "DiscoveryExecutor",
     "LifecycleReconcileResult",
     "ProductionLifecycleActions",
+    "TargetExitAssessment",
 ]

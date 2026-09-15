@@ -1,4 +1,4 @@
-"""Release-shipped composition for live Massive and Robinhood evidence.
+"""Release-shipped compositions for Massive market and broker evidence.
 
 This module contains orchestration semantics only. Provider credentials remain
 in injected, already-authorized clients, while RuntimeComposition proves every
@@ -12,7 +12,9 @@ from decimal import Decimal
 from typing import Any, Mapping, Protocol
 
 from .broker import BrokerClient
+from .broker.ibkr_read import IbkrWholeAccountReadBridge
 from .latency import LatencyRecorder
+from .ibkr_instrument_provider import IbkrPipelineInstrumentEvidenceProvider
 from .market_data import MarketDataCache
 from .massive_adapter import MassiveRestStreamSource
 from .pipeline import (
@@ -20,6 +22,7 @@ from .pipeline import (
     FullLiveEntryPipeline,
     LiveValidationEvidence,
     PipelineThresholds,
+    POST_SIZING_HARD_GATE_FACTS,
     PreparedStructure,
     REQUIRED_HARD_GATE_FACTS,
     RobinhoodInstrumentEvidenceProvider,
@@ -28,6 +31,9 @@ from .pipeline import (
 
 SUPPORTED_DISCOVERY_COMPOSITION_ID = (
     "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+)
+SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID = (
+    "titan.massive_rest_stream.ibkr_contract.quality.v1"
 )
 
 
@@ -114,7 +120,10 @@ class NormalizedQualityEvidenceProvider:
                 as_of=current,
                 timeout_seconds=self.timeout_seconds,
             )
-            if not isinstance(raw, Mapping) or set(raw) != self.REQUIRED_FIELDS:
+            if not isinstance(raw, Mapping) or set(raw) not in (
+                self.REQUIRED_FIELDS,
+                self.REQUIRED_FIELDS | {"deferred_hard_gate_facts"},
+            ):
                 return None
             if raw["shadow_proposal_grants_authority"] is not False:
                 return None
@@ -126,10 +135,22 @@ class NormalizedQualityEvidenceProvider:
             hard_gates = raw["hard_gate_facts"]
             if not all(isinstance(item, Mapping) for item in (setup, execution, hard_gates)):
                 return None
-            if set(hard_gates) != REQUIRED_HARD_GATE_FACTS or any(
-                hard_gates[name] is not True for name in REQUIRED_HARD_GATE_FACTS
+            deferred_raw = raw.get("deferred_hard_gate_facts", ())
+            if (
+                not isinstance(deferred_raw, (list, tuple, frozenset))
+                or any(not isinstance(name, str) for name in deferred_raw)
+                or len(set(deferred_raw)) != len(deferred_raw)
             ):
                 return None
+            deferred = frozenset(deferred_raw)
+            if not deferred.issubset(POST_SIZING_HARD_GATE_FACTS):
+                return None
+            if set(hard_gates) != REQUIRED_HARD_GATE_FACTS:
+                return None
+            for name in REQUIRED_HARD_GATE_FACTS:
+                required_value = False if name in deferred else True
+                if hard_gates[name] is not required_value:
+                    return None
             evidence = LiveValidationEvidence(
                 evidence_id=str(raw["evidence_id"]).strip(),
                 source_plan_id=str(raw["source_plan_id"]).strip(),
@@ -150,6 +171,7 @@ class NormalizedQualityEvidenceProvider:
                 },
                 hard_gate_facts={str(k): bool(v) for k, v in hard_gates.items()},
                 shadow_proposal_grants_authority=False,
+                deferred_hard_gate_facts=deferred,
             )
             if (
                 not evidence.evidence_id
@@ -218,6 +240,8 @@ class SupportedDiscoveryProviderComposition:
                     "health",
                     "prepared_structures",
                     "hydrate_cache",
+                    "ensure_risk_symbols",
+                    "evidence_snapshot",
                     "release_components",
                 ),
             ),
@@ -271,6 +295,7 @@ class SupportedDiscoveryProviderComposition:
         writer_lock: object,
         latency: LatencyRecorder | None,
         authority: object,
+        plan_sealer: object | None = None,
     ) -> FullLiveDiscoveryExecutor:
         # Imports are concrete and release-contained; the writer lock is
         # revalidated by ``authority`` at every mutation boundary.
@@ -290,6 +315,150 @@ class SupportedDiscoveryProviderComposition:
             instrument_evidence=instrument,
             quality_evidence=quality,
             thresholds=PipelineThresholds.from_policy(policy),
+            plan_sealer=plan_sealer,
+            latency=latency,
+        )
+        return FullLiveDiscoveryExecutor(source=self._source, pipeline=pipeline)
+
+
+class SupportedIbkrDiscoveryProviderComposition:
+    """Massive market evidence joined only with IBKR contract eligibility."""
+
+    def __init__(
+        self,
+        *,
+        source: MassiveRestStreamSource,
+        read_bridge: IbkrWholeAccountReadBridge,
+        instrument_evidence: IbkrPipelineInstrumentEvidenceProvider,
+        quality_reader: QualityEvidenceRecordReader,
+        provider_binding_id: str,
+        timeout_seconds: float = 3.0,
+        shared_dependencies_owned_by_transport: bool = False,
+    ) -> None:
+        if not isinstance(source, MassiveRestStreamSource):
+            raise ValueError("IBKR discovery requires MassiveRestStreamSource")
+        if not isinstance(read_bridge, IbkrWholeAccountReadBridge):
+            raise ValueError("IBKR discovery requires the complete IBKR read bridge")
+        if not isinstance(instrument_evidence, IbkrPipelineInstrumentEvidenceProvider):
+            raise ValueError("IBKR discovery requires concrete IBKR instrument evidence")
+        if len(provider_binding_id) != 64 or any(
+            value not in "0123456789abcdef" for value in provider_binding_id
+        ):
+            raise ValueError("provider binding must be a non-secret SHA-256 receipt")
+        if source.rest.authorization.binding_id != provider_binding_id:
+            raise ValueError("Massive authorization differs from the provider binding")
+        if not 0 < float(timeout_seconds) <= 30:
+            raise ValueError("provider timeout must be in (0, 30]")
+        self._source = source
+        self.read_bridge = read_bridge
+        self.instrument_evidence = instrument_evidence
+        self.quality_reader = quality_reader
+        self.provider_binding_id = provider_binding_id
+        self.timeout_seconds = float(timeout_seconds)
+        self.shared_dependencies_owned_by_transport = bool(
+            shared_dependencies_owned_by_transport
+        )
+
+    @property
+    def identity(self) -> str:
+        return SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID
+
+    @property
+    def market_source(self) -> MassiveRestStreamSource:
+        return self._source
+
+    def release_components(self) -> tuple[tuple[str, object, tuple[str, ...]], ...]:
+        components = [
+            (
+                "market_source",
+                self._source,
+                (
+                    "health",
+                    "prepared_structures",
+                    "hydrate_cache",
+                    "ensure_risk_symbols",
+                    "evidence_snapshot",
+                    "release_components",
+                ),
+            ),
+            (
+                "instrument_evidence_provider",
+                self.instrument_evidence,
+                ("release_components", "readiness", "get_instrument_evidence"),
+            ),
+            (
+                "quality_evidence_reader",
+                self.quality_reader,
+                ("readiness", "get_quality_evidence"),
+            ),
+        ]
+        if not self.shared_dependencies_owned_by_transport:
+            components.insert(
+                1,
+                (
+                    "ibkr_read_bridge",
+                    self.read_bridge,
+                    (
+                        "release_components",
+                        "get_account_base",
+                        "list_order_family_page",
+                        "lookup_equity_orders_by_client_ref",
+                    ),
+                ),
+            )
+        return tuple(components)
+
+    def tradability_ready(self, *, now: datetime) -> bool:
+        current = _aware(now, "provider readiness time")
+        try:
+            instrument = self.instrument_evidence.readiness(
+                as_of=current, timeout_seconds=self.timeout_seconds
+            )
+            quality = self.quality_reader.readiness(
+                as_of=current, timeout_seconds=self.timeout_seconds
+            )
+            return bool(
+                isinstance(instrument, Mapping)
+                and instrument.get("ready") is True
+                and instrument.get("authenticated") is True
+                and instrument.get("source") == "ibkr:tws-contract-details"
+                and isinstance(quality, Mapping)
+                and quality.get("ready") is True
+                and quality.get("authenticated") is True
+                and str(quality.get("provider_binding_id", ""))
+                == self.provider_binding_id
+                and 0
+                <= (current - _aware(quality.get("observed_at"), "quality observed_at")).total_seconds()
+                <= self.timeout_seconds
+            )
+        except Exception:
+            return False
+
+    def build_executor(
+        self,
+        *,
+        policy: object,
+        state: object,
+        broker: BrokerClient,
+        writer_lock: object,
+        latency: LatencyRecorder | None,
+        authority: object,
+        plan_sealer: object | None = None,
+    ) -> FullLiveDiscoveryExecutor:
+        del writer_lock
+        quality = NormalizedQualityEvidenceProvider(
+            self.quality_reader, timeout_seconds=self.timeout_seconds
+        )
+        pipeline = FullLiveEntryPipeline(
+            policy=policy,
+            market_data=MarketDataCache(),
+            state=state,
+            broker=broker,
+            authority=authority,
+            instrument_evidence=self.instrument_evidence,
+            quality_evidence=quality,
+            thresholds=PipelineThresholds.from_policy(policy),
+            plan_sealer=plan_sealer,
             latency=latency,
         )
         return FullLiveDiscoveryExecutor(source=self._source, pipeline=pipeline)
@@ -300,5 +469,7 @@ __all__ = [
     "ProductionRobinhoodInstrumentReader",
     "QualityEvidenceRecordReader",
     "SUPPORTED_DISCOVERY_COMPOSITION_ID",
+    "SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID",
+    "SupportedIbkrDiscoveryProviderComposition",
     "SupportedDiscoveryProviderComposition",
 ]

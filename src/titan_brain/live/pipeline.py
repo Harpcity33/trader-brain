@@ -17,7 +17,7 @@ discovery.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_FLOOR
 from enum import Enum
@@ -38,7 +38,12 @@ from titan_brain.scoring import (
 
 from .broker import AccountSnapshot, BrokerClient, BrokerSide
 from .authority import MutationAuthority
-from .execution import EntryExecutionCoordinator, ExecutionOutcome, ExecutionStatus
+from .execution import (
+    EntryExecutionCoordinator,
+    ExecutionOutcome,
+    ExecutionStatus,
+    PreparedOrderPlanSealer,
+)
 from .latency import LatencyRecorder, LatencySpan
 from .market_data import (
     CompletedBar,
@@ -56,6 +61,8 @@ from .risk_runtime import (
     RiskDecision,
     RiskExposure,
     SessionLatch,
+    dollar_headroom_capacity,
+    entry_lifecycle_fee_reserve,
     evaluate_entry,
 )
 from .state import LiveStateStore
@@ -70,7 +77,7 @@ REQUIRED_HARD_GATE_FACTS = frozenset(
         "independent_geometry_revalidation",
         "causal_completed_bar_structure",
         "fresh_executable_quote",
-        "robinhood_tradable",
+        "broker_tradable",
         "acceptable_spread",
         "adequate_displayed_depth",
         "acceptable_extension",
@@ -78,6 +85,14 @@ REQUIRED_HARD_GATE_FACTS = frozenset(
         "remaining_capacity",
         "current_session_eligible",
     }
+)
+
+# These two facts require the actual sized order and a fresh account snapshot.
+# A quality reader may explicitly defer them, but never assert them by default.
+# _plan_candidate still enforces evaluate_entry and _market_decision before the
+# durable submission boundary; no other hard gate may use this two-stage path.
+POST_SIZING_HARD_GATE_FACTS = frozenset(
+    {"adequate_displayed_depth", "remaining_capacity"}
 )
 
 
@@ -92,16 +107,116 @@ class PipelineStatus(str, Enum):
     SUBMISSION_UNKNOWN = "SUBMISSION_UNKNOWN"
 
 
+class PremarketAnalysisStatus(str, Enum):
+    """Caller-visible state for one analysis-only schedule slot."""
+
+    OUTSIDE_LANE = "OUTSIDE_LANE"
+    NOT_DUE = "NOT_DUE"
+    COMPLETED = "COMPLETED"
+    BLOCKED = "BLOCKED"
+
+
+@dataclass(frozen=True)
+class PremarketAnalysisSchedule:
+    """Exact 30-minute premarket schedule decision.
+
+    The caller owns durable de-duplication and passes the last successfully
+    completed slot back on the next invocation.  This object grants no order
+    authority and deliberately contains no broker request.
+    """
+
+    lane: str
+    due: bool
+    interval_minutes: int
+    scheduled_for: datetime | None
+    next_due_at: datetime | None
+    reason: str
+    execution_authority: bool = field(init=False, default=False)
+    approved_to_buy: bool = field(init=False, default=False)
+
+
+@dataclass(frozen=True)
+class PremarketCandidateFact:
+    """Compact deterministic facts for one analysis-only candidate."""
+
+    rank: int
+    symbol: str
+    source_plan_id: str
+    source_observed_at: datetime
+    shadow_ranking_score: Decimal
+    setup_score: float
+    execution_score: float
+    instrument_evidence_id: str | None
+    instrument_id: str | None
+    instrument_source: str | None
+    instrument_observed_at: datetime | None
+    regular_session_eligibility_at: datetime | None
+    quote_bid: Decimal | None
+    quote_ask: Decimal | None
+    quote_bid_size: int | None
+    quote_ask_size: int | None
+    quote_observed_at: datetime | None
+    spread_bps: Decimal | None
+    latest_completed_bar_end: datetime | None
+    session_volume: int
+    structural_invalidation: Decimal
+    targets: tuple[Decimal, ...]
+    hard_gate_failures: tuple[str, ...]
+    deferred_execution_gates: tuple[str, ...]
+    execution_authority: bool = field(init=False, default=False)
+    approved_to_buy: bool = field(init=False, default=False)
+
+
+@dataclass(frozen=True)
+class PremarketAnalysisResult:
+    """Analysis facts returned to a scheduler; never an entry recommendation."""
+
+    status: PremarketAnalysisStatus
+    schedule: PremarketAnalysisSchedule
+    analysis_id: str | None
+    observed_at: datetime
+    candidates: tuple[PremarketCandidateFact, ...]
+    blockers: tuple[str, ...]
+    message: str
+    execution_authority: bool = field(init=False, default=False)
+    approved_to_buy: bool = field(init=False, default=False)
+
+
 @dataclass(frozen=True)
 class PipelineThresholds:
     """Explicit operator-approved score floors; there are no hidden defaults."""
 
-    minimum_setup_score: float
-    minimum_execution_score: float
-    a_plus_setup_score: float
-    a_plus_execution_score: float
+    minimum_setup_score: float | None
+    minimum_execution_score: float | None
+    a_plus_setup_score: float | None
+    a_plus_execution_score: float | None
+    score_policy: str = "threshold_gated"
+    a_plus_enabled: bool = True
 
     def __post_init__(self) -> None:
+        if self.score_policy not in {"threshold_gated", "ranking_only"}:
+            raise ValueError("unsupported signed score policy")
+        if type(self.a_plus_enabled) is not bool:
+            raise ValueError("a_plus_enabled must be boolean")
+        values = tuple(
+            getattr(self, name)
+            for name in (
+                "minimum_setup_score",
+                "minimum_execution_score",
+                "a_plus_setup_score",
+                "a_plus_execution_score",
+            )
+        )
+        if self.score_policy == "ranking_only":
+            if any(value is not None for value in values):
+                raise ValueError("ranking-only scores cannot contain hidden floors")
+            if self.a_plus_enabled is not False:
+                raise ValueError("ranking-only score policy requires A+ disabled")
+            return
+        if any(value is None for value in values):
+            raise ValueError("threshold-gated score policy requires every threshold")
+        if self.a_plus_enabled is not True:
+            raise ValueError("threshold-gated score policy requires A+ enabled")
         for name in (
             "minimum_setup_score",
             "minimum_execution_score",
@@ -112,6 +227,10 @@ class PipelineThresholds:
             if not math.isfinite(value) or not 0 <= value <= 100:
                 raise ValueError(f"{name} must be finite and in [0, 100]")
             object.__setattr__(self, name, value)
+        assert self.minimum_setup_score is not None
+        assert self.minimum_execution_score is not None
+        assert self.a_plus_setup_score is not None
+        assert self.a_plus_execution_score is not None
         if self.a_plus_setup_score < self.minimum_setup_score:
             raise ValueError("A+ setup threshold cannot be below the live floor")
         if self.a_plus_execution_score < self.minimum_execution_score:
@@ -119,7 +238,7 @@ class PipelineThresholds:
 
     @classmethod
     def from_policy(cls, policy: PolicyBundle) -> "PipelineThresholds":
-        """Load only explicit signed thresholds; unresolved values are fatal."""
+        """Load one exact signed score treatment without implicit thresholds."""
 
         discovery = policy.config.get("discovery")
         if not isinstance(discovery, Mapping):
@@ -130,17 +249,52 @@ class PipelineThresholds:
             "a_plus_setup_score",
             "a_plus_execution_score",
         )
+        missing_keys = tuple(name for name in names if name not in discovery)
+        if missing_keys:
+            raise ValueError(
+                "signed live score fields are missing: " + ",".join(missing_keys)
+            )
+        score_policy = discovery.get("score_policy", "threshold_gated")
+        a_plus_enabled = discovery.get("a_plus_enabled", True)
+        if score_policy == "ranking_only":
+            if any(discovery.get(name) is not None for name in names):
+                raise ValueError(
+                    "ranking-only signed score policy requires null thresholds"
+                )
+            if a_plus_enabled is not False:
+                raise ValueError(
+                    "ranking-only signed score policy requires a_plus_enabled=false"
+                )
+            return cls(
+                None,
+                None,
+                None,
+                None,
+                score_policy="ranking_only",
+                a_plus_enabled=False,
+            )
+        if score_policy != "threshold_gated":
+            raise ValueError("signed score_policy is unsupported")
         missing = tuple(name for name in names if discovery.get(name) is None)
         if missing:
             raise ValueError(
                 "signed live score thresholds are unresolved: " + ",".join(missing)
+            )
+        if a_plus_enabled is not True:
+            raise ValueError(
+                "threshold-gated signed score policy requires a_plus_enabled=true"
             )
         return cls(*(float(discovery[name]) for name in names))
 
 
 @dataclass(frozen=True)
 class InstrumentEvidence:
-    """Current Robinhood/instrument eligibility from an injected live reader."""
+    """Current broker/instrument eligibility from an injected live reader.
+
+    ``robinhood_tradable`` is retained as the serialized v1 field name. Core
+    policy consumes the broker-neutral ``broker_tradable`` property so an IBKR
+    record never masquerades as Robinhood evidence.
+    """
 
     evidence_id: str
     symbol: str
@@ -151,6 +305,8 @@ class InstrumentEvidence:
     exchange_listed: bool
     robinhood_tradable: bool
     regular_hours_eligible: bool
+    eligibility_at: datetime | None = None
+    eligibility_scope: str = "current_regular_session"
 
     def __post_init__(self) -> None:
         symbol = self.symbol.strip().upper()
@@ -159,6 +315,14 @@ class InstrumentEvidence:
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(
             self, "observed_at", _aware_utc(self.observed_at, "instrument.observed_at")
+        )
+        eligibility_at = self.eligibility_at
+        if eligibility_at is None:
+            eligibility_at = self.observed_at
+        object.__setattr__(
+            self,
+            "eligibility_at",
+            _aware_utc(eligibility_at, "instrument.eligibility_at"),
         )
         for field in ("evidence_id", "instrument_id", "source", "asset_type"):
             if not str(getattr(self, field)).strip():
@@ -170,6 +334,15 @@ class InstrumentEvidence:
         ):
             if not isinstance(getattr(self, field), bool):
                 raise ValueError(f"instrument {field} must be boolean")
+        if self.eligibility_scope not in {
+            "current_regular_session",
+            "upcoming_regular_session_analysis",
+        }:
+            raise ValueError("instrument eligibility scope is invalid")
+
+    @property
+    def broker_tradable(self) -> bool:
+        return self.robinhood_tradable
 
 
 @dataclass(frozen=True)
@@ -189,6 +362,7 @@ class LiveValidationEvidence:
     execution_components: Mapping[str, float]
     hard_gate_facts: Mapping[str, bool]
     shadow_proposal_grants_authority: bool = False
+    deferred_hard_gate_facts: frozenset[str] = frozenset()
 
 
 class InstrumentEvidenceProvider(Protocol):
@@ -301,6 +475,18 @@ class PreparedStructureSource(Protocol):
         now: datetime,
         tradability: TradabilityProvider,
     ) -> tuple[str, ...]: ...
+
+    def ensure_risk_symbols(
+        self,
+        cache: MarketDataCache,
+        *,
+        symbols: Sequence[str],
+        session_start: datetime,
+        now: datetime,
+        tradability: TradabilityProvider,
+    ) -> tuple[str, ...]: ...
+
+    def evidence_snapshot(self, symbol: str, *, now: datetime) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -456,7 +642,7 @@ def build_account_risk_snapshot(
     if risk_age < -1 or risk_age > maximum_age:
         failures.append("AUTHORITATIVE_ACCOUNT_RISK_EVIDENCE_STALE")
 
-    account_key = str(policy.config["account"]["masked_identifier"])
+    account_key = policy.account_key
     prices = dict(prices or {})
     broker_positions = {
         item.symbol: item
@@ -464,8 +650,15 @@ def build_account_risk_snapshot(
         if item.quantity > 0
     }
     active_reservations = state.rows(
-        """SELECT r.*,p.symbol,p.limit_price,p.structural_stop,i.intent_id,
-                         i.client_ref,i.state AS intent_state
+        """SELECT r.*,p.symbol,p.limit_price,p.structural_stop,
+                         p.quantity AS plan_quantity,
+                         p.account_key AS plan_account_key,
+                         p.strategy_id AS plan_strategy_id,
+                         p.policy_hash AS plan_policy_hash,
+                         p.config_hash AS plan_config_hash,
+                         i.intent_id,i.client_ref,i.state AS intent_state,
+                         i.plan_id AS intent_plan_id,
+                         i.account_key AS intent_account_key
               FROM risk_reservations r
               JOIN plans p ON p.plan_id=r.plan_id
               JOIN order_intents i ON i.reservation_id=r.reservation_id
@@ -473,6 +666,45 @@ def build_account_risk_snapshot(
              ORDER BY r.created_at,r.reservation_id""",
         (account_key,),
     )
+    reservation_fees: dict[str, Decimal] = {}
+    reservation_failures: list[str] = []
+    for row in active_reservations:
+        if any(
+            (
+                row["plan_account_key"] != account_key,
+                row["intent_account_key"] != account_key,
+                row["intent_plan_id"] != row["plan_id"],
+                row["plan_strategy_id"] != policy.strategy_id,
+                row["plan_policy_hash"] != policy.policy_hash,
+                row["plan_config_hash"] != policy.config_hash,
+            )
+        ):
+            reservation_failures.append(
+                "ACTIVE_RESERVATION_POLICY_BINDING_MISMATCH"
+            )
+            continue
+        try:
+            quantity = int(row["plan_quantity"])
+            if quantity != row["plan_quantity"] or quantity <= 0:
+                raise ValueError("invalid durable plan quantity")
+            fee = entry_lifecycle_fee_reserve(policy, quantity=quantity)
+            planned = _decimal_from_cents(row["planned_risk_cents"])
+            execution = _decimal_from_cents(row["execution_reserve_cents"])
+            stress = _decimal_from_cents(row["stress_risk_cents"])
+        except (KeyError, TypeError, ValueError):
+            reservation_failures.append(
+                "ACTIVE_RESERVATION_FEE_DERIVATION_INVALID"
+            )
+            continue
+        if stress != planned + execution + fee:
+            reservation_failures.append(
+                "ACTIVE_RESERVATION_FEE_BINDING_MISMATCH"
+            )
+            continue
+        reservation_fees[str(row["reservation_id"])] = fee
+    if reservation_failures:
+        return None, _unique(tuple(failures) + tuple(reservation_failures))
+
     all_owned = state.rows(
         """SELECT i.client_ref,i.plan_id,p.symbol,o.broker_order_id
               FROM order_intents i JOIN plans p ON p.plan_id=i.plan_id
@@ -529,6 +761,7 @@ def build_account_risk_snapshot(
                 planned_risk=_decimal_from_cents(row["planned_risk_cents"]),
                 stress_risk=_decimal_from_cents(row["stress_risk_cents"]),
                 execution_reserve=_decimal_from_cents(row["execution_reserve_cents"]),
+                fee_reserve=reservation_fees[str(row["reservation_id"])],
                 notional=_decimal_from_cents(row["notional_cents"]),
                 protected=protected,
             )
@@ -554,6 +787,7 @@ def build_account_risk_snapshot(
                 planned_risk=notional,
                 stress_risk=notional,
                 execution_reserve=ZERO,
+                fee_reserve=ZERO,
                 notional=notional,
                 protected=False,
             )
@@ -580,6 +814,7 @@ def build_account_risk_snapshot(
                 planned_risk=notional if order.side is BrokerSide.BUY else ZERO,
                 stress_risk=notional if order.side is BrokerSide.BUY else ZERO,
                 execution_reserve=ZERO,
+                fee_reserve=ZERO,
                 notional=notional,
                 protected=False,
             )
@@ -599,6 +834,7 @@ def build_account_risk_snapshot(
             planned_risk=ZERO,
             stress_risk=ZERO,
             execution_reserve=ZERO,
+            fee_reserve=ZERO,
             notional=ZERO,
             protected=False,
         )
@@ -642,6 +878,7 @@ class FullLiveEntryPipeline:
         instrument_evidence: InstrumentEvidenceProvider,
         quality_evidence: QualityEvidenceProvider,
         thresholds: PipelineThresholds,
+        plan_sealer: PreparedOrderPlanSealer | None = None,
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
     ) -> None:
@@ -661,6 +898,7 @@ class FullLiveEntryPipeline:
             state=state,
             broker=broker,
             authority=authority,
+            plan_sealer=plan_sealer,
             clock=self._clock,
             latency=latency,
         )
@@ -912,13 +1150,19 @@ class FullLiveEntryPipeline:
                 )
             except (TypeError, ValueError) as exc:
                 failures.append("EXECUTION_SCORE_COMPONENTS_INCOMPLETE_OR_INVALID")
-            if setup is not None and setup.score < self.thresholds.minimum_setup_score:
-                failures.append("SETUP_SCORE_BELOW_MINIMUM")
-            if (
-                execution is not None
-                and execution.score < self.thresholds.minimum_execution_score
-            ):
-                failures.append("EXECUTION_SCORE_BELOW_MINIMUM")
+            if self.thresholds.score_policy == "threshold_gated":
+                assert self.thresholds.minimum_setup_score is not None
+                assert self.thresholds.minimum_execution_score is not None
+                if (
+                    setup is not None
+                    and setup.score < self.thresholds.minimum_setup_score
+                ):
+                    failures.append("SETUP_SCORE_BELOW_MINIMUM")
+                if (
+                    execution is not None
+                    and execution.score < self.thresholds.minimum_execution_score
+                ):
+                    failures.append("EXECUTION_SCORE_BELOW_MINIMUM")
         return _ScoredCandidate(
             structure=structure,
             instrument=instrument,
@@ -969,11 +1213,29 @@ class FullLiveEntryPipeline:
             failures.append("INSTRUMENT_EVIDENCE_STALE_OR_FUTURE")
         if evidence.asset_type != "stock" or evidence.exchange_listed is not True:
             failures.append("INSTRUMENT_OUTSIDE_ALLOWED_SCOPE")
+        eligibility_age = (
+            abs(
+                (
+                    now
+                    - _aware_utc(
+                        evidence.eligibility_at, "instrument.eligibility_at"
+                    )
+                ).total_seconds()
+            )
+            if evidence.eligibility_at is not None
+            else math.inf
+        )
         if (
-            evidence.robinhood_tradable is not True
+            evidence.eligibility_scope != "current_regular_session"
+            or eligibility_age
+            > int(self.policy.config["evidence"]["quote_max_age_seconds"])
+        ):
+            failures.append("INSTRUMENT_ELIGIBILITY_NOT_CURRENT")
+        if (
+            evidence.broker_tradable is not True
             or evidence.regular_hours_eligible is not True
         ):
-            failures.append("ROBINHOOD_NOT_CURRENTLY_TRADABLE")
+            failures.append("BROKER_NOT_CURRENTLY_TRADABLE")
         return _unique(failures)
 
     def _validation_failures(
@@ -1011,6 +1273,13 @@ class FullLiveEntryPipeline:
                 failures.append("POSITIVE_EXECUTION_RESERVE_REQUIRED")
         except ValueError as exc:
             failures.append("EXECUTION_RESERVE_INVALID")
+        deferred = evidence.deferred_hard_gate_facts
+        if (
+            not isinstance(deferred, frozenset)
+            or not deferred.issubset(POST_SIZING_HARD_GATE_FACTS)
+        ):
+            failures.append("DEFERRED_HARD_GATE_FACTS_INVALID")
+            deferred = frozenset()
         supplied = set(evidence.hard_gate_facts)
         if supplied != REQUIRED_HARD_GATE_FACTS:
             missing = sorted(REQUIRED_HARD_GATE_FACTS - supplied)
@@ -1018,7 +1287,10 @@ class FullLiveEntryPipeline:
             failures.append(f"HARD_GATE_FACTS_INCOMPLETE:missing={missing}:extra={extra}")
         else:
             for name in sorted(REQUIRED_HARD_GATE_FACTS):
-                if evidence.hard_gate_facts[name] is not True:
+                if name in deferred:
+                    if evidence.hard_gate_facts[name] is not False:
+                        failures.append(f"DEFERRED_HARD_GATE_MUST_BE_UNASSERTED:{name}")
+                elif evidence.hard_gate_facts[name] is not True:
                     failures.append(f"HARD_GATE_FAILED:{name}")
         # Scoring helpers enforce the complete exact component schemas.  These
         # checks make the failure readable without silently filling anything.
@@ -1055,8 +1327,8 @@ class FullLiveEntryPipeline:
             return None, None, None, ("QUOTE_MISSING",)
         if quote.bid > quote.ask:
             failures.append("CROSSED_QUOTE")
-        if quote.tradable is not True or not candidate.instrument.robinhood_tradable:
-            failures.append("ROBINHOOD_TRADABILITY_EVIDENCE_CONFLICT")
+        if quote.tradable is not True or not candidate.instrument.broker_tradable:
+            failures.append("BROKER_TRADABILITY_EVIDENCE_CONFLICT")
         if quote.halted:
             failures.append("MARKET_HALTED")
         completed_at = _aware_utc(
@@ -1073,7 +1345,10 @@ class FullLiveEntryPipeline:
 
         quality_tier = (
             "a_plus"
-            if candidate.setup.score >= self.thresholds.a_plus_setup_score
+            if self.thresholds.a_plus_enabled
+            and self.thresholds.a_plus_setup_score is not None
+            and self.thresholds.a_plus_execution_score is not None
+            and candidate.setup.score >= self.thresholds.a_plus_setup_score
             and candidate.execution.score >= self.thresholds.a_plus_execution_score
             else "normal"
         )
@@ -1176,7 +1451,9 @@ class FullLiveEntryPipeline:
         )
         if position is not None and existing_quantity is None:
             failures.append("ADD_PROHIBITED_EXISTING_POSITION")
-        if existing_quantity is None and self._prior_symbol_plan_today(structure.symbol, now):
+        if existing_quantity is None and self._prior_symbol_plan_today(
+            structure.symbol, now, broker_snapshot=broker_snapshot
+        ):
             failures.append("REENTRY_PROHIBITED_FOR_ACCOUNT_DAY")
 
         risk = evaluate_entry(
@@ -1219,21 +1496,23 @@ class FullLiveEntryPipeline:
         quality_prefix = "a_plus" if quality_tier == "a_plus" else "normal"
         quantity_caps = [
             min(snapshot.cash, snapshot.unleveraged_buying_power) / validation.entry_limit,
-            _risk_cap(
-                self.policy,
-                equity,
-                f"{quality_prefix}_planned_risk_pct",
-                f"{quality_prefix}_planned_risk_dollars",
-            )
-            / per_share_planned,
-            _risk_cap(
-                self.policy,
-                equity,
-                "max_single_trade_stress_risk_pct",
-                "max_single_trade_stress_risk_dollars",
-            )
-            / per_share_stress,
         ]
+        if self.policy.dollar_headroom_risk:
+            quantity_caps.append(dollar_headroom_capacity(
+                self.policy, realized_pnl=snapshot.daily_realized_pnl,
+                profit_goal_crossed=latch.profit_goal_crossed,
+            ) / per_share_stress)
+        else:
+            quantity_caps.extend((
+                _risk_cap(
+                    self.policy, equity, f"{quality_prefix}_planned_risk_pct",
+                    f"{quality_prefix}_planned_risk_dollars",
+                ) / per_share_planned,
+                _risk_cap(
+                    self.policy, equity, "max_single_trade_stress_risk_pct",
+                    "max_single_trade_stress_risk_dollars",
+                ) / per_share_stress,
+            ))
         depth_multiple = self.policy.config["evidence"].get("minimum_depth_multiple")
         if depth_multiple is not None:
             multiple = decimal_value(depth_multiple, "minimum_depth_multiple")
@@ -1435,7 +1714,7 @@ class FullLiveEntryPipeline:
                    AND policy_hash=? AND config_hash=?
                  ORDER BY created_at DESC""",
             (
-                str(self.policy.config["account"]["masked_identifier"]),
+                self.policy.account_key,
                 structure.symbol,
                 structure.setup_id,
                 self.policy.policy_hash,
@@ -1459,20 +1738,119 @@ class FullLiveEntryPipeline:
                 return quantity
         return None
 
-    def _prior_symbol_plan_today(self, symbol: str, now: datetime) -> bool:
+    def _prior_symbol_plan_today(
+        self, symbol: str, now: datetime, *, broker_snapshot: AccountSnapshot
+    ) -> bool:
+        """Block reentry unless every same-day attempt was rejected unused.
+
+        A released reservation alone is insufficient: it can also describe a
+        completed trade.  Only the existing immediate zero-fill release proof
+        for a rejected placement or failed pre-submit review permits a *new*
+        plan.  Exact plan replay retains its separate idempotent path.
+        """
         zone = ZoneInfo(str(self.policy.config["sessions"]["timezone"]))
         trading_date = now.astimezone(zone).date()
         rows = self.state.rows(
-            "SELECT created_at FROM plans WHERE account_key=? AND symbol=?",
+            "SELECT plan_id,created_at FROM plans WHERE account_key=? AND symbol=?",
             (
-                str(self.policy.config["account"]["masked_identifier"]),
+                self.policy.account_key,
                 symbol,
             ),
         )
-        return any(
-            datetime.fromisoformat(str(row["created_at"])).astimezone(zone).date()
+        prior_plans = [
+            row for row in rows
+            if datetime.fromisoformat(str(row["created_at"])).astimezone(zone).date()
             == trading_date
-            for row in rows
+        ]
+        if not prior_plans:
+            return False
+        if any(
+            item.symbol == symbol and item.quantity != ZERO
+            for item in broker_snapshot.equity_positions
+        ) or any(
+            item.symbol == symbol and not item.state.terminal
+            for item in broker_snapshot.equity_orders
+        ):
+            return True
+        return any(
+            not self._rejected_attempt_proven_unused(
+                str(row["plan_id"]), broker_snapshot=broker_snapshot
+            )
+            for row in prior_plans
+        )
+
+    def _rejected_attempt_proven_unused(
+        self, plan_id: str, *, broker_snapshot: AccountSnapshot
+    ) -> bool:
+        intents = self.state.rows(
+            """SELECT i.*,r.state AS reservation_state
+                 FROM order_intents i LEFT JOIN risk_reservations r
+                   ON r.reservation_id=i.reservation_id
+                 WHERE i.plan_id=?""",
+            (plan_id,),
+        )
+        if len(intents) != 1:
+            return False
+        intent = intents[0]
+        if (
+            intent["kind"] != "ENTRY"
+            or intent["state"] not in {"REJECTED", "FAILED"}
+            or intent["reservation_state"] != "RELEASED"
+        ):
+            return False
+        proofs = self.state.rows(
+            """SELECT event_type,payload_json FROM audit_events
+                 WHERE (entity_type='order_intent' AND entity_id=? AND event_type=?)
+                    OR (entity_type='risk_reservation' AND entity_id=?
+                        AND event_type='RISK_RESERVATION_RELEASED')
+                 ORDER BY sequence""",
+            (intent["intent_id"], f"INTENT_{intent['state']}", intent["reservation_id"]),
+        )
+        by_event = {str(row["event_type"]): row["payload_json"] for row in proofs}
+        try:
+            terminal = json.loads(by_event[f"INTENT_{intent['state']}"])
+            release = json.loads(by_event["RISK_RESERVATION_RELEASED"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not isinstance(terminal, dict) or not isinstance(release, dict):
+            return False
+        rejected_unused = (
+            intent["state"] == "REJECTED" and terminal.get("known_reject") is True
+        ) or (
+            intent["state"] == "FAILED"
+            and terminal.get("phase") in {"review", "review_validation"}
+        )
+        if (
+            not rejected_unused
+            or release.get("proof") != "KNOWN_TERMINAL_ZERO_FILL"
+            or release.get("intent_state") != intent["state"]
+        ):
+            return False
+        orders = self.state.rows(
+            """SELECT o.*, (SELECT COUNT(*) FROM fills f
+                            WHERE f.broker_order_id=o.broker_order_id) AS fill_count
+                 FROM broker_orders o WHERE o.intent_id=?""",
+            (intent["intent_id"],),
+        )
+        if any(
+            row["state"] != "REJECTED"
+            or row["cumulative_filled_quantity"] != 0
+            or int(row["fill_count"]) != 0
+            for row in orders
+        ):
+            return False
+        order_ids = {str(row["broker_order_id"]) for row in orders}
+        return not any(
+            (
+                order.client_ref_id == intent["client_ref"]
+                or order.broker_order_id in order_ids
+            )
+            and (
+                order.state.value != "REJECTED"
+                or order.cumulative_filled_quantity != ZERO
+                or bool(order.fills)
+            )
+            for order in broker_snapshot.equity_orders
         )
 
     @staticmethod
@@ -1525,7 +1903,7 @@ class _InstrumentTradabilityView:
     """Adapt full instrument evidence to Massive's narrow boolean contract.
 
     The adapter deliberately catches provider failures and returns ``False``.
-    Massive cannot prove Robinhood eligibility on its own, and an exception or
+    Massive cannot prove broker eligibility on its own, and an exception or
     omitted record must therefore become a non-tradable quote rather than a
     permissive default.
     """
@@ -1555,11 +1933,653 @@ class _InstrumentTradabilityView:
                 and -1 <= age <= self.maximum_age_seconds
                 and evidence.asset_type == "stock"
                 and evidence.exchange_listed is True
-                and evidence.robinhood_tradable is True
+                and evidence.broker_tradable is True
                 and evidence.regular_hours_eligible is True
+                and evidence.eligibility_scope == "current_regular_session"
+                and evidence.eligibility_at is not None
+                and abs((current - evidence.eligibility_at).total_seconds())
+                <= self.maximum_age_seconds
             )
         except Exception:
             return False
+
+
+class PremarketAnalysisExecutor:
+    """Read-only premarket ranking over shared Massive and IBKR evidence.
+
+    This object intentionally has no broker client, state store, mutation
+    authority, order coordinator, or plan sealer.  It can subscribe/hydrate the
+    existing read-only Massive cache and request IBKR contract details, but its
+    public result is only a deterministic fact set with explicit deferred
+    execution gates.
+    """
+
+    def __init__(
+        self,
+        *,
+        source: PreparedStructureSource,
+        policy: PolicyBundle,
+        market_data: MarketDataCache,
+        instrument_evidence: InstrumentEvidenceProvider,
+        tradability: TradabilityProvider,
+        thresholds: PipelineThresholds,
+    ) -> None:
+        self.source = source
+        self.policy = policy
+        self.market_data = market_data
+        self.instrument_evidence = instrument_evidence
+        self.tradability = tradability
+        self.thresholds = thresholds
+
+    def due(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None = None,
+    ) -> PremarketAnalysisSchedule:
+        current = _aware_utc(now, "premarket analysis time")
+        sessions = self.policy.config.get("sessions", {})
+        try:
+            interval = int(sessions.get("premarket_analysis_interval_minutes"))
+            start_clock = time.fromisoformat(str(sessions.get("premarket_start")))
+        except (TypeError, ValueError):
+            interval = 0
+            start_clock = time(7, 0)
+        lane = self.policy.calendar.lane(current)
+        if (
+            sessions.get("premarket_mode") != "analysis_only"
+            or sessions.get("premarket_orders_enabled") is not False
+            or interval != 30
+        ):
+            return PremarketAnalysisSchedule(
+                lane=lane,
+                due=False,
+                interval_minutes=interval,
+                scheduled_for=None,
+                next_due_at=None,
+                reason="PREMARKET_ANALYSIS_POLICY_INVALID",
+            )
+        if lane != "premarket_attended":
+            return PremarketAnalysisSchedule(
+                lane=lane,
+                due=False,
+                interval_minutes=interval,
+                scheduled_for=None,
+                next_due_at=None,
+                reason="OUTSIDE_PREMARKET_ANALYSIS_LANE",
+            )
+        zone = ZoneInfo(str(sessions.get("timezone")))
+        local = current.astimezone(zone)
+        session = self.policy.calendar.session_times(local.date())
+        if session is None:
+            return PremarketAnalysisSchedule(
+                lane="closed",
+                due=False,
+                interval_minutes=interval,
+                scheduled_for=None,
+                next_due_at=None,
+                reason="NO_VERIFIED_TRADING_SESSION",
+            )
+        start = datetime.combine(local.date(), start_clock, zone)
+        elapsed_minutes = int((local - start).total_seconds() // 60)
+        slot_local = start + timedelta(
+            minutes=(elapsed_minutes // interval) * interval
+        )
+        slot = slot_local.astimezone(timezone.utc)
+        next_local = slot_local + timedelta(minutes=interval)
+        next_due = (
+            next_local.astimezone(timezone.utc)
+            if self.policy.calendar.lane(next_local) == "premarket_attended"
+            else None
+        )
+        last: datetime | None = None
+        if last_completed_slot is not None:
+            try:
+                last = _aware_utc(
+                    last_completed_slot, "premarket last completed slot"
+                )
+                last_local = last.astimezone(zone)
+                aligned_seconds = (last_local - start).total_seconds()
+                if (
+                    last_local.date() == local.date()
+                    and (
+                        aligned_seconds < 0
+                        or aligned_seconds % (interval * 60) != 0
+                        or last > slot
+                    )
+                ):
+                    raise ValueError("unaligned or future slot")
+                if last_local.date() != local.date():
+                    last = None
+            except (TypeError, ValueError):
+                return PremarketAnalysisSchedule(
+                    lane="premarket",
+                    due=False,
+                    interval_minutes=interval,
+                    scheduled_for=slot,
+                    next_due_at=next_due,
+                    reason="PREMARKET_LAST_COMPLETED_SLOT_INVALID",
+                )
+        due = last is None or last < slot
+        return PremarketAnalysisSchedule(
+            lane="premarket",
+            due=due,
+            interval_minutes=interval,
+            scheduled_for=slot,
+            next_due_at=next_due,
+            reason=("PREMARKET_ANALYSIS_DUE" if due else "PREMARKET_SLOT_COMPLETE"),
+        )
+
+    def analyze(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None = None,
+    ) -> PremarketAnalysisResult:
+        current = _aware_utc(now, "premarket analysis time")
+        schedule = self.due(now=current, last_completed_slot=last_completed_slot)
+        if schedule.reason in {
+            "PREMARKET_ANALYSIS_POLICY_INVALID",
+            "NO_VERIFIED_TRADING_SESSION",
+        }:
+            return self._blocked(current, schedule, (schedule.reason,))
+        if schedule.lane != "premarket":
+            return PremarketAnalysisResult(
+                status=PremarketAnalysisStatus.OUTSIDE_LANE,
+                schedule=schedule,
+                analysis_id=None,
+                observed_at=current,
+                candidates=(),
+                blockers=(schedule.reason,),
+                message="Premarket analysis is unavailable outside its analysis-only lane.",
+            )
+        if not schedule.due:
+            return PremarketAnalysisResult(
+                status=PremarketAnalysisStatus.NOT_DUE,
+                schedule=schedule,
+                analysis_id=None,
+                observed_at=current,
+                candidates=(),
+                blockers=(
+                    ()
+                    if schedule.reason == "PREMARKET_SLOT_COMPLETE"
+                    else (schedule.reason,)
+                ),
+                message="The current 30-minute premarket analysis slot is not due.",
+            )
+
+        try:
+            health = self.source.health(now=current)
+        except Exception as exc:
+            return self._blocked(
+                current,
+                schedule,
+                (f"MASSIVE_HEALTH_FAILED:{type(exc).__name__}",),
+            )
+        health_failures = tuple(str(value) for value in getattr(health, "blockers", ()))
+        if getattr(health, "service_healthy", not health_failures) is not True:
+            return self._blocked(
+                current,
+                schedule,
+                health_failures or ("MASSIVE_SERVICE_UNHEALTHY",),
+            )
+        try:
+            structures = self.source.prepared_structures(
+                now=current,
+                limit=int(self.policy.config["market_data"]["max_active_candidates"]),
+            )
+        except Exception as exc:
+            return self._blocked(
+                current,
+                schedule,
+                (f"MASSIVE_CANDIDATE_READ_FAILED:{type(exc).__name__}",),
+            )
+        unique: dict[tuple[str, str], PreparedStructure] = {}
+        for structure in structures:
+            unique[(structure.source_plan_id, structure.payload_hash)] = structure
+        structures = tuple(unique[key] for key in sorted(unique))
+        hydration_failures: tuple[str, ...] = ()
+        if structures:
+            try:
+                hydration_failures = tuple(
+                    str(value)
+                    for value in self.source.hydrate_cache(
+                        self.market_data,
+                        structures=structures,
+                        session_start=self._session_start(current),
+                        now=current,
+                        tradability=self.tradability,
+                    )
+                )
+            except Exception as exc:
+                return self._blocked(
+                    current,
+                    schedule,
+                    (f"MASSIVE_CACHE_HYDRATION_FAILED:{type(exc).__name__}",),
+                )
+
+        session_open = self._regular_session_open(current)
+        facts = [
+            self._candidate_fact(
+                structure=structure,
+                now=current,
+                session_open=session_open,
+            )
+            for structure in structures
+        ]
+        facts.sort(
+            key=lambda value: (
+                bool(value.hard_gate_failures),
+                -min(value.setup_score, value.execution_score),
+                -(value.setup_score + value.execution_score),
+                -value.shadow_ranking_score,
+                value.symbol,
+                value.source_plan_id,
+            )
+        )
+        ranked = tuple(replace(value, rank=index) for index, value in enumerate(facts, 1))
+        payload = {
+            "schema": "titan_premarket_analysis_2026-09-14_v1",
+            "scheduled_for": schedule.scheduled_for.isoformat()
+            if schedule.scheduled_for is not None
+            else None,
+            "observed_at": current.isoformat(),
+            "blockers": list(_unique(hydration_failures)),
+            "candidates": [self._candidate_payload(value) for value in ranked],
+            "execution_authority": False,
+            "approved_to_buy": False,
+        }
+        return PremarketAnalysisResult(
+            status=PremarketAnalysisStatus.COMPLETED,
+            schedule=schedule,
+            analysis_id=_event_id("premarket-analysis", payload),
+            observed_at=current,
+            candidates=ranked,
+            blockers=_unique(hydration_failures),
+            message=(
+                "Analysis-only premarket ranking completed; no candidate is "
+                "approved to buy and no order action is available from this result."
+            ),
+        )
+
+    def _candidate_fact(
+        self,
+        *,
+        structure: PreparedStructure,
+        now: datetime,
+        session_open: datetime,
+    ) -> PremarketCandidateFact:
+        failures: list[str] = []
+        try:
+            SetupID(structure.setup_id)
+        except ValueError:
+            failures.append("UNKNOWN_SETUP_ID")
+        structure_age = (
+            now - _aware_utc(structure.observed_at, "structure observed_at")
+        ).total_seconds()
+        if structure_age < -1 or structure_age > int(
+            self.policy.config["market_data"]["candidate_max_age_seconds"]
+        ):
+            failures.append("SHADOW_STRUCTURE_STALE_OR_FUTURE")
+        if structure.entry_limit <= Decimal("5"):
+            failures.append("PRICE_NOT_STRICTLY_ABOVE_5")
+        if structure.structural_stop <= 0 or structure.structural_stop >= structure.entry_limit:
+            failures.append("SHADOW_STRUCTURE_GEOMETRY_INVALID")
+        if not structure.targets or any(
+            target <= structure.entry_limit for target in structure.targets
+        ):
+            failures.append("SHADOW_TARGET_GEOMETRY_INVALID")
+        if (
+            structure.payload.get("trade_authority") is not False
+            or structure.payload.get("broker_authority") is not False
+            or structure.payload.get("book_mode") != "SHADOW"
+        ):
+            failures.append("SHADOW_SOURCE_AUTHORITY_BOUNDARY_UNPROVEN")
+
+        instrument: InstrumentEvidence | None = None
+        analysis_reader = getattr(
+            self.instrument_evidence, "get_premarket_analysis_evidence", None
+        )
+        if not callable(analysis_reader):
+            failures.append("IBKR_UPCOMING_SESSION_EVIDENCE_UNSUPPORTED")
+        else:
+            try:
+                instrument = analysis_reader(
+                    structure.symbol,
+                    now=now,
+                    regular_session_open=session_open,
+                )
+            except Exception as exc:
+                failures.append(
+                    f"IBKR_UPCOMING_SESSION_EVIDENCE_FAILED:{type(exc).__name__}"
+                )
+        if instrument is None:
+            failures.append("IBKR_UPCOMING_SESSION_EVIDENCE_MISSING")
+        else:
+            instrument_age = (
+                now
+                - _aware_utc(instrument.observed_at, "instrument observed_at")
+            ).total_seconds()
+            if instrument_age < -1 or instrument_age > int(
+                self.policy.config["evidence"]["quote_max_age_seconds"]
+            ):
+                failures.append("INSTRUMENT_EVIDENCE_STALE_OR_FUTURE")
+            if (
+                instrument.source != "ibkr:tws-contract-details"
+                or not instrument.evidence_id
+                or not instrument.instrument_id
+            ):
+                failures.append("IBKR_INSTRUMENT_PROVENANCE_INVALID")
+            if instrument.symbol != structure.symbol:
+                failures.append("INSTRUMENT_EVIDENCE_SYMBOL_MISMATCH")
+            if (
+                instrument.asset_type != "stock"
+                or instrument.exchange_listed is not True
+                or instrument.broker_tradable is not True
+                or instrument.regular_hours_eligible is not True
+            ):
+                failures.append("IBKR_UPCOMING_REGULAR_SESSION_NOT_ELIGIBLE")
+            if (
+                instrument.eligibility_scope
+                != "upcoming_regular_session_analysis"
+                or instrument.eligibility_at != session_open
+            ):
+                failures.append("IBKR_UPCOMING_SESSION_SCOPE_MISMATCH")
+
+        quote, bars, _watermark, degradation = self.market_data.symbol_state(
+            structure.symbol
+        )
+        completed = tuple(item for item in bars if item.end_at <= now)
+        latest_bar = max(completed, key=lambda item: item.end_at, default=None)
+        session_start = self._session_start(now)
+        session_volume = sum(
+            item.volume
+            for item in completed
+            if session_start <= item.end_at <= now
+        )
+        if degradation is not None:
+            failures.append(degradation)
+        if latest_bar is None:
+            failures.append("COMPLETED_MINUTE_BAR_MISSING")
+        else:
+            if (
+                latest_bar.start_at.second != 0
+                or latest_bar.start_at.microsecond != 0
+                or latest_bar.end_at.second != 0
+                or latest_bar.end_at.microsecond != 0
+                or latest_bar.end_at - latest_bar.start_at != timedelta(minutes=1)
+            ):
+                failures.append("COMPLETED_MINUTE_BAR_INVALID")
+            if (now - latest_bar.end_at).total_seconds() > int(
+                self.policy.config["evidence"]["completed_bar_max_age_seconds"]
+            ):
+                failures.append("COMPLETED_MINUTE_BAR_STALE")
+        if session_volume < int(
+            self.policy.config["scope"]["minimum_session_volume_inclusive"]
+        ):
+            failures.append("VOLUME_BELOW_750000")
+
+        spread: Decimal | None = None
+        if quote is None:
+            failures.append("QUOTE_MISSING")
+        else:
+            oldest_age = (now - quote.oldest_venue_at).total_seconds()
+            newest_age = (now - quote.newest_venue_at).total_seconds()
+            if newest_age < -1:
+                failures.append("QUOTE_FUTURE_DATED")
+            if oldest_age > int(
+                self.policy.config["evidence"]["quote_max_age_seconds"]
+            ):
+                failures.append("QUOTE_STALE")
+            if quote.bid > quote.ask:
+                failures.append("CROSSED_QUOTE")
+            if quote.ask <= Decimal("5"):
+                failures.append("PRICE_NOT_STRICTLY_ABOVE_5")
+            if quote.halted:
+                failures.append("MARKET_HALTED")
+            if quote.ask > structure.entry_limit:
+                failures.append("ACCEPTABLE_EXTENSION_FAILED")
+            spread = quote.spread_bps
+            max_spread = self.policy.config["evidence"].get("max_spread_bps")
+            if max_spread is None:
+                failures.append("NUMERIC_SPREAD_GATE_UNRESOLVED")
+            elif spread > decimal_value(max_spread, "max_spread_bps"):
+                failures.append("SPREAD_TOO_WIDE")
+
+        risk = structure.entry_limit - structure.structural_stop
+        reward = (
+            min(structure.targets) - structure.entry_limit
+            if structure.targets
+            else Decimal("-1")
+        )
+        if risk <= 0 or reward < risk * Decimal("2"):
+            failures.append("FAVORABLE_REWARD_RISK_FAILED")
+
+        setup_components = self._setup_components(
+            structure=structure,
+            latest_bar=latest_bar,
+            session_volume=session_volume,
+        )
+        execution_components = self._execution_components(
+            quote=quote,
+            latest_bar=latest_bar,
+        )
+        setup = score_setup(setup_components)
+        execution = score_execution(execution_components, instrument_kind="equity")
+        if self.thresholds.score_policy == "threshold_gated":
+            assert self.thresholds.minimum_setup_score is not None
+            assert self.thresholds.minimum_execution_score is not None
+            if setup.score < self.thresholds.minimum_setup_score:
+                failures.append("SETUP_SCORE_BELOW_MINIMUM")
+            if execution.score < self.thresholds.minimum_execution_score:
+                failures.append("EXECUTION_SCORE_BELOW_MINIMUM")
+        deferred = [
+            "CURRENT_SESSION_ENTRY_ELIGIBILITY_NOT_EVALUATED",
+            "ACCOUNT_CAPACITY_NOT_EVALUATED",
+            "ORDER_SIZED_DISPLAYED_DEPTH_NOT_EVALUATED",
+            "FRESH_BROKER_SNAPSHOT_NOT_EVALUATED",
+        ]
+        if self.policy.config["evidence"].get("minimum_depth_multiple") is None:
+            failures.append("NUMERIC_DEPTH_GATE_UNRESOLVED")
+        return PremarketCandidateFact(
+            rank=0,
+            symbol=structure.symbol,
+            source_plan_id=structure.source_plan_id,
+            source_observed_at=_aware_utc(
+                structure.observed_at, "structure observed_at"
+            ),
+            shadow_ranking_score=structure.ranking_score,
+            setup_score=float(setup.score),
+            execution_score=float(execution.score),
+            instrument_evidence_id=(instrument.evidence_id if instrument else None),
+            instrument_id=(instrument.instrument_id if instrument else None),
+            instrument_source=(instrument.source if instrument else None),
+            instrument_observed_at=(instrument.observed_at if instrument else None),
+            regular_session_eligibility_at=(
+                instrument.eligibility_at if instrument else None
+            ),
+            quote_bid=(quote.bid if quote else None),
+            quote_ask=(quote.ask if quote else None),
+            quote_bid_size=(quote.bid_size if quote else None),
+            quote_ask_size=(quote.ask_size if quote else None),
+            quote_observed_at=(quote.observed_at if quote else None),
+            spread_bps=spread,
+            latest_completed_bar_end=(latest_bar.end_at if latest_bar else None),
+            session_volume=session_volume,
+            structural_invalidation=structure.structural_stop,
+            targets=structure.targets,
+            hard_gate_failures=_unique(failures),
+            deferred_execution_gates=tuple(deferred),
+        )
+
+    def _setup_components(
+        self,
+        *,
+        structure: PreparedStructure,
+        latest_bar: CompletedBar | None,
+        session_volume: int,
+    ) -> Mapping[str, float]:
+        minimum_volume = int(
+            self.policy.config["scope"]["minimum_session_volume_inclusive"]
+        )
+        geometry = bool(
+            latest_bar is not None
+            and structure.structural_stop < structure.entry_limit
+            and all(target > structure.entry_limit for target in structure.targets)
+        )
+        return {
+            "liquidity": min(
+                100.0,
+                (float(session_volume) / max(1.0, float(minimum_volume))) * 100.0,
+            ),
+            "relative_volume": self._explicit_score(
+                structure.payload, "relative_volume_score"
+            ),
+            "technical_structure_vwap": 100.0 if geometry else 0.0,
+            "catalyst_context": self._explicit_score(
+                structure.payload, "catalyst_context_score"
+            ),
+            "sector_market_sympathy": self._explicit_score(
+                structure.payload, "sector_market_sympathy_score"
+            ),
+            "prior_90_day_behavior": self._explicit_score(
+                structure.payload, "prior_90_day_behavior_score"
+            ),
+            "gap_behavior": self._explicit_score(
+                structure.payload, "gap_behavior_score"
+            ),
+            "other_massive_data": 100.0 if latest_bar is not None else 0.0,
+        }
+
+    def _execution_components(
+        self,
+        *,
+        quote: Quote | None,
+        latest_bar: CompletedBar | None,
+    ) -> Mapping[str, float]:
+        max_spread_raw = self.policy.config["evidence"].get("max_spread_bps")
+        max_spread = (
+            decimal_value(max_spread_raw, "max_spread_bps")
+            if max_spread_raw is not None
+            else None
+        )
+        spread_score = 0.0
+        if quote is not None and max_spread is not None and max_spread > 0:
+            spread_score = max(
+                0.0,
+                100.0 * (1.0 - float(quote.spread_bps / max_spread)),
+            )
+        volatility = 0.0
+        if latest_bar is not None:
+            volatility = max(
+                0.0,
+                100.0
+                * (
+                    1.0
+                    - float(
+                        (latest_bar.high - latest_bar.low)
+                        / max(latest_bar.close, Decimal("0.01"))
+                    )
+                ),
+            )
+        return {
+            "spread": spread_score,
+            "displayed_depth": (
+                min(100.0, float(min(quote.bid_size, quote.ask_size)))
+                if quote is not None
+                else 0.0
+            ),
+            "projected_slippage": spread_score,
+            "volatility": volatility,
+            "order_size_liquidity": 0.0,
+            "halt_risk": 0.0 if quote is None or quote.halted else 100.0,
+        }
+
+    @staticmethod
+    def _explicit_score(payload: Mapping[str, Any], name: str) -> float:
+        raw = payload.get(name)
+        if isinstance(raw, bool):
+            return 100.0 if raw else 0.0
+        if isinstance(raw, (int, float, Decimal)):
+            value = float(raw)
+            if math.isfinite(value):
+                return max(0.0, min(100.0, value))
+        return 0.0
+
+    def _session_start(self, now: datetime) -> datetime:
+        zone = ZoneInfo(str(self.policy.config["sessions"]["timezone"]))
+        local = now.astimezone(zone)
+        start = time.fromisoformat(
+            str(self.policy.config["sessions"]["premarket_start"])
+        )
+        return datetime.combine(local.date(), start, zone).astimezone(timezone.utc)
+
+    def _regular_session_open(self, now: datetime) -> datetime:
+        zone = ZoneInfo(str(self.policy.config["sessions"]["timezone"]))
+        session = self.policy.calendar.session_times(now.astimezone(zone).date())
+        if session is None:
+            raise ValueError("verified regular session is missing")
+        return session.open_at.astimezone(timezone.utc)
+
+    @staticmethod
+    def _candidate_payload(value: PremarketCandidateFact) -> Mapping[str, Any]:
+        return {
+            "rank": value.rank,
+            "symbol": value.symbol,
+            "source_plan_id": value.source_plan_id,
+            "source_observed_at": value.source_observed_at.isoformat(),
+            "shadow_ranking_score": str(value.shadow_ranking_score),
+            "setup_score": value.setup_score,
+            "execution_score": value.execution_score,
+            "instrument_evidence_id": value.instrument_evidence_id,
+            "instrument_id": value.instrument_id,
+            "instrument_source": value.instrument_source,
+            "instrument_observed_at": value.instrument_observed_at.isoformat()
+            if value.instrument_observed_at is not None
+            else None,
+            "regular_session_eligibility_at": value.regular_session_eligibility_at.isoformat()
+            if value.regular_session_eligibility_at is not None
+            else None,
+            "quote_bid": str(value.quote_bid) if value.quote_bid is not None else None,
+            "quote_ask": str(value.quote_ask) if value.quote_ask is not None else None,
+            "quote_bid_size": value.quote_bid_size,
+            "quote_ask_size": value.quote_ask_size,
+            "quote_observed_at": value.quote_observed_at.isoformat()
+            if value.quote_observed_at is not None
+            else None,
+            "spread_bps": str(value.spread_bps)
+            if value.spread_bps is not None
+            else None,
+            "latest_completed_bar_end": value.latest_completed_bar_end.isoformat()
+            if value.latest_completed_bar_end is not None
+            else None,
+            "session_volume": value.session_volume,
+            "structural_invalidation": str(value.structural_invalidation),
+            "targets": [str(target) for target in value.targets],
+            "hard_gate_failures": list(value.hard_gate_failures),
+            "deferred_execution_gates": list(value.deferred_execution_gates),
+            "execution_authority": False,
+            "approved_to_buy": False,
+        }
+
+    @staticmethod
+    def _blocked(
+        now: datetime,
+        schedule: PremarketAnalysisSchedule,
+        blockers: Sequence[str],
+    ) -> PremarketAnalysisResult:
+        return PremarketAnalysisResult(
+            status=PremarketAnalysisStatus.BLOCKED,
+            schedule=schedule,
+            analysis_id=None,
+            observed_at=now,
+            candidates=(),
+            blockers=_unique(tuple(blockers)),
+            message=(
+                "Premarket analysis was blocked by missing read-only evidence; "
+                "no order action is available."
+            ),
+        )
 
 
 class FullLiveDiscoveryExecutor:
@@ -1590,6 +2610,69 @@ class FullLiveDiscoveryExecutor:
                 self.policy.config["evidence"]["quote_max_age_seconds"]
             ),
         )
+        self._premarket_analysis = PremarketAnalysisExecutor(
+            source=source,
+            policy=self.policy,
+            market_data=self.market_data,
+            instrument_evidence=pipeline.instrument_evidence,
+            tradability=self._tradability,
+            thresholds=pipeline.thresholds,
+        )
+
+    def premarket_analysis_due(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None = None,
+    ) -> PremarketAnalysisSchedule:
+        """Return the exact caller-owned 30-minute scheduling decision."""
+
+        return self._premarket_analysis.due(
+            now=now,
+            last_completed_slot=last_completed_slot,
+        )
+
+    def analyze(
+        self,
+        *,
+        now: datetime,
+        last_completed_slot: datetime | None = None,
+    ) -> PremarketAnalysisResult:
+        """Run one due premarket analysis slot without any broker mutation API."""
+
+        return self._premarket_analysis.analyze(
+            now=now,
+            last_completed_slot=last_completed_slot,
+        )
+
+    def target_evidence_snapshot(self, symbol: str, *, now: datetime) -> object:
+        """Bootstrap and sample held-position evidence without discovery.
+
+        This method is intentionally read-only and is callable while entry
+        discovery is blocked.  The first call after a restart may return a
+        pending readiness snapshot while the bounded REST backfill runs; the
+        continuously owned stream then keeps the symbol available for later
+        target-exit ticks.
+        """
+
+        current = _aware_utc(now, "target evidence time")
+        normalized = str(symbol).strip().upper()
+        if not normalized:
+            raise ValueError("target evidence symbol is required")
+        failures = self.source.ensure_risk_symbols(
+            self.market_data,
+            symbols=(normalized,),
+            session_start=self._session_start(current),
+            now=current,
+            tradability=self._tradability,
+        )
+        if failures:
+            raise RuntimeError(
+                "TARGET_EVIDENCE_HYDRATION_BLOCKED:" + ",".join(
+                    _unique(tuple(str(item) for item in failures))
+                )
+            )
+        return self.source.evidence_snapshot(normalized, now=current)
 
     def final_entry_evidence_failures(
         self, *, plan: object, request: object, now: datetime
@@ -1640,7 +2723,7 @@ class FullLiveDiscoveryExecutor:
             plan.symbol, now=current
         )
         if instrument is None:
-            failures.append("FINAL_ROBINHOOD_TRADABILITY_EVIDENCE_MISSING")
+            failures.append("FINAL_BROKER_TRADABILITY_EVIDENCE_MISSING")
         else:
             age = (current - _aware_utc(
                 instrument.observed_at, "final instrument observed_at"
@@ -1659,10 +2742,14 @@ class FullLiveDiscoveryExecutor:
             if (
                 instrument.asset_type != "stock"
                 or instrument.exchange_listed is not True
-                or instrument.robinhood_tradable is not True
+                or instrument.broker_tradable is not True
                 or instrument.regular_hours_eligible is not True
+                or instrument.eligibility_scope != "current_regular_session"
+                or instrument.eligibility_at is None
+                or abs((current - instrument.eligibility_at).total_seconds())
+                > int(self.policy.config["evidence"]["quote_max_age_seconds"])
             ):
-                failures.append("FINAL_ROBINHOOD_TRADABILITY_DENIED")
+                failures.append("FINAL_BROKER_TRADABILITY_DENIED")
         return _unique(failures)
 
     def execute(
@@ -1786,7 +2873,7 @@ class FullLiveDiscoveryExecutor:
         rows = self.state.rows(
             "SELECT * FROM session_latches WHERE account_key=? AND trading_date=?",
             (
-                str(self.policy.config["account"]["masked_identifier"]),
+                self.policy.account_key,
                 trading_date.isoformat(),
             ),
         )
@@ -1858,6 +2945,11 @@ __all__ = [
     "PipelineRunResult",
     "PipelineStatus",
     "PipelineThresholds",
+    "PremarketAnalysisExecutor",
+    "PremarketAnalysisResult",
+    "PremarketAnalysisSchedule",
+    "PremarketAnalysisStatus",
+    "PremarketCandidateFact",
     "PreparedStructureSource",
     "QualityEvidenceProvider",
     "REQUIRED_HARD_GATE_FACTS",

@@ -320,6 +320,51 @@ class RuntimeStateTests(unittest.TestCase):
         self.assertEqual(status["mode"], "PAUSED")
         self.assertEqual(status["authority_enabled"], 0)
 
+    def test_activation_rejects_readiness_without_explicit_authority_mode(self) -> None:
+        self.initialize()
+        with self.assertRaisesRegex(
+            StateConflict, "execution authority mode is missing"
+        ):
+            stage_canonical_activation(
+                self.store,
+                created_at=self.now,
+                expires_at=self.now + timedelta(minutes=5),
+                readiness_overrides={
+                    "execution_authority_mode": None,
+                    "attended_mutation_supported": None,
+                },
+            )
+
+    def test_state_boundary_rejects_unproven_command_lane(self) -> None:
+        self.initialize()
+        with self.assertRaisesRegex(StateConflict, "failed hard gate"):
+            stage_canonical_activation(
+                self.store,
+                created_at=self.now,
+                expires_at=self.now + timedelta(minutes=5),
+                readiness_overrides={
+                    "broker_command_next_valid_id_received": False,
+                },
+            )
+
+        status = self.store.runtime_status()
+        self.assertEqual(status["mode"], "PAUSED")
+        self.assertEqual(status["authority_enabled"], 0)
+
+    def test_state_boundary_rejects_missing_current_high_water_receipt(self) -> None:
+        self.initialize()
+        with self.assertRaisesRegex(StateConflict, "incomplete or blocked"):
+            stage_canonical_activation(
+                self.store,
+                created_at=self.now,
+                expires_at=self.now + timedelta(minutes=5),
+                readiness_overrides={"risk_high_water_receipt_hash": None},
+            )
+
+        status = self.store.runtime_status()
+        self.assertEqual(status["mode"], "PAUSED")
+        self.assertEqual(status["authority_enabled"], 0)
+
     def test_activation_requires_exact_phrase_and_active_transition_requires_new_reconciliation(self) -> None:
         self.initialize()
         record, owner = stage_canonical_activation(

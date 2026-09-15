@@ -21,8 +21,9 @@ The owner may approve this version once or return one edited replacement.
   through 09:35; regular-hours entries stop at 15:30; exchange-calendar-aware
   closeout and broker-confirmed flatness remain mandatory.
 - The irreversible broker-confirmed realized-P&L new-entry lock remains the
-  smaller of 6% of usable equity and $100. The +$150 goal is aspirational; after
-  its first confirmed crossing, new risk must preserve at least +$125.
+  existing -$100 boundary. The +$150 goal is aspirational; after its first
+  confirmed crossing, new risk must preserve at least +$125. The 6% overlay
+  proposed below is staged, not part of this established baseline.
 - Exact review/confirmation requirements advertised by the selected broker and
   every stronger existing Titan confirmation requirement remain mandatory.
   Unknown submissions are never automatically retried; exits never overlap;

@@ -44,9 +44,32 @@
     "durable_consent_status_required": ["production", "internal"],
     "send_probe_authorized": false
   },
+  "ibkr_gmail": {
+    "implementation_id": "titan.gmail_api.desktop_oauth.keychain_refresh.v1",
+    "enabled": false,
+    "credential_backend": "macos_keychain",
+    "desktop_client_service": "titan-full-live-ibkr-ending-3103-gmail-desktop-client",
+    "refresh_token_service": "titan-full-live-ibkr-ending-3103-gmail-refresh-token",
+    "consent_status_service": "titan-full-live-ibkr-ending-3103-gmail-consent-status",
+    "sender_service": "titan-full-live-ibkr-ending-3103-gmail-sender",
+    "destination_service": "titan-full-live-ibkr-ending-3103-gmail-destination",
+    "credential_account": "ibkr-live-ending-3103",
+    "account_key": "ibkr-live-ending-3103",
+    "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+    "durable_consent_status_required": ["production", "internal"],
+    "send_probe_authorized": false
+  },
   "control": {
     "credential_backend": "macos_keychain",
     "authentication_key_service": "titan-full-live-control-authentication-key",
     "credential_account": "ending-7153"
+  },
+  "ibkr_control": {
+    "implementation_id": "titan.hmac_control.ibkr.keychain.v1",
+    "credential_backend": "macos_keychain",
+    "authentication_key_service": "titan-full-live-ibkr-ending-3103-control-authentication-key",
+    "credential_account": "ibkr-live-ending-3103",
+    "account_key": "ibkr-live-ending-3103",
+    "authorization_binding_source": "signed_execution.production_authorization_binding_id"
   }
 }

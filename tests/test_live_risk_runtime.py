@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import copy
+from dataclasses import replace
 from datetime import datetime, timedelta
+from decimal import Decimal
 import math
 from pathlib import Path
 import unittest
 from zoneinfo import ZoneInfo
 
 from titan_brain.live.plans import ExpiringPlan
-from titan_brain.live.policy import PolicyBundle
+from titan_brain.live.policy import PolicyBundle, sha256_json
 from titan_brain.live.risk_runtime import (
+    AUTONOMOUS_ENTRY_FIXED_ORDER_LEGS,
     AccountRiskSnapshot,
     RiskExposure,
     SessionLatch,
+    entry_lifecycle_fee_reserve,
     evaluate_entry,
     update_session_latch,
 )
@@ -25,6 +30,17 @@ NOW = datetime(2026, 9, 8, 10, 0, tzinfo=ET)
 class RiskRuntimeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.policy = PolicyBundle.load(ROOT)
+
+    def policy_with_commission_reserve(self, amount: str = "1.00") -> PolicyBundle:
+        config = copy.deepcopy(self.policy.config)
+        config["execution"][
+            "minimum_commission_reserve_per_order_dollars"
+        ] = amount
+        return replace(
+            self.policy,
+            config=config,
+            config_hash=sha256_json(config),
+        )
 
     def plan(self, **overrides) -> ExpiringPlan:
         raw = dict(
@@ -85,6 +101,153 @@ class RiskRuntimeTests(unittest.TestCase):
         self.assertEqual(str(decision.proposal_planned_risk), "1.00")
         self.assertEqual(str(decision.remaining_buying_power), "976")
 
+    def test_policy_fee_reserve_covers_one_share_fills_and_contingency(self) -> None:
+        policy = self.policy_with_commission_reserve("1.00")
+        plan = self.plan(
+            policy_hash=policy.policy_hash,
+            config_hash=policy.config_hash,
+        )
+        legacy_plan = self.plan()
+        legacy = evaluate_entry(
+            policy=self.policy,
+            snapshot=self.snapshot(),
+            plan=legacy_plan,
+            latch=SessionLatch(NOW.date()),
+            now=NOW,
+        )
+
+        decision = evaluate_entry(
+            policy=policy,
+            snapshot=self.snapshot(),
+            plan=plan,
+            latch=SessionLatch(NOW.date()),
+            now=NOW,
+        )
+
+        self.assertEqual(AUTONOMOUS_ENTRY_FIXED_ORDER_LEGS, 2)
+        self.assertEqual(
+            entry_lifecycle_fee_reserve(policy, quantity=plan.quantity),
+            Decimal("4.00"),
+        )
+        self.assertEqual(
+            entry_lifecycle_fee_reserve(policy, quantity=7),
+            Decimal("9.00"),
+        )
+        self.assertEqual(decision.proposal_planned_risk, Decimal("1.00"))
+        self.assertEqual(decision.proposal_reserve, Decimal("0.10"))
+        self.assertEqual(decision.proposal_stress_risk, Decimal("5.10"))
+        self.assertEqual(decision.remaining_buying_power, Decimal("972.00"))
+        self.assertEqual(decision.remaining_cash_headroom, Decimal("972.00"))
+        self.assertEqual(
+            decision.remaining_daily_headroom,
+            legacy.remaining_daily_headroom - Decimal("4.00"),
+        )
+        self.assertEqual(
+            decision.remaining_portfolio_headroom,
+            legacy.remaining_portfolio_headroom - Decimal("4.00"),
+        )
+        self.assertEqual(
+            decision.remaining_stress_headroom,
+            legacy.remaining_stress_headroom - Decimal("4.00"),
+        )
+
+    def test_fee_reserve_is_in_cash_and_post_goal_headroom(self) -> None:
+        policy = self.policy_with_commission_reserve("1.00")
+        plan = self.plan(
+            policy_hash=policy.policy_hash,
+            config_hash=policy.config_hash,
+        )
+        cash = evaluate_entry(
+            policy=policy,
+            snapshot=self.snapshot(
+                unleveraged_buying_power="25.00",
+                cash="25.00",
+            ),
+            plan=plan,
+            latch=SessionLatch(NOW.date()),
+            now=NOW,
+        )
+        self.assertIn("INSUFFICIENT_UNLEVERAGED_FUNDS", cash.failures)
+
+        goal = SessionLatch(
+            NOW.date(),
+            profit_goal_crossed=True,
+            first_profit_crossed_at=NOW - timedelta(minutes=1),
+            highest_realized_pnl=Decimal("150"),
+        )
+        post_goal = evaluate_entry(
+            policy=policy,
+            snapshot=self.snapshot(daily_realized_pnl="127.00"),
+            plan=plan,
+            latch=goal,
+            now=NOW,
+        )
+        self.assertIn("POST_GOAL_125_FLOOR_NOT_PRESERVED", post_goal.failures)
+
+    def test_attended_legacy_policy_without_fee_field_remains_zero(self) -> None:
+        self.assertNotIn(
+            "minimum_commission_reserve_per_order_dollars",
+            self.policy.config["execution"],
+        )
+        self.assertEqual(
+            entry_lifecycle_fee_reserve(self.policy, quantity=2), Decimal("0")
+        )
+
+    def test_existing_reservation_fee_and_notional_reduce_all_headroom(self) -> None:
+        policy = self.policy_with_commission_reserve("1.00")
+        plan = self.plan(
+            policy_hash=policy.policy_hash,
+            config_hash=policy.config_hash,
+        )
+        existing = RiskExposure.build(
+            reference="reservation:existing",
+            category="pending",
+            planned_risk="2.00",
+            stress_risk="8.00",
+            execution_reserve="1.00",
+            fee_reserve="5.00",
+            notional="50.00",
+            protected=True,
+        )
+        latch = SessionLatch(
+            NOW.date(),
+            profit_goal_crossed=True,
+            first_profit_crossed_at=NOW - timedelta(minutes=1),
+            highest_realized_pnl=Decimal("150"),
+        )
+        decision = evaluate_entry(
+            policy=policy,
+            snapshot=self.snapshot(
+                exposures=(existing,),
+                unleveraged_buying_power="80.00",
+                cash="80.00",
+                daily_realized_pnl="134.00",
+            ),
+            plan=plan,
+            latch=latch,
+            now=NOW,
+        )
+
+        self.assertEqual(decision.remaining_daily_headroom, Decimal("46.90"))
+        self.assertEqual(decision.remaining_portfolio_headroom, Decimal("36.90"))
+        self.assertEqual(decision.remaining_stress_headroom, Decimal("36.90"))
+        self.assertEqual(decision.remaining_buying_power, Decimal("-3.00"))
+        self.assertEqual(decision.remaining_cash_headroom, Decimal("-3.00"))
+        self.assertIn("INSUFFICIENT_UNLEVERAGED_FUNDS", decision.failures)
+        self.assertIn("POST_GOAL_125_FLOOR_NOT_PRESERVED", decision.failures)
+
+    def test_plan_policy_binding_mismatch_denies_risk_decision(self) -> None:
+        plan = replace(self.plan(), config_hash="f" * 64)
+        decision = evaluate_entry(
+            policy=self.policy,
+            snapshot=self.snapshot(),
+            plan=plan,
+            latch=SessionLatch(NOW.date()),
+            now=NOW,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertIn("PLAN_POLICY_BINDING_MISMATCH", decision.failures)
+
     def test_unknown_unprotected_and_incomplete_reconciliation_block(self) -> None:
         unknown = RiskExposure.build(
             reference="intent-unknown",
@@ -92,6 +255,7 @@ class RiskRuntimeTests(unittest.TestCase):
             planned_risk="3",
             stress_risk="4",
             execution_reserve="1",
+            fee_reserve="0",
             notional="50",
             protected=False,
         )

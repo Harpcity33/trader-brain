@@ -18,6 +18,7 @@ from uuid import UUID
 
 from ..models import BrokerOrderState
 from ..money import finite_decimal, positive_decimal, whole_shares
+from ..risk_evidence_binding import risk_high_water_receipt_hash
 
 
 _ACCOUNT_MASK = re.compile(r"^(?:•{4}|\*{4})[0-9]{4}$")
@@ -108,6 +109,7 @@ class OrderFamilyCoverageStatus(str, Enum):
 class ClientRefRecoverySource(str, Enum):
     DEDICATED_LOOKUP = "dedicated_lookup"
     EXHAUSTIVE_ORDER_HISTORY = "exhaustive_order_history"
+    CURRENT_DAY_ORDER_ROSTER = "current_day_order_roster"
     UNAVAILABLE = "unavailable"
 
 
@@ -433,6 +435,9 @@ class FillSnapshot:
     price: Decimal
     executed_at: datetime
     fee: Decimal = Decimal("0")
+    broker_perm_id: int | None = None
+    provider_commission: Decimal | None = None
+    provider_commission_currency: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fill_id", _required(self.fill_id, "fill_id"))
@@ -440,6 +445,34 @@ class FillSnapshot:
         object.__setattr__(self, "price", positive_decimal(self.price, field="price"))
         object.__setattr__(self, "fee", _nonnegative(self.fee, "fee"))
         object.__setattr__(self, "executed_at", _utc(self.executed_at, "executed_at"))
+        if self.broker_perm_id is not None and (
+            isinstance(self.broker_perm_id, bool)
+            or not isinstance(self.broker_perm_id, int)
+            or self.broker_perm_id <= 0
+        ):
+            raise ValueError("broker_perm_id must be a positive integer when supplied")
+        commission_present = self.provider_commission is not None
+        currency_present = self.provider_commission_currency is not None
+        if commission_present != currency_present:
+            raise ValueError(
+                "provider commission and currency must be supplied together"
+            )
+        if commission_present:
+            object.__setattr__(
+                self,
+                "provider_commission",
+                finite_decimal(
+                    self.provider_commission,
+                    field="provider_commission",
+                ),
+            )
+            currency = _required(
+                self.provider_commission_currency,
+                "provider_commission_currency",
+            ).upper()
+            if not re.fullmatch(r"[A-Z]{3}", currency):
+                raise ValueError("provider commission currency must be three letters")
+            object.__setattr__(self, "provider_commission_currency", currency)
 
 
 @dataclass(frozen=True)
@@ -460,6 +493,7 @@ class OrderSnapshot:
     stop_price: Decimal | None = None
     client_ref_id: str | None = None
     fills: tuple[FillSnapshot, ...] = ()
+    broker_perm_id: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "broker_order_id", _required(self.broker_order_id, "broker_order_id"))
@@ -534,6 +568,19 @@ class OrderSnapshot:
         fill_total = sum((fill.quantity for fill in self.fills), Decimal("0"))
         if fill_total != cumulative:
             raise ValueError("fill quantities must equal cumulative_filled_quantity")
+        if self.broker_perm_id is not None and (
+            isinstance(self.broker_perm_id, bool)
+            or not isinstance(self.broker_perm_id, int)
+            or self.broker_perm_id <= 0
+        ):
+            raise ValueError("broker_perm_id must be a positive integer when supplied")
+        if any(
+            fill.broker_perm_id is not None
+            and self.broker_perm_id is not None
+            and fill.broker_perm_id != self.broker_perm_id
+            for fill in self.fills
+        ):
+            raise ValueError("fill permanent identity must match its order")
 
 
 @dataclass(frozen=True)
@@ -564,6 +611,11 @@ class AccountSnapshot:
     risk_evidence_authoritative: bool = False
     risk_evidence_source: str | None = None
     risk_evidence_as_of: datetime | None = None
+    risk_baseline_identity_hash: str | None = None
+    risk_baseline_receipt_hash: str | None = None
+    risk_high_water_identity_hash: str | None = None
+    risk_high_water_lineage_hash: str | None = None
+    risk_high_water_receipt_hash: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "account_masked", _account_mask(self.account_masked))
@@ -643,6 +695,29 @@ class AccountSnapshot:
             raise ValueError(
                 "authoritative risk evidence requires source and as-of provenance"
             )
+        risk_receipts = (
+            self.risk_baseline_identity_hash,
+            self.risk_baseline_receipt_hash,
+            self.risk_high_water_identity_hash,
+            self.risk_high_water_lineage_hash,
+            self.risk_high_water_receipt_hash,
+        )
+        if any(value is not None for value in risk_receipts) and any(
+            value is None for value in risk_receipts
+        ):
+            raise ValueError(
+                "authenticated entry-risk identity and receipt hashes must be populated together"
+            )
+        for name in (
+            "risk_baseline_identity_hash",
+            "risk_baseline_receipt_hash",
+            "risk_high_water_identity_hash",
+            "risk_high_water_lineage_hash",
+            "risk_high_water_receipt_hash",
+        ):
+            value = getattr(self, name)
+            if value is not None and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise ValueError(f"{name} must be lowercase SHA-256 or null")
 
     @property
     def whole_broker_reconciled(self) -> bool:
@@ -677,6 +752,27 @@ class AccountSnapshot:
                 self.weekly_realized_pnl is not None,
                 self.peak_equity_complete,
                 self.peak_equity is not None,
+            )
+        )
+
+    @property
+    def authenticated_entry_risk_evidence_ready(self) -> bool:
+        """Require both complete risk facts and their authenticated identities."""
+
+        return bool(
+            self.entry_risk_evidence_ready
+            and self.risk_baseline_identity_hash is not None
+            and self.risk_baseline_receipt_hash is not None
+            and self.risk_high_water_identity_hash is not None
+            and self.risk_high_water_lineage_hash is not None
+            and self.risk_high_water_receipt_hash is not None
+            and self.peak_equity is not None
+            and self.risk_high_water_receipt_hash
+            == risk_high_water_receipt_hash(
+                identity_hash=self.risk_high_water_identity_hash,
+                baseline_receipt_hash=self.risk_baseline_receipt_hash,
+                lineage_hash=self.risk_high_water_lineage_hash,
+                peak_equity=self.peak_equity,
             )
         )
 
@@ -838,6 +934,38 @@ class BrokerNativeReview(ReviewReceipt):
 
 
 @dataclass(frozen=True, kw_only=True)
+class AttendedLocalReview(ReviewReceipt):
+    """Exact local API preview that requires one attended owner phrase.
+
+    Some supported broker APIs accept a direct order submission but do not
+    expose a broker-native review token.  This type keeps that situation
+    explicit: it is *not* broker-bound, cannot claim a broker review ID, and
+    cannot be used without the exact, unexpired confirmation phrase carried by
+    the receipt.  It therefore must never be treated as an unattended local
+    preflight decision.
+    """
+
+    decision_id: str = ""
+    policy_binding_id: str = ""
+    evidence_collection_id: str = ""
+    provider_contract_id: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        for name in (
+            "decision_id",
+            "policy_binding_id",
+            "evidence_collection_id",
+            "provider_contract_id",
+        ):
+            object.__setattr__(self, name, _required(getattr(self, name), name))
+        if self.broker_bound or self.broker_review_id is not None:
+            raise ValueError("attended local review cannot claim a broker binding")
+        if self.required_confirmation_phrase is None:
+            raise ValueError("attended local review requires an exact confirmation phrase")
+
+
+@dataclass(frozen=True, kw_only=True)
 class LocalPreflightDecision(ReviewReceipt):
     """A local policy decision, never a broker review or approval token.
 
@@ -864,6 +992,121 @@ class LocalPreflightDecision(ReviewReceipt):
             raise ValueError("local preflight cannot claim a broker review binding")
         if self.required_confirmation_phrase is not None:
             raise ValueError("local preflight cannot encode broker confirmation")
+
+
+@dataclass(frozen=True, kw_only=True)
+class AttendedCancelReview:
+    """One-shot local cancellation preview requiring an exact owner phrase."""
+
+    decision_id: str
+    account_masked: str
+    broker_order_id: str
+    client_ref_id: str
+    reviewed_at: datetime
+    received_at: datetime
+    expires_at: datetime
+    disclosure: str
+    order_checks: tuple[OrderCheck, ...]
+    required_confirmation_phrase: str
+    preview: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "decision_id", _required(self.decision_id, "decision_id"))
+        object.__setattr__(self, "account_masked", _account_mask(self.account_masked))
+        object.__setattr__(
+            self, "broker_order_id", _required(self.broker_order_id, "broker_order_id")
+        )
+        try:
+            client_ref = str(UUID(_required(self.client_ref_id, "client_ref_id")))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("client_ref_id must be a UUID") from exc
+        object.__setattr__(self, "client_ref_id", client_ref)
+        reviewed = _utc(self.reviewed_at, "reviewed_at")
+        received = _utc(self.received_at, "received_at")
+        expires = _utc(self.expires_at, "expires_at")
+        if received < reviewed or expires <= received:
+            raise ValueError("cancel review timestamps are invalid")
+        object.__setattr__(self, "reviewed_at", reviewed)
+        object.__setattr__(self, "received_at", received)
+        object.__setattr__(self, "expires_at", expires)
+        object.__setattr__(self, "disclosure", _required(self.disclosure, "disclosure"))
+        checks = tuple(self.order_checks)
+        if any(not isinstance(check, OrderCheck) for check in checks):
+            raise ValueError("order_checks must contain OrderCheck records")
+        object.__setattr__(self, "order_checks", checks)
+        object.__setattr__(
+            self,
+            "required_confirmation_phrase",
+            _required(self.required_confirmation_phrase, "required_confirmation_phrase"),
+        )
+        if not isinstance(self.preview, Mapping):
+            raise ValueError("cancel preview must be a mapping")
+        object.__setattr__(self, "preview", dict(self.preview))
+
+    def expired_at(self, now: datetime) -> bool:
+        return _utc(now, "now") >= self.expires_at
+
+
+@dataclass(frozen=True, kw_only=True)
+class LocalCancelDecision:
+    """One-shot autonomous cancellation decision from the approved policy.
+
+    This is deliberately distinct from :class:`AttendedCancelReview`.  It is
+    valid only when a separately authenticated provider contract permits
+    unattended cancellation and the transport has freshly re-proved the exact
+    owned broker order.  It never carries or suppresses a confirmation phrase.
+    """
+
+    decision_id: str
+    account_masked: str
+    broker_order_id: str
+    client_ref_id: str
+    reviewed_at: datetime
+    received_at: datetime
+    expires_at: datetime
+    disclosure: str
+    order_checks: tuple[OrderCheck, ...]
+    policy_binding_id: str
+    evidence_collection_id: str
+    provider_contract_id: str
+    preview: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "decision_id",
+            "policy_binding_id",
+            "evidence_collection_id",
+            "provider_contract_id",
+        ):
+            object.__setattr__(self, name, _required(getattr(self, name), name))
+        object.__setattr__(self, "account_masked", _account_mask(self.account_masked))
+        object.__setattr__(
+            self, "broker_order_id", _required(self.broker_order_id, "broker_order_id")
+        )
+        try:
+            client_ref = str(UUID(_required(self.client_ref_id, "client_ref_id")))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("client_ref_id must be a UUID") from exc
+        object.__setattr__(self, "client_ref_id", client_ref)
+        reviewed = _utc(self.reviewed_at, "reviewed_at")
+        received = _utc(self.received_at, "received_at")
+        expires = _utc(self.expires_at, "expires_at")
+        if received < reviewed or expires <= received:
+            raise ValueError("cancel decision timestamps are invalid")
+        object.__setattr__(self, "reviewed_at", reviewed)
+        object.__setattr__(self, "received_at", received)
+        object.__setattr__(self, "expires_at", expires)
+        object.__setattr__(self, "disclosure", _required(self.disclosure, "disclosure"))
+        checks = tuple(self.order_checks)
+        if any(not isinstance(check, OrderCheck) for check in checks):
+            raise ValueError("order_checks must contain OrderCheck records")
+        object.__setattr__(self, "order_checks", checks)
+        if not isinstance(self.preview, Mapping):
+            raise ValueError("cancel decision preview must be a mapping")
+        object.__setattr__(self, "preview", dict(self.preview))
+
+    def expired_at(self, now: datetime) -> bool:
+        return _utc(now, "now") >= self.expires_at
 
 
 @dataclass(frozen=True)
@@ -1039,6 +1282,8 @@ class BrokerClient(Protocol):
 
 __all__ = [
     "AccountSnapshot",
+    "AttendedCancelReview",
+    "AttendedLocalReview",
     "BrokerAuthenticationError",
     "BrokerCapabilities",
     "BrokerCapabilityError",
@@ -1056,6 +1301,7 @@ __all__ = [
     "EquityOrderType",
     "FillSnapshot",
     "FundsSnapshot",
+    "LocalCancelDecision",
     "LocalPreflightDecision",
     "MarketHours",
     "OperationStatus",
@@ -1068,5 +1314,6 @@ __all__ = [
     "OrderSnapshot",
     "PositionSnapshot",
     "ReviewReceipt",
+    "risk_high_water_receipt_hash",
     "TimeInForce",
 ]

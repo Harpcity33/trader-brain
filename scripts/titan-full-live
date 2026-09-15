@@ -3,9 +3,117 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import sys
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+_ATTENDED_COMMANDS = frozenset(
+    {
+        "attended-review",
+        "attended-confirm",
+        "attended-cancel-review",
+        "attended-cancel-confirm",
+        "attended-protection-review",
+    }
+)
+
+_AUTONOMOUS_COMPOSITION_COMMANDS = frozenset(
+    {
+        "activate",
+        "doctor",
+        "prepare-activation",
+        "readiness",
+        "serve",
+    }
+)
+
+_NOTIFICATION_ONLY_COMMANDS = frozenset(
+    {
+        "notification-setup-status",
+        "notification-test",
+        "notification-worker",
+    }
+)
+
+_CONTROL_ONLY_COMMANDS = frozenset(
+    {
+        "deactivate",
+        "managed-closeout",
+        "pause-new-entries",
+        "status",
+    }
+)
+
+
+def _release_bound_command_inputs(
+    *,
+    release_root: Path,
+    install_root: Path | None,
+    full_live_config_name: str,
+    release_manifest_hash: str | None,
+    arguments: list[str],
+):
+    """Construct a write lane only for an exact command and signed mode.
+
+    Attended commands retain their existing one-shot loader.  An installed
+    unattended IBKR policy loads autonomous inputs only for commands that
+    consume the production composition.  Status, provider status, notification
+    delivery, and all other read/control surfaces never load write authority.
+    """
+
+    if install_root is None or not arguments:
+        return None
+    command = arguments[0]
+    if command not in _ATTENDED_COMMANDS | _AUTONOMOUS_COMPOSITION_COMMANDS:
+        return None
+    from titan_brain.live.policy import PolicyBundle
+
+    selected_policy = PolicyBundle.load(
+        release_root,
+        config_relative=f"config/{full_live_config_name}",
+    )
+    execution = selected_policy.config["execution"]
+    if execution.get("broker_adapter") != "supported_production_transport":
+        return None
+    authority_mode = execution.get("execution_authority_mode")
+    if command in _ATTENDED_COMMANDS:
+        if authority_mode != "attended_only":
+            return None
+        from titan_brain.live.ibkr_command_inputs import (
+            build_release_bound_ibkr_command_inputs,
+        )
+
+        return build_release_bound_ibkr_command_inputs(
+            release_root=release_root,
+            install_root=install_root,
+            full_live_config_name=full_live_config_name,
+            release_manifest_hash=str(release_manifest_hash or ""),
+            clock=_utc_now,
+        )
+    if authority_mode != "unattended":
+        return None
+    from titan_brain.live.ibkr_autonomous_inputs import (
+        build_release_bound_ibkr_autonomous_inputs,
+    )
+
+    return build_release_bound_ibkr_autonomous_inputs(
+        release_root=release_root,
+        install_root=install_root,
+        full_live_config_name=full_live_config_name,
+        release_manifest_hash=str(release_manifest_hash or ""),
+        clock=_utc_now,
+        # Activation-facing probes must authenticate the real guarded command
+        # lane (including nextValidId and the exact managed account).  They do
+        # not install write evidence; only the long-lived coordinator does.
+        connect_command_session=True,
+        authorize_command_writes=command == "serve",
+    )
 
 
 def _paths() -> tuple[Path, Path | None]:
@@ -16,11 +124,25 @@ def _paths() -> tuple[Path, Path | None]:
     return release_root, install_root
 
 
+def _command_composition_factory(assembly: object, arguments: list[str]):
+    """Select the smallest release-attested provider graph for one command."""
+
+    if arguments and arguments[0] in _CONTROL_ONLY_COMMANDS:
+        return getattr(assembly, "control_runtime_composition")
+    if arguments and arguments[0] in _NOTIFICATION_ONLY_COMMANDS:
+        return getattr(assembly, "notification_runtime_composition")
+    if arguments and arguments[0] == "serve":
+        return getattr(assembly, "coordinator_runtime_composition")
+    return getattr(assembly, "runtime_composition")
+
+
 def main() -> int:
     if sys.version_info < (3, 11):
         print("titan-full-live requires Python 3.11 or newer", file=sys.stderr)
         return 70
     release_root, install_root = _paths()
+    full_live_config_name = "full_live.json"
+    release_manifest_hash: str | None = None
     # Installed releases are immutable and verified as an exact file set. Do
     # not let normal imports create unmanifested __pycache__ files inside them.
     sys.dont_write_bytecode = True
@@ -32,9 +154,43 @@ def main() -> int:
     os.environ.setdefault("TITAN_FULL_LIVE_RELEASE_ROOT", str(release_root))
     if install_root is not None:
         os.environ.setdefault("TITAN_FULL_LIVE_INSTALL_ROOT", str(install_root))
+        from titan_brain.live.policy import PolicyBundle
+        from titan_brain.live.release import load_release_manifest
+
+        manifest = load_release_manifest(
+            install_root / "release-manifest.json",
+            verify_files_root=release_root,
+        )
+        release_manifest_hash = str(manifest["release_manifest_hash"])
+        # The release manifest, not a launcher default, selects the account-
+        # scoped signed policy.  This prevents an isolated IBKR install from
+        # ever being composed against the Robinhood ending-7153 policy.
+        full_live_config_name = Path(str(manifest["config_path"])).name
+        policy = PolicyBundle.load(
+            release_root,
+            config_relative=str(manifest["config_path"]),
+        )
+        # Notification delivery is a separate failure domain: it verifies the
+        # installed release and signed policy above, then composes only its
+        # attested route and provider dependencies below.  It must not import,
+        # parse, or validate the broker SDK/profile just to deliver incidents.
+        if not sys.argv[1:] or sys.argv[1] not in _NOTIFICATION_ONLY_COMMANDS:
+            # Keep ``-I -S`` intact.  An IBKR profile may add only the official
+            # SDK snapshot copied and hash-attested by the paused installer.
+            from titan_brain.live.provider_profile import (
+                IbkrLocalProviderProfile,
+                activate_installed_sdk,
+            )
+
+            profile = IbkrLocalProviderProfile.from_config(policy.config)
+            if profile is not None and (
+                not sys.argv[1:] or sys.argv[1] not in _CONTROL_ONLY_COMMANDS
+            ):
+                activate_installed_sdk(install_root, profile)
     # Import only from the immutable release after the source root has been
-    # fixed.  Every command, including readiness, the coordinator and the
-    # independent notification worker, receives the same reviewed assembly.
+    # fixed. Every command receives a graph from the same reviewed assembly;
+    # independent notification commands deliberately receive only delivery
+    # dependencies so they never occupy broker or market-data connections.
     from titan_brain.live.cli import main as cli_main
     from titan_brain.live.local_assembly import LocalProviderAssembly
 
@@ -44,15 +200,25 @@ def main() -> int:
             str(Path.home() / "Library/Application Support/Titan Momentum/full-live"),
         )
     )
+    ibkr_command_inputs = _release_bound_command_inputs(
+        release_root=release_root,
+        install_root=install_root,
+        full_live_config_name=full_live_config_name,
+        release_manifest_hash=release_manifest_hash,
+        arguments=sys.argv[1:],
+    )
     assembly = LocalProviderAssembly(
         release_root=release_root,
         install_root=effective_install_root,
+        full_live_config_name=full_live_config_name,
+        ibkr_command_inputs=ibkr_command_inputs,
     )
+    composition_factory = _command_composition_factory(assembly, sys.argv[1:])
     try:
         return int(
             cli_main(
                 sys.argv[1:],
-                runtime_composition=assembly.runtime_composition(),
+                runtime_composition=composition_factory,
                 provider_assembly=assembly,
             )
         )

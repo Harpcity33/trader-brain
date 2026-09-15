@@ -1,0 +1,67 @@
+{
+  "schema_version": "titan_ibkr_transition_test_results_2026-09-14_v1",
+  "source_commit": "39e516fa70c5debd1c0a3f73904611af6becfed2",
+  "tests": [
+    {
+      "name": "combined_repository_suite_with_official_ibkr_sdk",
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:<authorized-ibkr-sdk-site-packages> python3.12 -B -m unittest discover -s tests -p test_*.py -q",
+      "result": "PASS",
+      "tests_run": 761,
+      "skipped": 0
+    },
+    {
+      "name": "combined_repository_suite_without_optional_sdk_import_path",
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.12 -B -m unittest discover -s tests -p test_*.py -q",
+      "result": "PASS",
+      "tests_run": 761,
+      "skipped": 2
+    },
+    {
+      "name": "focused_ibkr_callback_and_reporting_suite",
+      "command": "PYTHONPATH=src:<authorized-ibkr-sdk-site-packages> python3.12 -B -m unittest tests.test_live_ibkr_runtime tests.test_live_ibkr_read tests.test_live_ibkr_instrument_preflight tests.test_live_local_assembly",
+      "result": "PASS",
+      "tests_run": 75,
+      "skipped": 0
+    },
+    {
+      "name": "repository_validator",
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3.12 -B scripts/validate_repository.py",
+      "result": "PASS",
+      "scope": "executable source commit and built release artifacts before adding this report/evidence pair",
+      "checked_bytes": 5911455,
+      "python_files": 132,
+      "json_files": 27,
+      "toml_files": 4,
+      "validation_manifest_sha256": "67c201ce6ba7b6531f7827e9a31623a9a3d7f606fd403dfe58b4d71fe09bf69d"
+    },
+    {
+      "name": "compile_and_diff_checks",
+      "command": "python3.12 -B -m compileall -q src scripts && git diff --check",
+      "result": "PASS"
+    },
+    {
+      "name": "installed_authenticated_provider_probe",
+      "command": "<installed-launcher> provider-status --install-root <ibkr-install-root> --probe-network",
+      "result": "EXPECTED_BLOCKED",
+      "exit_code": 2,
+      "connected": [
+        "massive_rest",
+        "massive_stream",
+        "ibkr_gateway_runtime:ending-3103"
+      ],
+      "blocked": [
+        "ibkr_whole_account_read:LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_SDK_CALLBACK_321",
+        "ibkr_contract_details:LOCAL_ASSEMBLY_IBKR_CONTRACT_READ_NOT_REACHED",
+        "deterministic_local_quality:OWNER_QUALITY_THRESHOLDS_AND_BROKER_CAPACITY_JOIN_REQUIRED",
+        "codex_heartbeat_notification:CODEX_HEARTBEAT_DESTINATION_BRIDGE_UNPROVEN"
+      ],
+      "broker_mutations_invoked": [],
+      "notification_messages_sent": []
+    }
+  ],
+  "release": {
+    "release_id": "2555007a709b80a4a69ad3c4d902ecef3f4684ed99d39c137187e2c7bbf16b6d",
+    "archive_sha256": "e131f490e4ed1fd091b5f5aee46c185bf96eaa86c062a0e8e63aae54cc90c493",
+    "manifest_sha256": "53f6b3e3212750100f46010d8739b717fab33b08851e743912c95bb7113d7e84"
+  }
+}

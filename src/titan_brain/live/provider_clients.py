@@ -10,6 +10,7 @@ the locally verified Robinhood MCP contract still requires attended approval.
 from __future__ import annotations
 
 import base64
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -35,6 +36,10 @@ from .notifications import GmailAuthorizationEvidence, NotificationDeliveryError
 
 
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_KEYCHAIN_SERVICE_FIELDS = (
+    "desktop_client_service", "refresh_token_service", "consent_status_service",
+    "sender_service", "destination_service",
+)
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _KEYCHAIN_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}")
 
@@ -100,6 +105,24 @@ class MacOSKeychain:
         self.timeout_seconds = float(timeout_seconds)
         self.maximum_bytes = int(maximum_bytes)
 
+    def metadata_status(self, item: KeychainItem) -> str:
+        """Check one exact locator without requesting or retaining its secret."""
+
+        arguments = [self.SECURITY, "find-generic-password", "-s", item.service]
+        if item.account:
+            arguments.extend(("-a", item.account))
+        try:
+            result = subprocess.run(
+                arguments, check=False, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=self.timeout_seconds,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return "UNAVAILABLE"
+        if result.returncode == 0:
+            return "PRESENT"
+        # errSecItemNotFound (-25300) is returned as its low eight bits by security.
+        return "MISSING" if result.returncode == 44 else "UNAVAILABLE"
+
     def read(self, item: KeychainItem) -> bytes:
         arguments = [self.SECURITY, "find-generic-password", "-s", item.service]
         if item.account:
@@ -129,6 +152,54 @@ class MacOSKeychain:
             return self.read(item).decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CredentialUnavailable("CREDENTIAL_KEYCHAIN_ITEM_NOT_UTF8") from exc
+
+
+def select_account_gmail_profile(
+    profile: Mapping[str, Any], full_live: Mapping[str, Any]
+) -> tuple[str, Mapping[str, Any]]:
+    """Bind Gmail credential locators to the exact selected trading account."""
+
+    account = full_live.get("account", {})
+    if not isinstance(account, Mapping):
+        raise ValueError("GMAIL_ACCOUNT_NAMESPACE_INVALID")
+    account_key = account.get("account_key", account.get("masked_identifier"))
+    supported = {
+        "ending-7153": ("gmail", "7153"),
+        "ibkr-live-ending-3103": ("ibkr_gmail", "3103"),
+    }
+    if not isinstance(account_key, str) or account_key not in supported:
+        raise ValueError("GMAIL_ACCOUNT_NAMESPACE_INVALID")
+    profile_key, last4 = supported[account_key]
+    if account.get("required_last4") != last4:
+        raise ValueError("GMAIL_ACCOUNT_NAMESPACE_INVALID")
+    selected = profile.get(profile_key)
+    if not isinstance(selected, Mapping):
+        raise ValueError("GMAIL_ACCOUNT_PROFILE_MISSING")
+    if (
+        selected.get("credential_account") != account_key
+        or selected.get("credential_backend") != "macos_keychain"
+        or selected.get("implementation_id")
+        != "titan.gmail_api.desktop_oauth.keychain_refresh.v1"
+        or tuple(selected.get("scopes", ())) != (GMAIL_SEND_SCOPE,)
+    ):
+        raise ValueError("GMAIL_ACCOUNT_PROFILE_INVALID")
+    for field in GMAIL_KEYCHAIN_SERVICE_FIELDS:
+        service = selected.get(field)
+        if not isinstance(service, str):
+            raise ValueError("GMAIL_ACCOUNT_PROFILE_INVALID")
+        KeychainItem(service=service, account=account_key)
+    if profile_key == "ibkr_gmail":
+        legacy = profile.get("gmail", {})
+        legacy_services = (
+            {legacy.get(field) for field in GMAIL_KEYCHAIN_SERVICE_FIELDS}
+            if isinstance(legacy, Mapping) else set()
+        )
+        if selected.get("account_key") != account_key or any(
+            selected.get(field) in legacy_services
+            for field in GMAIL_KEYCHAIN_SERVICE_FIELDS
+        ):
+            raise ValueError("GMAIL_ACCOUNT_PROFILE_NOT_ISOLATED")
+    return profile_key, selected
 
 
 class KeychainMassiveAuthorizer:
@@ -349,13 +420,27 @@ class _MinimalWebSocket:
                 raise WebSocketProtocolError("MASSIVE_STREAM_OPCODE_UNSUPPORTED")
             if fin:
                 try:
-                    return json.loads(fragments.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise WebSocketProtocolError("MASSIVE_STREAM_JSON_INVALID") from exc
+                    value = json.loads(fragments.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise WebSocketProtocolError("MASSIVE_STREAM_JSON_INVALID") from None
+                if value is None:
+                    # None is reserved for no frame/socket timeout, not a
+                    # provider's malformed JSON null message.
+                    raise WebSocketProtocolError("MASSIVE_STREAM_FRAME_INVALID")
+                return value
 
 
 class MassiveWebSocketStreamTransport:
-    """One-consumer Massive WSS transport with bounded subscriptions/reconnects."""
+    """One-consumer Massive WSS transport with bounded subscriptions/reconnects.
+
+    Validate every record in a frame before exposing any of its data. Runtime
+    status records must be explicit ``success`` messages; unknown/negative
+    statuses invalidate the connection. Handshake frames must contain only
+    their expected-stage status, never silently discarded market data. This
+    intentionally fails closed on protocol additions requiring review.
+    """
+
+    MAX_PENDING_RECORDS = 100_000
 
     def __init__(
         self,
@@ -398,6 +483,11 @@ class MassiveWebSocketStreamTransport:
         self._latest_quote_at: datetime | None = None
         self._latest_bar_at: datetime | None = None
         self._last_detail = "NOT_CONNECTED"
+        # Retain a received JSON frame's tail between bounded drain calls.
+        # Read another frame only after this one is exhausted; the underlying
+        # WebSocket frame-size limit therefore also bounds this pending queue.
+        self._pending_records: deque[tuple[Mapping[str, Any], datetime]] = deque()
+        self._stream_generation = 0
 
     @property
     def authorization(self) -> MassiveAuthorizationEvidence:
@@ -437,6 +527,8 @@ class MassiveWebSocketStreamTransport:
                 return
             previous = set(self._subscribed)
             self._symbols = normalized
+            self._pending_records.clear()
+            self._stream_generation += 1
             socket_client = self._socket if self._authenticated else None
             if socket_client is None:
                 self._snapshot_resynced = False
@@ -475,16 +567,47 @@ class MassiveWebSocketStreamTransport:
         self._connected = False
         self._authenticated = False
         self._snapshot_resynced = False
+        self._latest_quote_at = None
+        self._latest_bar_at = None
         self._subscribed = ()
+        self._pending_records.clear()
+        self._stream_generation += 1
         self._last_detail = detail
         if socket_client is not None:
-            socket_client.close()
+            try:
+                socket_client.close()
+            except Exception:
+                # State is already invalid. A close error must not replace a
+                # sanitized failure with raw provider/socket exception text.
+                pass
 
-    @staticmethod
-    def _status_records(value: object) -> tuple[Mapping[str, Any], ...]:
-        if not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value):
-            raise WebSocketProtocolError("MASSIVE_STREAM_STATUS_INVALID")
-        return tuple(value)
+    def _frame_records(
+        self, value: object, *, expected_status: str | None = None
+    ) -> tuple[Mapping[str, Any], ...]:
+        if not isinstance(value, list) or not value:
+            raise WebSocketProtocolError("MASSIVE_STREAM_FRAME_INVALID")
+        if len(value) > self.MAX_PENDING_RECORDS:
+            raise WebSocketProtocolError("MASSIVE_STREAM_PENDING_RECORD_OVERFLOW")
+        records = []
+        for item in value:
+            if not isinstance(item, Mapping):
+                raise WebSocketProtocolError("MASSIVE_STREAM_FRAME_INVALID")
+            event = item.get("ev")
+            if not isinstance(event, str) or not event.strip():
+                raise WebSocketProtocolError("MASSIVE_STREAM_FRAME_INVALID")
+            if event.strip().upper() == "STATUS":
+                status = item.get("status")
+                if not isinstance(status, str) or not status.strip():
+                    raise WebSocketProtocolError("MASSIVE_STREAM_STATUS_INVALID")
+                allowed = expected_status if expected_status is not None else "success"
+                if status.strip().lower() != allowed:
+                    raise WebSocketProtocolError("MASSIVE_STREAM_STATUS_REJECTED")
+            elif expected_status is not None:
+                # Before subscribe, any data is unexpected and cannot be
+                # discarded just because an auth_success precedes it.
+                raise WebSocketProtocolError("MASSIVE_STREAM_HANDSHAKE_DATA_UNEXPECTED")
+            records.append(dict(item))
+        return tuple(records)
 
     def _receive_status(self, socket_client: _MinimalWebSocket, expected: str) -> None:
         deadline = time.monotonic() + self.connect_timeout_seconds
@@ -494,23 +617,21 @@ class MassiveWebSocketStreamTransport:
             )
             if value is None:
                 continue
-            for item in self._status_records(value):
-                if str(item.get("ev", "")).lower() != "status":
-                    continue
-                status = str(item.get("status", "")).lower()
-                if status in {"auth_failed", "failed", "error"}:
-                    raise WebSocketProtocolError("MASSIVE_STREAM_AUTH_REJECTED")
-                if status == expected:
-                    return
+            # The entire frame must pass before any positive status counts.
+            self._frame_records(value, expected_status=expected)
+            return
         raise WebSocketProtocolError("MASSIVE_STREAM_STATUS_TIMEOUT")
 
     def _connect_locked(self) -> None:
         if self._authenticated and self._socket is not None:
             return
-        socket_client = self._websocket_factory(
-            self.websocket_url, timeout_seconds=self.connect_timeout_seconds
-        )
+        self._pending_records.clear()
+        self._stream_generation += 1
+        socket_client = None
         try:
+            socket_client = self._websocket_factory(
+                self.websocket_url, timeout_seconds=self.connect_timeout_seconds
+            )
             socket_client.connect()
             self._receive_status(socket_client, "connected")
             socket_client.send_json(
@@ -535,10 +656,14 @@ class MassiveWebSocketStreamTransport:
             self._subscribed = self._symbols
             self._snapshot_resynced = False
             self._last_detail = "AUTHENTICATED"
-        except Exception as exc:
-            socket_client.close()
-            self._disconnect_locked(type(exc).__name__.upper())
-            raise MassiveStoreError("MASSIVE_STREAM_CONNECTION_FAILED") from exc
+        except Exception:
+            if socket_client is not None:
+                try:
+                    socket_client.close()
+                except Exception:
+                    pass
+            self._disconnect_locked("CONNECTION_FAILED")
+            raise MassiveStoreError("MASSIVE_STREAM_CONNECTION_FAILED") from None
 
     @staticmethod
     def _provider_timestamp(value: object) -> datetime | None:
@@ -594,61 +719,89 @@ class MassiveWebSocketStreamTransport:
             with self._state_lock:
                 self._connect_locked()
                 socket_client = self._socket
+                generation = self._stream_generation
             assert socket_client is not None
             deadline = time.monotonic() + float(timeout_seconds)
             events: list[Mapping[str, Any]] = []
             while len(events) < int(limit):
-                remaining = max(0.0, deadline - time.monotonic())
-                if timeout_seconds and remaining <= 0:
-                    break
-                try:
-                    value = socket_client.receive_json(
-                        timeout_seconds=(remaining if timeout_seconds else 0.001)
-                    )
-                except Exception as exc:
+                with self._state_lock:
+                    if generation != self._stream_generation or socket_client is not self._socket:
+                        raise MassiveStoreError("MASSIVE_STREAM_LIFECYCLE_CHANGED")
+                    pending = self._pending_records.popleft() if self._pending_records else None
+                if pending is None:
+                    remaining = max(0.0, deadline - time.monotonic())
+                    if timeout_seconds and remaining <= 0:
+                        break
+                    try:
+                        value = socket_client.receive_json(
+                            timeout_seconds=(remaining if timeout_seconds else 0.001)
+                        )
+                    except Exception:
+                        with self._state_lock:
+                            if generation == self._stream_generation and socket_client is self._socket:
+                                self._disconnect_locked("READ_FAILED")
+                        raise MassiveStoreError("MASSIVE_STREAM_READ_FAILED") from None
+                    if value is None:
+                        break
                     with self._state_lock:
-                        self._disconnect_locked(type(exc).__name__.upper())
-                    raise MassiveStoreError("MASSIVE_STREAM_READ_FAILED") from exc
-                if value is None:
-                    break
-                received_at = _aware(self._clock(), "Massive stream receipt clock")
-                records = self._status_records(value)
-                for raw in records:
+                        if generation != self._stream_generation or socket_client is not self._socket:
+                            raise MassiveStoreError("MASSIVE_STREAM_LIFECYCLE_CHANGED")
+                        try:
+                            received_at = _aware(self._clock(), "Massive stream receipt clock")
+                            records = self._frame_records(value)
+                        except Exception as exc:
+                            # Only our fixed protocol codes may leave this
+                            # boundary; never retain provider message text.
+                            safe_codes = {
+                                "MASSIVE_STREAM_FRAME_INVALID",
+                                "MASSIVE_STREAM_STATUS_INVALID",
+                                "MASSIVE_STREAM_STATUS_REJECTED",
+                                "MASSIVE_STREAM_PENDING_RECORD_OVERFLOW",
+                            }
+                            code = str(exc) if isinstance(exc, WebSocketProtocolError) else ""
+                            if code not in safe_codes:
+                                code = "MASSIVE_STREAM_FRAME_INVALID"
+                            self._disconnect_locked(code.removeprefix("MASSIVE_STREAM_"))
+                            raise MassiveStoreError(code) from None
+                        self._pending_records.extend((raw, received_at) for raw in records)
+                    continue
+                raw, received_at = pending
+                with self._state_lock:
+                    if generation != self._stream_generation or socket_client is not self._socket:
+                        raise MassiveStoreError("MASSIVE_STREAM_LIFECYCLE_CHANGED")
                     kind = str(raw.get("ev", "")).upper()
                     if kind == "STATUS":
                         continue
                     if kind not in {"Q", "AM", "A"}:
                         continue
                     symbol = str(raw.get("sym", "")).strip().upper()
-                    with self._state_lock:
-                        if symbol not in self._symbols:
-                            continue
+                    if symbol not in self._symbols:
+                        continue
                     events.append(dict(raw))
                     event_at = self._provider_event_time(raw)
-                    with self._state_lock:
-                        if kind == "Q" and event_at is not None:
-                            self._latest_quote_at = max(
-                                filter(None, (self._latest_quote_at, event_at))
+                    if kind == "Q" and event_at is not None:
+                        self._latest_quote_at = max(
+                            filter(None, (self._latest_quote_at, event_at))
+                        )
+                    elif kind == "AM":
+                        completed_end = self._completed_am_end(
+                            raw, received_at=received_at
+                        )
+                        # Use the frame's original receipt, not the later drain
+                        # time, when deciding whether its minute was complete.
+                        if completed_end is None:
+                            continue
+                        self._latest_bar_at = max(
+                            filter(
+                                None,
+                                (self._latest_bar_at, completed_end),
                             )
-                        elif kind == "AM":
-                            completed_end = self._completed_am_end(
-                                raw, received_at=received_at
-                            )
-                            # Transport health mirrors the stricter cache rule:
-                            # a minute is not complete merely because an AM
-                            # frame arrived or its start time is old enough.
-                            if completed_end is None:
-                                continue
-                            self._latest_bar_at = max(
-                                filter(
-                                    None,
-                                    (self._latest_bar_at, completed_end),
-                                )
-                            )
-                        self._snapshot_resynced = bool(self._subscribed)
-                    if len(events) >= int(limit):
-                        break
-            return tuple(events)
+                        )
+                    self._snapshot_resynced = bool(self._subscribed)
+            with self._state_lock:
+                if generation != self._stream_generation or socket_client is not self._socket:
+                    raise MassiveStoreError("MASSIVE_STREAM_LIFECYCLE_CHANGED")
+                return tuple(events)
         finally:
             self._consumer_lock.release()
 

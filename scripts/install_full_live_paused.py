@@ -3,16 +3,19 @@
 
 This installer is intentionally incapable of loading launchd, starting the
 runtime, or contacting the broker.  It writes release state below ``--root``
-and takes the one fixed per-user account-writer interlock, independent of the
-selected install root, so parallel installs cannot create independent writers.
+and takes the fixed per-user coordinator and account-writer interlocks,
+independent of the selected install root, so it cannot replace a release under
+either a live reconciler or a broker mutation.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -22,26 +25,130 @@ import re
 import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
 
 
-MANIFEST_SCHEMA = "titan_full_live_release_2026-09-08_v1"
-INSTALL_SCHEMA = "titan_full_live_paused_install_2026-09-08_v1"
+MANIFEST_SCHEMA = "titan_full_live_release_2026-09-14_v2"
+INSTALL_SCHEMA = "titan_full_live_paused_install_2026-09-14_v4"
 LAUNCHD_LABEL = "com.harpcity.trader-brain-full-live"
 NOTIFICATION_LAUNCHD_LABEL = "com.harpcity.trader-brain-full-live-notifications"
 MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+# Allow bounded tar/gzip framing overhead while keeping the authenticated
+# archive snapshot small enough to hold as immutable bytes during validation.
+MAX_ARCHIVE_FILE_BYTES = MAX_ARCHIVE_TOTAL_BYTES + (32 * 1024 * 1024)
 HEX = frozenset("0123456789abcdef")
 _USER_LOCK_RELATIVE_PATH = Path(
     "Library/Application Support/Titan Momentum/account-writer-locks"
 )
+_ATTENDED_COORDINATOR_LOCK_PREFIX = "attended-read-coordinator::"
 _SUPPORTED_STATE_SCHEMA_VERSION = 3
 _ZERO_AUDIT_HASH = "0" * 64
+_IBKR_PROFILE_SCHEMA = "titan_ibkr_local_provider_profile_v2"
+_IBKR_SDK_RECEIPT_SCHEMA = "titan_ibkr_sdk_snapshot_attestation_v1"
+_IBKR_SDK_RECEIPT_RELATIVE = Path("control/ibkr-sdk-attestation.json")
+_MAX_SDK_FILE_BYTES = 16 * 1024 * 1024
+_MAX_SDK_TOTAL_BYTES = 128 * 1024 * 1024
+_IBKR_RISK_LEDGER_APPLICATION_ID = 0x54495242
+_IBKR_RISK_LEDGER_SCHEMA_VERSION = 3
+_IBKR_RISK_LEDGER_RELATIVE = Path("state/ibkr-risk-high-water.sqlite3")
+_IBKR_RISK_LEDGER_ARCHIVE_RELATIVE = Path(
+    "state/ibkr-risk-high-water-archive"
+)
+_IBKR_RISK_LEGACY_BINDING_COLUMNS = (
+    "singleton",
+    "release_manifest_hash",
+    "config_hash",
+    "policy_binding_id",
+    "risk_binding_id",
+    "account_key",
+    "account_masked",
+    "account_binding_fingerprint",
+    "latest_trading_date",
+    "highest_equity",
+)
+_IBKR_RISK_BINDING_COLUMNS = (
+    *_IBKR_RISK_LEGACY_BINDING_COLUMNS[:-2],
+    "lineage_hash",
+    *_IBKR_RISK_LEGACY_BINDING_COLUMNS[-2:],
+)
+_IBKR_RISK_DAILY_COLUMNS = (
+    "trading_date",
+    "baseline_receipt_hash",
+    "baseline_provider_receipt_sha256",
+    "baseline_prior_high_water_equity",
+    "peak_equity",
+    "last_net_liquidation",
+    "last_observed_at",
+)
+_IBKR_RISK_CARRY_COLUMNS = (
+    "singleton",
+    "source_release_manifest_hash",
+    "source_config_hash",
+    "source_policy_binding_id",
+    "source_risk_binding_id",
+    "source_account_key",
+    "source_account_masked",
+    "source_account_binding_fingerprint",
+    "source_latest_trading_date",
+    "source_highest_equity",
+    "source_ledger_sha256",
+    "archive_relative_path",
+    "migrated_at",
+)
+_INSTALLER_RELATIVE_PATH = "scripts/install_full_live_paused.py"
+_FIXED_RELEASE_PATHS = frozenset(
+    {
+        "pyproject.toml",
+        "README.md",
+        "ARCHITECTURE.md",
+        "CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md",
+        _INSTALLER_RELATIVE_PATH,
+        "scripts/titan-full-live",
+        "deployment/com.harpcity.trader-brain-full-live.plist.in",
+        "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
+        "validation/full-live/2026-09-08/OPERATIONS.md",
+        "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+        "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    }
+)
+_REQUIRED_RUNTIME_MODULES = frozenset(
+    {
+        "titan_brain",
+        "titan_brain.live",
+        "titan_brain.live.cli",
+        "titan_brain.live.local_assembly",
+    }
+)
+
+
+def _configured_account_key(config: dict[str, Any]) -> str:
+    """Read the non-secret release account namespace without legacy pinning."""
+
+    try:
+        account = config["account"]
+        if not isinstance(account, dict):
+            raise TypeError("account is not an object")
+        last4 = str(account["required_last4"])
+        masked = str(account["masked_identifier"])
+        key = str(account.get("account_key", masked))
+    except (KeyError, TypeError) as exc:
+        raise InstallError("release account binding cannot be read") from exc
+    if (
+        not re.fullmatch(r"[0-9]{4}", last4)
+        or masked != f"ending-{last4}"
+        or not re.fullmatch(r"[a-z][a-z0-9_-]{2,127}", key)
+        or re.search(r"[0-9]{5,}", key)
+    ):
+        raise InstallError("release account binding is invalid")
+    return key
 _STATE_V2_OUTBOX_COLUMNS: tuple[tuple[str, str], ...] = (
     ("claim_owner", "TEXT"),
     ("claim_expires_at", "TEXT"),
@@ -261,6 +368,71 @@ def _expected_archive_hash(archive: Path, explicit: str | None) -> str:
     return expected
 
 
+def _archive_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_mode),
+        int(metadata.st_nlink),
+        int(metadata.st_size),
+        int(metadata.st_mtime_ns),
+        int(metadata.st_ctime_ns),
+    )
+
+
+def _assert_archive_path_identity(
+    archive: Path, expected: tuple[int, int, int, int, int, int, int]
+) -> None:
+    try:
+        observed = archive.lstat()
+    except OSError as exc:
+        raise InstallError("release archive path changed during verification") from exc
+    if not stat.S_ISREG(observed.st_mode) or _archive_identity(observed) != expected:
+        raise InstallError("release archive path changed during verification")
+
+
+def _capture_verified_archive(archive: Path, expected_hash: str) -> tuple[bytes, str]:
+    """Hash and retain the exact regular-file bytes that will be parsed."""
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(archive, flags)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise InstallError("release archive must be a regular file")
+        identity = _archive_identity(before)
+        _assert_archive_path_identity(archive, identity)
+        if before.st_size <= 0 or before.st_size > MAX_ARCHIVE_FILE_BYTES:
+            raise InstallError("release archive file size is invalid")
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            data = handle.read(MAX_ARCHIVE_FILE_BYTES + 1)
+            after = os.fstat(handle.fileno())
+        if len(data) != before.st_size or len(data) > MAX_ARCHIVE_FILE_BYTES:
+            raise InstallError("release archive changed while being read")
+        if _archive_identity(after) != identity:
+            raise InstallError("release archive changed while being read")
+        _assert_archive_path_identity(archive, identity)
+    except InstallError:
+        raise
+    except OSError as exc:
+        raise InstallError(
+            _external_failure_code("RELEASE_ARCHIVE_UNREADABLE", exc)
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    actual_hash = sha256_bytes(data)
+    if actual_hash != expected_hash:
+        raise InstallError("release archive checksum mismatch")
+    return data, actual_hash
+
+
 def _safe_member_name(name: str) -> str:
     pure = PurePosixPath(name)
     if pure.is_absolute() or not pure.parts or ".." in pure.parts or "." in pure.parts:
@@ -271,11 +443,11 @@ def _safe_member_name(name: str) -> str:
     return normalized
 
 
-def _read_archive(archive: Path) -> tuple[dict[str, Any], bytes, dict[str, bytes]]:
+def _read_archive(archive_bytes: bytes) -> tuple[dict[str, Any], bytes, dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     total = 0
     try:
-        with tarfile.open(archive, mode="r:gz") as bundle:
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as bundle:
             for member in bundle.getmembers():
                 name = _safe_member_name(member.name)
                 if not member.isfile() or member.issym() or member.islnk():
@@ -310,10 +482,592 @@ def _read_archive(archive: Path) -> tuple[dict[str, Any], bytes, dict[str, bytes
     return manifest, manifest_bytes, payloads
 
 
+def _is_release_source_path(relative: str) -> bool:
+    """Mirror the builder's complete committed release-path selection."""
+
+    pure = PurePosixPath(relative)
+    parts = pure.parts
+    if relative in _FIXED_RELEASE_PATHS:
+        return True
+    if len(parts) == 2 and parts[0] == "config" and pure.suffix == ".json":
+        return True
+    if (
+        len(parts) >= 3
+        and parts[0:2] == ("src", "titan_brain")
+        and pure.suffix == ".py"
+    ):
+        return True
+    if len(parts) == 2 and parts[0] == "deployment":
+        return pure.suffix == ".md" or relative.endswith(".plist.in")
+    return False
+
+
+def _source_path_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_mode),
+        int(metadata.st_nlink),
+    )
+
+
+def _assert_source_path_identity(
+    path: Path,
+    expected: tuple[int, int, int, int],
+    *,
+    label: str,
+) -> None:
+    try:
+        observed = path.lstat()
+    except OSError as exc:
+        raise InstallError(f"trusted Git {label} was replaced during verification") from exc
+    if _source_path_identity(observed) != expected:
+        raise InstallError(f"trusted Git {label} was replaced during verification")
+
+
+def _trusted_git(
+    root: Path, *arguments: str, input_bytes: bytes | None = None
+) -> bytes:
+    """Run a read-only Git object query with replacement refs disabled."""
+
+    environment = os.environ.copy()
+    for name in tuple(environment):
+        if name in {
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_DIR",
+            "GIT_GRAFT_FILE",
+            "GIT_INDEX_FILE",
+            "GIT_NAMESPACE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_REPLACE_REF_BASE",
+            "GIT_SHALLOW_FILE",
+            "GIT_WORK_TREE",
+        } or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            environment.pop(name, None)
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    environment["GIT_NO_LAZY_FETCH"] = "1"
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(root), *arguments],
+            input=input_bytes,
+            check=False,
+            capture_output=True,
+            env=environment,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        raise InstallError("trusted Git repository cannot be read") from exc
+    if completed.returncode != 0:
+        raise InstallError("trusted Git repository query failed")
+    return completed.stdout
+
+
+def _validate_expected_source_revision(value: str) -> str:
+    revision = str(value).strip().lower()
+    if len(revision) != 40 or any(character not in HEX for character in revision):
+        raise InstallError(
+            "expected source revision must be an exact 40-character Git commit"
+        )
+    return revision
+
+
+def _trusted_git_tree(
+    root: Path, revision: str
+) -> dict[str, tuple[str, str, str]]:
+    raw = _trusted_git(root, "ls-tree", "-r", "-z", "--full-tree", revision)
+    entries: dict[str, tuple[str, str, str]] = {}
+    try:
+        encoded_entries = raw.split(b"\0")
+        for encoded in encoded_entries:
+            if not encoded:
+                continue
+            metadata, separator, encoded_path = encoded.partition(b"\t")
+            fields = metadata.decode("ascii").split(" ")
+            relative = encoded_path.decode("utf-8")
+            pure = PurePosixPath(relative)
+            if (
+                not separator
+                or len(fields) != 3
+                or not relative
+                or relative != pure.as_posix()
+                or pure.is_absolute()
+                or "." in pure.parts
+                or ".." in pure.parts
+                or "\\" in relative
+                or relative in entries
+            ):
+                raise ValueError("non-canonical Git tree entry")
+            entries[relative] = (fields[0], fields[1], fields[2])
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallError("trusted Git commit tree is malformed") from exc
+    return entries
+
+
+def _trusted_git_blobs(root: Path, object_ids: list[str]) -> dict[str, bytes]:
+    unique = sorted(set(object_ids))
+    request = ("\n".join(unique) + "\n").encode("ascii")
+    checked = _trusted_git(
+        root,
+        "cat-file",
+        "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input_bytes=request,
+    )
+    sizes: dict[str, int] = {}
+    try:
+        lines = checked.decode("ascii").splitlines()
+        if len(lines) != len(unique):
+            raise ValueError("unexpected Git object count")
+        total = 0
+        for requested, line in zip(unique, lines, strict=True):
+            fields = line.split(" ")
+            if len(fields) != 3 or fields[0] != requested or fields[1] != "blob":
+                raise ValueError("unexpected Git object metadata")
+            size = int(fields[2])
+            if size < 0 or size > MAX_ARCHIVE_MEMBER_BYTES:
+                raise ValueError("Git blob exceeds release limit")
+            total += size
+            if total > MAX_ARCHIVE_TOTAL_BYTES:
+                raise ValueError("Git blobs exceed release limit")
+            sizes[requested] = size
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallError("trusted Git release blob inventory is invalid") from exc
+
+    raw = _trusted_git(root, "cat-file", "--batch", input_bytes=request)
+    result: dict[str, bytes] = {}
+    offset = 0
+    try:
+        for requested in unique:
+            end = raw.find(b"\n", offset)
+            if end < 0:
+                raise ValueError("missing Git object header")
+            header = raw[offset:end].decode("ascii").split(" ")
+            offset = end + 1
+            if (
+                len(header) != 3
+                or header[0] != requested
+                or header[1] != "blob"
+                or int(header[2]) != sizes[requested]
+            ):
+                raise ValueError("unexpected Git object header")
+            size = sizes[requested]
+            data = raw[offset : offset + size]
+            offset += size
+            if len(data) != size or raw[offset : offset + 1] != b"\n":
+                raise ValueError("invalid Git object payload boundary")
+            offset += 1
+            result[requested] = data
+        if offset != len(raw):
+            raise ValueError("unexpected Git object trailing data")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallError("trusted Git release blobs cannot be read") from exc
+    return result
+
+
+def _verify_trusted_source_provenance(
+    manifest: dict[str, Any],
+    payloads: dict[str, bytes],
+    *,
+    trusted_source_root: Path,
+    expected_source_revision: str,
+) -> dict[str, Any]:
+    """Bind the complete archive inventory to one explicit immutable Git tree."""
+
+    requested_root = Path(trusted_source_root).expanduser()
+    try:
+        requested_metadata = requested_root.lstat()
+    except OSError as exc:
+        raise InstallError("trusted Git repository is missing") from exc
+    if requested_root.is_symlink() or not stat.S_ISDIR(requested_metadata.st_mode):
+        raise InstallError("trusted Git repository must be a real directory")
+    root_identity = _source_path_identity(requested_metadata)
+    try:
+        root = requested_root.resolve(strict=True)
+    except OSError as exc:
+        raise InstallError("trusted Git repository cannot be resolved") from exc
+    revision = _validate_expected_source_revision(expected_source_revision)
+    if manifest.get("source_commit") != revision:
+        raise InstallError(
+            "release manifest source_commit does not match expected source revision"
+        )
+
+    try:
+        top_level = Path(
+            _trusted_git(root, "rev-parse", "--show-toplevel")
+            .decode("utf-8")
+            .strip()
+        ).resolve(strict=True)
+        git_directory = Path(
+            _trusted_git(root, "rev-parse", "--absolute-git-dir")
+            .decode("utf-8")
+            .strip()
+        ).resolve(strict=True)
+        object_format = (
+            _trusted_git(root, "rev-parse", "--show-object-format")
+            .decode("ascii")
+            .strip()
+        )
+        git_metadata = git_directory.lstat()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InstallError("trusted Git repository metadata cannot be read") from exc
+    if top_level != root:
+        raise InstallError("trusted source root must be the Git repository top level")
+    if object_format != "sha1":
+        raise InstallError("trusted Git repository object format is unsupported")
+    if git_directory.is_symlink() or not stat.S_ISDIR(git_metadata.st_mode):
+        raise InstallError("trusted Git metadata must be a real directory")
+    git_identity = _source_path_identity(git_metadata)
+
+    try:
+        resolved_revision = (
+            _trusted_git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+            .decode("ascii")
+            .strip()
+            .lower()
+        )
+    except UnicodeDecodeError as exc:
+        raise InstallError("trusted Git source revision cannot be read") from exc
+    if resolved_revision != revision:
+        raise InstallError("expected source revision is not the exact trusted Git commit")
+
+    tree = _trusted_git_tree(root, revision)
+    missing_fixed = sorted(_FIXED_RELEASE_PATHS - set(tree))
+    if missing_fixed:
+        raise InstallError(
+            f"trusted Git commit lacks required release sources: {missing_fixed}"
+        )
+    committed_release = {
+        relative: entry
+        for relative, entry in tree.items()
+        if _is_release_source_path(relative)
+    }
+    manifest_records = {
+        str(record["path"]): record for record in manifest["files"]
+    }
+    if set(manifest_records) != set(committed_release):
+        missing = sorted(set(committed_release) - set(manifest_records))
+        unexpected = sorted(set(manifest_records) - set(committed_release))
+        raise InstallError(
+            "release manifest inventory differs from trusted Git commit; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+
+    object_ids: list[str] = []
+    for relative, (mode, object_type, object_id) in committed_release.items():
+        if object_type != "blob" or mode not in {"100644", "100755"}:
+            raise InstallError(
+                f"trusted Git release source is not a regular blob: {relative}"
+            )
+        expected_mode = "0755" if mode == "100755" else "0644"
+        if manifest_records[relative].get("mode") != expected_mode:
+            raise InstallError(
+                f"release member mode differs from trusted Git commit: {relative}"
+            )
+        object_ids.append(object_id)
+
+    blobs = _trusted_git_blobs(root, object_ids)
+    trusted_records: list[dict[str, Any]] = []
+    for relative in sorted(committed_release):
+        mode, _object_type, object_id = committed_release[relative]
+        committed = blobs[object_id]
+        archived = payloads[relative]
+        record = manifest_records[relative]
+        if (
+            archived != committed
+            or record.get("size") != len(committed)
+            or record.get("sha256") != sha256_bytes(committed)
+        ):
+            raise InstallError(
+                f"release member differs from trusted Git commit: {relative}"
+            )
+        trusted_records.append(
+            {
+                "path": relative,
+                "sha256": sha256_bytes(committed),
+                "size": len(committed),
+                "mode": "0755" if mode == "100755" else "0644",
+            }
+        )
+
+    if manifest["files"] != trusted_records:
+        raise InstallError(
+            "release manifest file descriptor differs from trusted Git commit"
+        )
+    try:
+        config_path = str(manifest["config_path"])
+        config = json.loads(blobs[committed_release[config_path][2]])
+        if not isinstance(config, dict):
+            raise TypeError("config is not an object")
+        approval = config.get("owner_policy_approval")
+        if approval is not None:
+            if not isinstance(approval, dict):
+                raise InstallError("owner policy approval must be an object")
+            for path_field, hash_field in (
+                ("proposal_path", "proposal_sha256"),
+                ("approval_record_path", "approval_record_sha256"),
+            ):
+                relative = approval.get(path_field)
+                digest = approval.get(hash_field)
+                if (
+                    not isinstance(relative, str)
+                    or relative not in _FIXED_RELEASE_PATHS
+                    or relative not in committed_release
+                    or not isinstance(digest, str)
+                    or sha256_bytes(blobs[committed_release[relative][2]]) != digest
+                ):
+                    raise InstallError("owner policy approval artifact binding is invalid")
+        risk_relative = str(config["risk"]["limits_path"])
+        risk = json.loads(blobs[committed_release[risk_relative][2]])
+        if not isinstance(risk, dict):
+            raise TypeError("risk limits are not an object")
+        deployment = config.get("deployment")
+        if deployment is not None and not isinstance(deployment, dict):
+            raise TypeError("deployment is not an object")
+        install_subtree = str(
+            deployment.get("install_subtree")
+            if isinstance(deployment, dict)
+            else "Application Support/Titan Momentum/full-live"
+        )
+        config_hash = sha256_bytes(canonical_json(config))
+        risk_hash = sha256_bytes(canonical_json(risk))
+        policy_hash = sha256_bytes(
+            canonical_json(
+                {
+                    "account": config["account"],
+                    "scope": config["scope"],
+                    "sessions": config["sessions"],
+                    "risk": config["risk"],
+                    "risk_hash": risk_hash,
+                    "strategy_id": config["strategy_id"],
+                }
+            )
+        )
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise InstallError(
+            "trusted Git release configuration cannot produce a manifest"
+        ) from exc
+
+    trusted_descriptor: dict[str, Any] = {
+        "schema_version": MANIFEST_SCHEMA,
+        "release_name": "titan-full-live",
+        "config_path": config_path,
+        "source_commit": revision,
+        "source_tree": sha256_bytes(canonical_json(trusted_records)),
+        "config_hash": config_hash,
+        "policy_hash": policy_hash,
+        "reproducible_epoch": 0,
+        "python_requires": ">=3.11",
+        "entrypoint": "scripts/titan-full-live",
+        "default_mode": "PAUSED",
+        "install_subtree": install_subtree,
+        "launchd_template": (
+            "deployment/com.harpcity.trader-brain-full-live.plist.in"
+        ),
+        "notification_launchd_template": (
+            "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
+        ),
+        "files": trusted_records,
+    }
+    descriptor = dict(manifest)
+    descriptor.pop("release_manifest_hash")
+    if descriptor != trusted_descriptor:
+        raise InstallError(
+            "release manifest descriptor differs from trusted Git commit"
+        )
+    if manifest["release_manifest_hash"] != sha256_bytes(
+        canonical_json(trusted_descriptor)
+    ):
+        raise InstallError(
+            "release manifest identity differs from trusted Git commit"
+        )
+
+    _assert_source_path_identity(
+        requested_root, root_identity, label="repository"
+    )
+    _assert_source_path_identity(
+        git_directory, git_identity, label="metadata directory"
+    )
+    final_revision = (
+        _trusted_git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+        .decode("ascii")
+        .strip()
+        .lower()
+    )
+    if final_revision != revision:
+        raise InstallError("trusted Git source revision was replaced during verification")
+    return {
+        "repository": str(root),
+        "expected_revision": revision,
+        "verified_release_files": len(committed_release),
+        "git_replacement_objects_disabled": True,
+    }
+
+
+def _runtime_module_name(relative: str) -> tuple[str, bool] | None:
+    """Map one release path to its import name without executing release code."""
+
+    pure = PurePosixPath(relative)
+    if len(pure.parts) < 3 or pure.parts[:2] != ("src", "titan_brain"):
+        return None
+    if pure.suffix != ".py":
+        raise InstallError(
+            f"release runtime inventory contains a non-Python source: {relative}"
+        )
+    module_parts = list(pure.parts[1:])
+    is_package = module_parts[-1] == "__init__.py"
+    if is_package:
+        module_parts.pop()
+    else:
+        module_parts[-1] = PurePosixPath(module_parts[-1]).stem
+    if not module_parts or any(not part.isidentifier() for part in module_parts):
+        raise InstallError(f"release runtime module path is invalid: {relative}")
+    return ".".join(module_parts), is_package
+
+
+def _resolve_internal_import(
+    *,
+    importing_module: str,
+    importing_is_package: bool,
+    level: int,
+    imported_module: str | None,
+) -> str:
+    if level == 0:
+        return str(imported_module or "")
+    package_parts = importing_module.split(".")
+    if not importing_is_package:
+        package_parts.pop()
+    parent_hops = level - 1
+    if parent_hops >= len(package_parts):
+        raise InstallError(
+            f"release runtime has an invalid relative import in {importing_module}"
+        )
+    if parent_hops:
+        package_parts = package_parts[:-parent_hops]
+    if imported_module:
+        package_parts.extend(imported_module.split("."))
+    return ".".join(package_parts)
+
+
+def _verify_runtime_python_inventory(payloads: dict[str, bytes]) -> None:
+    """Statically prove syntax and the complete internal import closure.
+
+    The builder's contract is every ``src/titan_brain/**/*.py`` file.  The
+    installer does not execute archive code before committing a release, but
+    it parses every supplied runtime module and rejects any internal import
+    whose module/package is absent.  This avoids a second hand-maintained list
+    of implementation files while still detecting a self-consistent archive
+    with (for example) the activation or broker adapter module removed.
+    """
+
+    modules: dict[str, tuple[str, bool]] = {}
+    source_paths: list[tuple[str, str, bool]] = []
+    for relative in sorted(payloads):
+        mapped = _runtime_module_name(relative)
+        if mapped is None:
+            continue
+        module_name, is_package = mapped
+        if module_name in modules:
+            raise InstallError(f"duplicate release runtime module: {module_name}")
+        modules[module_name] = (relative, is_package)
+        source_paths.append((relative, module_name, is_package))
+    missing_roots = sorted(_REQUIRED_RUNTIME_MODULES - set(modules))
+    if missing_roots:
+        raise InstallError(
+            f"release runtime inventory lacks required module roots: {missing_roots}"
+        )
+
+    # The launcher is part of the executable import boundary even though it is
+    # not itself a package module.
+    parse_targets = list(source_paths)
+    parse_targets.append(("scripts/titan-full-live", "<release-launcher>", False))
+    for relative, module_name, is_package in parse_targets:
+        try:
+            source = payloads[relative].decode("utf-8")
+            tree = ast.parse(source, filename=relative)
+        except (KeyError, UnicodeDecodeError, SyntaxError) as exc:
+            raise InstallError(
+                f"release runtime source cannot be parsed: {relative}"
+            ) from exc
+        for node in ast.walk(tree):
+            targets: list[str] = []
+            if isinstance(node, ast.Import):
+                targets.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if module_name == "<release-launcher>" and node.level:
+                    raise InstallError("release launcher cannot use relative imports")
+                targets.append(
+                    _resolve_internal_import(
+                        importing_module=module_name,
+                        importing_is_package=is_package,
+                        level=node.level,
+                        imported_module=node.module,
+                    )
+                )
+            for target in targets:
+                if target == "titan_brain" or target.startswith("titan_brain."):
+                    if target not in modules:
+                        raise InstallError(
+                            "release runtime internal import is missing: "
+                            f"{relative} -> {target}"
+                        )
+
+
+def _verify_running_installer(
+    manifest: dict[str, Any], payloads: dict[str, bytes]
+) -> dict[str, Any]:
+    """Bind the process performing installation to the release inventory."""
+
+    source = Path(__file__).absolute()
+    try:
+        metadata = source.lstat()
+        data = source.read_bytes()
+    except OSError as exc:
+        raise InstallError("running installer cannot be attested") from exc
+    if source.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise InstallError("running installer must be a regular non-symlink file")
+    if stat.S_IMODE(metadata.st_mode) != 0o755:
+        raise InstallError("running installer must have exact mode 0755")
+    records = {
+        str(record.get("path")): record
+        for record in manifest.get("files", ())
+        if isinstance(record, dict)
+    }
+    record = records.get(_INSTALLER_RELATIVE_PATH)
+    archived = payloads.get(_INSTALLER_RELATIVE_PATH)
+    digest = sha256_bytes(data)
+    if (
+        record is None
+        or archived is None
+        or record.get("mode") != "0755"
+        or record.get("size") != len(data)
+        or record.get("sha256") != digest
+        or data != archived
+    ):
+        raise InstallError(
+            "running installer does not match the release-attested installer"
+        )
+    return {
+        "schema_version": INSTALL_SCHEMA,
+        "sha256": digest,
+        "source_commit": manifest["source_commit"],
+        "source_path": str(source),
+        "python_executable": str(Path(sys.executable).resolve(strict=True)),
+        "python_implementation": sys.implementation.name,
+        "python_version": (
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        ),
+    }
+
+
 def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> None:
     expected_manifest_fields = {
         "schema_version",
         "release_name",
+        "config_path",
         "source_commit",
         "source_tree",
         "config_hash",
@@ -355,7 +1109,6 @@ def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> No
         "python_requires": ">=3.11",
         "entrypoint": "scripts/titan-full-live",
         "default_mode": "PAUSED",
-        "install_subtree": "Application Support/Titan Momentum/full-live",
         "launchd_template": "deployment/com.harpcity.trader-brain-full-live.plist.in",
         "notification_launchd_template": (
             "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
@@ -364,6 +1117,15 @@ def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> No
     for field, expected_value in required_values.items():
         if manifest.get(field) != expected_value:
             raise InstallError(f"release manifest {field} is invalid")
+    config_path = _safe_member_name(str(manifest.get("config_path", "")))
+    config_pure = PurePosixPath(config_path)
+    if config_pure.parent != PurePosixPath("config") or config_pure.suffix != ".json":
+        raise InstallError("release manifest config_path is invalid")
+    if manifest.get("install_subtree") not in {
+        "Application Support/Titan Momentum/full-live",
+        "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+    }:
+        raise InstallError("release manifest install_subtree is invalid")
     source_commit = manifest.get("source_commit")
     if (
         not isinstance(source_commit, str)
@@ -397,6 +1159,7 @@ def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> No
         "config/risk_limits.json",
         "config/nyse_calendar_2026.json",
         "scripts/titan-full-live",
+        _INSTALLER_RELATIVE_PATH,
         "src/titan_brain/live/cli.py",
         "src/titan_brain/live/composition.py",
         "src/titan_brain/live/discovery_composition.py",
@@ -418,6 +1181,8 @@ def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> No
         raise InstallError(
             f"release inventory lacks required runtime files: {sorted(required_files - set(expected))}"
         )
+    if config_path not in expected:
+        raise InstallError("release inventory lacks the selected config profile")
     if sha256_bytes(canonical_json(records)) != manifest["source_tree"]:
         raise InstallError("release source_tree does not match the file inventory")
     if set(expected) != set(payloads):
@@ -430,14 +1195,28 @@ def _verify_manifest(manifest: dict[str, Any], payloads: dict[str, bytes]) -> No
             raise InstallError(f"release member failed integrity verification: {name}")
         if record.get("mode") not in {"0644", "0755"}:
             raise InstallError(f"release member has unsupported mode: {name}")
+    if expected[_INSTALLER_RELATIVE_PATH].get("mode") != "0755":
+        raise InstallError("release installer must have mode 0755")
+    _verify_runtime_python_inventory(payloads)
 
 
-def _assert_install_root(root: Path) -> Path:
+def _assert_install_root(root: Path, install_subtree: str) -> Path:
     expanded = root.expanduser()
-    required_suffix = ("Application Support", "Titan Momentum", "full-live")
-    if tuple(expanded.parts[-3:]) != required_suffix:
+    subtree = PurePosixPath(str(install_subtree))
+    if (
+        subtree.is_absolute()
+        or ".." in subtree.parts
+        or subtree.as_posix()
+        not in {
+            "Application Support/Titan Momentum/full-live",
+            "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+        }
+    ):
+        raise InstallError("release install subtree is invalid")
+    required_suffix = subtree.parts
+    if tuple(expanded.parts[-len(required_suffix):]) != required_suffix:
         raise InstallError(
-            "install root must be under 'Application Support/Titan Momentum/full-live'"
+            f"install root must be under the exact signed subtree {subtree.as_posix()!r}"
         )
     resolved = expanded.resolve(strict=False)
     if resolved == Path.home().resolve() or resolved == resolved.parent:
@@ -903,14 +1682,14 @@ def _migrate_paused_runtime_identity(
     try:
         target = {
             "runtime_id": str(config["runtime_id"]),
-            "account_key": str(config["account"]["masked_identifier"]),
+            "account_key": _configured_account_key(config),
             "release_manifest_hash": str(manifest["release_manifest_hash"]),
             "config_hash": str(manifest["config_hash"]),
             "policy_hash": str(manifest["policy_hash"]),
         }
     except (KeyError, TypeError) as exc:
         raise InstallError("target runtime identity is incomplete") from exc
-    if not target["runtime_id"].strip() or target["account_key"] != "ending-7153":
+    if not target["runtime_id"].strip() or not target["account_key"].strip():
         raise InstallError("target runtime identity is invalid")
     for field in ("release_manifest_hash", "config_hash", "policy_hash"):
         value = target[field]
@@ -1106,6 +1885,700 @@ def _migrate_paused_runtime_identity(
         connection.close()
 
 
+def _ibkr_risk_hash(value: object, field: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in HEX for character in value)
+    ):
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    return value
+
+
+def _ibkr_risk_decimal(value: object, field: str) -> Decimal:
+    if type(value) is not str or not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", value
+    ):
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise InstallError(f"IBKR risk ledger {field} is invalid") from exc
+    normalized = format(parsed, "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    normalized = "0" if parsed == 0 else normalized
+    if not parsed.is_finite() or parsed <= 0 or normalized != value:
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    return parsed
+
+
+def _ibkr_risk_decimal_text(value: Decimal) -> str:
+    normalized = format(value, "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return "0" if value == 0 else normalized
+
+
+def _ibkr_risk_date(value: object, field: str) -> date:
+    if type(value) is not str:
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise InstallError(f"IBKR risk ledger {field} is invalid") from exc
+    if parsed.isoformat() != value:
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    return parsed
+
+
+def _ibkr_risk_time(value: object, field: str) -> datetime:
+    if type(value) is not str:
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise InstallError(f"IBKR risk ledger {field} is invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise InstallError(f"IBKR risk ledger {field} is invalid")
+    return parsed.astimezone(timezone.utc)
+
+
+def _ibkr_risk_target(
+    *,
+    manifest: dict[str, Any],
+    config: dict[str, Any],
+    payloads: dict[str, bytes],
+) -> dict[str, str] | None:
+    """Derive the exact runtime ledger identity from the verified release."""
+
+    execution = config.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw_relative = execution.get("ibkr_risk_high_water_ledger_relative_path")
+    if raw_relative is None:
+        if (
+            execution.get("broker_adapter") == "supported_production_transport"
+            and execution.get("execution_authority_mode") == "unattended"
+        ):
+            raise InstallError(
+                "IBKR risk high-water ledger must use canonical path "
+                "state/ibkr-risk-high-water.sqlite3"
+            )
+        return None
+    if type(raw_relative) is not str:
+        raise InstallError("IBKR risk high-water ledger path is invalid")
+    relative = Path(raw_relative)
+    if (
+        relative.is_absolute()
+        or relative.parent != _IBKR_RISK_LEDGER_RELATIVE.parent
+        or relative.suffix != ".sqlite3"
+        or relative.as_posix() != raw_relative
+        or relative.name == "full-live.sqlite3"
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or relative != _IBKR_RISK_LEDGER_RELATIVE
+    ):
+        raise InstallError(
+            "IBKR risk high-water ledger must use canonical path "
+            "state/ibkr-risk-high-water.sqlite3"
+        )
+    risk_config = config.get("risk")
+    account = config.get("account")
+    if not isinstance(risk_config, dict) or not isinstance(account, dict):
+        raise InstallError("IBKR risk ledger release bindings are incomplete")
+    risk_relative = str(risk_config.get("limits_path", ""))
+    risk_bytes = payloads.get(risk_relative)
+    if risk_bytes is None:
+        raise InstallError("IBKR risk limits are absent from the release")
+    try:
+        risk = json.loads(risk_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InstallError("IBKR risk limits are invalid") from exc
+    if not isinstance(risk, dict):
+        raise InstallError("IBKR risk limits are invalid")
+    last4 = str(account.get("required_last4", ""))
+    account_key = _configured_account_key(config)
+    fingerprint = _ibkr_risk_hash(
+        execution.get("production_account_binding_fingerprint"),
+        "account binding fingerprint",
+    )
+    return {
+        "relative_path": _IBKR_RISK_LEDGER_RELATIVE.as_posix(),
+        "release_manifest_hash": _ibkr_risk_hash(
+            manifest.get("release_manifest_hash"), "release manifest hash"
+        ),
+        "config_hash": _ibkr_risk_hash(
+            manifest.get("config_hash"), "config hash"
+        ),
+        "policy_binding_id": _ibkr_risk_hash(
+            manifest.get("policy_hash"), "policy binding"
+        ),
+        "risk_binding_id": sha256_bytes(canonical_json(risk)),
+        "account_key": account_key,
+        "account_masked": f"****{last4}",
+        "account_binding_fingerprint": fingerprint,
+    }
+
+
+def _ibkr_risk_binding_tuple(binding: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(binding[field])
+        for field in (
+            "release_manifest_hash",
+            "config_hash",
+            "policy_binding_id",
+            "risk_binding_id",
+            "account_key",
+            "account_masked",
+            "account_binding_fingerprint",
+        )
+    )
+
+
+def _ibkr_risk_table_columns(
+    connection: sqlite3.Connection, table: str
+) -> tuple[str, ...]:
+    if not table.replace("_", "").isalnum():
+        raise InstallError("IBKR risk ledger table name is unsafe")
+    return tuple(
+        str(row[1])
+        for row in connection.execute(
+            f'PRAGMA table_info("{table}")'
+        ).fetchall()
+    )
+
+
+def _validate_ibkr_risk_ledger_file(path: Path) -> os.stat_result:
+    if path.is_symlink() or not path.is_file():
+        raise InstallError("IBKR risk ledger must be a non-symlink regular file")
+    metadata = path.stat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or (hasattr(os, "geteuid") and metadata.st_uid != os.geteuid())
+    ):
+        raise InstallError("IBKR risk ledger file ownership or mode is unsafe")
+    for suffix in ("-journal", "-wal", "-shm"):
+        sidecar = Path(str(path) + suffix)
+        if sidecar.is_symlink():
+            raise InstallError("IBKR risk ledger sidecar is unsafe")
+        if sidecar.exists():
+            sidecar_metadata = sidecar.stat()
+            if (
+                not stat.S_ISREG(sidecar_metadata.st_mode)
+                or sidecar_metadata.st_nlink != 1
+                or stat.S_IMODE(sidecar_metadata.st_mode) & 0o077
+                or (
+                    hasattr(os, "geteuid")
+                    and sidecar_metadata.st_uid != os.geteuid()
+                )
+            ):
+                raise InstallError("IBKR risk ledger sidecar is unsafe")
+    return metadata
+
+
+def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
+    """Validate a closed v1/v2/v3 ledger and return its conservative floor."""
+
+    before = _validate_ibkr_risk_ledger_file(path)
+    connection = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA busy_timeout=5000")
+        connection.execute("PRAGMA synchronous=FULL")
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is not None and int(checkpoint[0]):
+            raise InstallError("IBKR risk ledger WAL checkpoint is busy")
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise InstallError("IBKR risk ledger failed SQLite quick_check")
+        if (
+            int(connection.execute("PRAGMA application_id").fetchone()[0])
+            != _IBKR_RISK_LEDGER_APPLICATION_ID
+        ):
+            raise InstallError("IBKR risk ledger application identity is invalid")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version not in {1, 2, _IBKR_RISK_LEDGER_SCHEMA_VERSION}:
+            raise InstallError("IBKR risk ledger schema is unsupported")
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        expected_tables = {"binding", "daily_high_water"}
+        if version >= 2:
+            expected_tables.add("carry_forward")
+        if tables != expected_tables:
+            raise InstallError("IBKR risk ledger tables differ from its schema")
+        if (
+            _ibkr_risk_table_columns(connection, "binding")
+            != (
+                _IBKR_RISK_BINDING_COLUMNS
+                if version == _IBKR_RISK_LEDGER_SCHEMA_VERSION
+                else _IBKR_RISK_LEGACY_BINDING_COLUMNS
+            )
+            or _ibkr_risk_table_columns(connection, "daily_high_water")
+            != _IBKR_RISK_DAILY_COLUMNS
+            or (
+                version >= 2
+                and _ibkr_risk_table_columns(connection, "carry_forward")
+                != _IBKR_RISK_CARRY_COLUMNS
+            )
+        ):
+            raise InstallError("IBKR risk ledger columns differ from its schema")
+        binding_rows = connection.execute("SELECT * FROM binding").fetchall()
+        if len(binding_rows) != 1 or binding_rows[0]["singleton"] != 1:
+            raise InstallError("IBKR risk ledger binding is missing or ambiguous")
+        binding = dict(binding_rows[0])
+        for field in (
+            "release_manifest_hash",
+            "config_hash",
+            "policy_binding_id",
+            "risk_binding_id",
+            "account_binding_fingerprint",
+        ):
+            _ibkr_risk_hash(binding.get(field), field)
+        if version == _IBKR_RISK_LEDGER_SCHEMA_VERSION:
+            _ibkr_risk_hash(binding.get("lineage_hash"), "lineage hash")
+        if (
+            not re.fullmatch(r"ibkr-live-ending-[0-9]{4}", str(binding["account_key"]))
+            or not re.fullmatch(r"(?:\*{4}|•{4})[0-9]{4}", str(binding["account_masked"]))
+            or str(binding["account_key"])[-4:]
+            != str(binding["account_masked"])[-4:]
+        ):
+            raise InstallError("IBKR risk ledger account binding is invalid")
+        daily = connection.execute(
+            "SELECT * FROM daily_high_water ORDER BY trading_date"
+        ).fetchall()
+        daily_dates: list[date] = []
+        daily_peaks: list[Decimal] = []
+        for row in daily:
+            daily_dates.append(_ibkr_risk_date(row["trading_date"], "trading date"))
+            _ibkr_risk_hash(row["baseline_receipt_hash"], "baseline receipt")
+            _ibkr_risk_hash(
+                row["baseline_provider_receipt_sha256"], "provider receipt"
+            )
+            baseline_peak = _ibkr_risk_decimal(
+                row["baseline_prior_high_water_equity"], "baseline high water"
+            )
+            peak = _ibkr_risk_decimal(row["peak_equity"], "daily peak")
+            last = _ibkr_risk_decimal(
+                row["last_net_liquidation"], "last net liquidation"
+            )
+            _ibkr_risk_time(row["last_observed_at"], "last observed time")
+            if peak < max(baseline_peak, last):
+                raise InstallError("IBKR risk ledger daily peak regressed")
+            daily_peaks.append(peak)
+        if (
+            daily_dates != sorted(set(daily_dates))
+            or daily_peaks != sorted(daily_peaks)
+        ):
+            raise InstallError("IBKR risk ledger trading dates are invalid")
+        latest_raw = binding["latest_trading_date"]
+        highest_raw = binding["highest_equity"]
+        if bool(daily) != (latest_raw is not None and highest_raw is not None):
+            raise InstallError("IBKR risk ledger binding summary is inconsistent")
+        current_latest = None
+        current_peak = None
+        if daily:
+            current_latest = _ibkr_risk_date(latest_raw, "latest trading date")
+            current_peak = _ibkr_risk_decimal(highest_raw, "highest equity")
+            if current_latest != daily_dates[-1] or current_peak != max(daily_peaks):
+                raise InstallError("IBKR risk ledger binding summary is inconsistent")
+
+        carried_latest = None
+        carried_peak = None
+        if version >= 2:
+            carry_rows = connection.execute("SELECT * FROM carry_forward").fetchall()
+            if len(carry_rows) > 1 or (
+                carry_rows and carry_rows[0]["singleton"] != 1
+            ):
+                raise InstallError("IBKR risk ledger carry-forward is ambiguous")
+            if carry_rows:
+                carry = carry_rows[0]
+                for field in (
+                    "source_release_manifest_hash",
+                    "source_config_hash",
+                    "source_policy_binding_id",
+                    "source_risk_binding_id",
+                    "source_account_binding_fingerprint",
+                    "source_ledger_sha256",
+                ):
+                    _ibkr_risk_hash(carry[field], field)
+                if (
+                    carry["source_account_key"] != binding["account_key"]
+                    or carry["source_account_masked"] != binding["account_masked"]
+                    or carry["source_account_binding_fingerprint"]
+                    != binding["account_binding_fingerprint"]
+                    or not re.fullmatch(
+                        r"state/ibkr-risk-high-water-archive/"
+                        r"[0-9a-f]{64}-[0-9a-f]{64}\.sqlite3",
+                        str(carry["archive_relative_path"]),
+                    )
+                ):
+                    raise InstallError("IBKR risk ledger carry-forward binding is invalid")
+                carried_latest = _ibkr_risk_date(
+                    carry["source_latest_trading_date"], "carry trading date"
+                )
+                carried_peak = _ibkr_risk_decimal(
+                    carry["source_highest_equity"], "carry high water"
+                )
+                if daily_dates and (
+                    daily_dates[0] < carried_latest
+                    or any(peak < carried_peak for peak in daily_peaks)
+                ):
+                    raise InstallError("IBKR risk ledger carry-forward floor regressed")
+                migrated = _ibkr_risk_time(carry["migrated_at"], "migration time")
+                if carry["migrated_at"] != migrated.isoformat():
+                    raise InstallError("IBKR risk ledger migration time is not canonical")
+        latest_candidates = [
+            item for item in (current_latest, carried_latest) if item is not None
+        ]
+        peak_candidates = [
+            item for item in (current_peak, carried_peak) if item is not None
+        ]
+        result = {
+            "schema_version": version,
+            "binding": binding,
+            "latest_trading_date": max(latest_candidates) if latest_candidates else None,
+            "highest_equity": max(peak_candidates) if peak_candidates else None,
+        }
+    except sqlite3.Error as exc:
+        raise InstallError(
+            _external_failure_code("IBKR_RISK_LEDGER_VALIDATION_FAILED", exc)
+        ) from exc
+    finally:
+        connection.close()
+    after = _validate_ibkr_risk_ledger_file(path)
+    if (
+        after.st_dev,
+        after.st_ino,
+        after.st_nlink,
+    ) != (before.st_dev, before.st_ino, 1):
+        raise InstallError("IBKR risk ledger file changed during validation")
+    for suffix in ("-journal", "-wal", "-shm"):
+        if Path(str(path) + suffix).exists():
+            raise InstallError("IBKR risk ledger did not checkpoint cleanly")
+    return result
+
+
+def _create_ibkr_risk_ledger(
+    path: Path,
+    *,
+    target: dict[str, str],
+    source: dict[str, Any] | None = None,
+    source_sha256: str | None = None,
+    archive_relative: str | None = None,
+    migrated_at: datetime | None = None,
+) -> str:
+    """Create one canonical v3 ledger with a fresh persistent lineage."""
+
+    lineage_hash = os.urandom(32).hex()
+    _ibkr_risk_hash(lineage_hash, "lineage hash")
+    connection = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+    try:
+        path.chmod(0o600)
+        connection.execute("PRAGMA journal_mode=DELETE")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "CREATE TABLE binding ("
+            "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+            "release_manifest_hash TEXT NOT NULL,config_hash TEXT NOT NULL,"
+            "policy_binding_id TEXT NOT NULL,risk_binding_id TEXT NOT NULL,"
+            "account_key TEXT NOT NULL,account_masked TEXT NOT NULL,"
+            "account_binding_fingerprint TEXT NOT NULL,"
+            "lineage_hash TEXT NOT NULL,"
+            "latest_trading_date TEXT,highest_equity TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE daily_high_water ("
+            "trading_date TEXT PRIMARY KEY,baseline_receipt_hash TEXT NOT NULL,"
+            "baseline_provider_receipt_sha256 TEXT NOT NULL,"
+            "baseline_prior_high_water_equity TEXT NOT NULL,"
+            "peak_equity TEXT NOT NULL,last_net_liquidation TEXT NOT NULL,"
+            "last_observed_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE carry_forward ("
+            "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+            "source_release_manifest_hash TEXT NOT NULL,"
+            "source_config_hash TEXT NOT NULL,"
+            "source_policy_binding_id TEXT NOT NULL,"
+            "source_risk_binding_id TEXT NOT NULL,"
+            "source_account_key TEXT NOT NULL,"
+            "source_account_masked TEXT NOT NULL,"
+            "source_account_binding_fingerprint TEXT NOT NULL,"
+            "source_latest_trading_date TEXT NOT NULL,"
+            "source_highest_equity TEXT NOT NULL,"
+            "source_ledger_sha256 TEXT NOT NULL,"
+            "archive_relative_path TEXT NOT NULL,"
+            "migrated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO binding VALUES (1,?,?,?,?,?,?,?,?,NULL,NULL)",
+            (*_ibkr_risk_binding_tuple(target), lineage_hash),
+        )
+        if source is not None:
+            source_peak = source["highest_equity"]
+            source_date = source["latest_trading_date"]
+            if (source_peak is None) != (source_date is None):
+                raise InstallError("IBKR risk ledger source summary is inconsistent")
+        else:
+            source_peak = None
+            source_date = None
+        if source_peak is not None:
+            if (
+                source_sha256 is None
+                or archive_relative is None
+                or migrated_at is None
+            ):
+                raise InstallError("IBKR risk ledger carry-forward is incomplete")
+            source_binding = source["binding"]
+            connection.execute(
+                "INSERT INTO carry_forward VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    source_binding["release_manifest_hash"],
+                    source_binding["config_hash"],
+                    source_binding["policy_binding_id"],
+                    source_binding["risk_binding_id"],
+                    source_binding["account_key"],
+                    source_binding["account_masked"],
+                    source_binding["account_binding_fingerprint"],
+                    source_date.isoformat(),
+                    _ibkr_risk_decimal_text(source_peak),
+                    source_sha256,
+                    archive_relative,
+                    migrated_at.astimezone(timezone.utc).isoformat(),
+                ),
+            )
+        connection.execute(
+            f"PRAGMA application_id={_IBKR_RISK_LEDGER_APPLICATION_ID}"
+        )
+        connection.execute(
+            f"PRAGMA user_version={_IBKR_RISK_LEDGER_SCHEMA_VERSION}"
+        )
+        connection.execute("COMMIT")
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise InstallError("new IBKR risk ledger failed SQLite quick_check")
+    except BaseException:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        connection.close()
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+    return lineage_hash
+
+
+def _archive_ibkr_risk_ledger(source: Path, archive: Path, digest: str) -> None:
+    if archive.exists():
+        _validate_ibkr_risk_ledger_file(archive)
+        if sha256_file(archive) != digest:
+            raise InstallError("IBKR risk ledger archive digest conflicts")
+        return
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{archive.name}.", dir=archive.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.close(descriptor)
+        shutil.copyfile(source, temporary)
+        temporary.chmod(0o600)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        if sha256_file(temporary) != digest:
+            raise InstallError("IBKR risk ledger archive copy changed")
+        os.replace(temporary, archive)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _migrate_ibkr_risk_high_water_ledger(
+    install_root: Path,
+    *,
+    manifest: dict[str, Any],
+    config: dict[str, Any],
+    payloads: dict[str, bytes],
+    migrated_at: datetime,
+) -> dict[str, Any]:
+    """Archive and conservatively carry a release-bound high-water floor.
+
+    The caller holds both fixed deployment/account writer interlocks and has
+    already proven an unarmed PAUSED state with no live writer or notification
+    lease.  This helper never starts a process, reads a key, consumes an
+    activation, or contacts IBKR.
+    """
+
+    target = _ibkr_risk_target(
+        manifest=manifest,
+        config=config,
+        payloads=payloads,
+    )
+    if target is None:
+        return {
+            "required": False,
+            "performed": False,
+            "reason": "RISK_LEDGER_NOT_CONFIGURED",
+        }
+    # Never derive durable risk state placement from a release-controlled
+    # filename.  Policy validation independently requires this same path.
+    ledger = install_root / _IBKR_RISK_LEDGER_RELATIVE
+    if ledger.is_symlink():
+        raise InstallError("IBKR risk ledger must be a non-symlink regular file")
+    if not ledger.exists():
+        for suffix in ("-journal", "-wal", "-shm"):
+            if os.path.lexists(Path(str(ledger) + suffix)):
+                raise InstallError("IBKR risk ledger orphaned sidecar is unsafe")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{ledger.name}.bootstrap-", dir=ledger.parent
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            temporary.unlink()
+            lineage_hash = _create_ibkr_risk_ledger(
+                temporary,
+                target=target,
+            )
+            staged = _read_ibkr_risk_ledger(temporary)
+            if (
+                staged["schema_version"] != _IBKR_RISK_LEDGER_SCHEMA_VERSION
+                or _ibkr_risk_binding_tuple(staged["binding"])
+                != _ibkr_risk_binding_tuple(target)
+                or staged["binding"].get("lineage_hash") != lineage_hash
+                or staged["highest_equity"] is not None
+                or staged["latest_trading_date"] is not None
+            ):
+                raise InstallError("new IBKR risk ledger binding is invalid")
+            try:
+                os.link(temporary, ledger)
+            except FileExistsError as exc:
+                raise InstallError(
+                    "IBKR risk ledger appeared during bootstrap"
+                ) from exc
+            temporary.unlink()
+            directory_descriptor = os.open(ledger.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return {
+            "required": True,
+            "performed": True,
+            "reason": "PAUSED_RISK_LEDGER_BOOTSTRAPPED",
+            "target_schema_version": _IBKR_RISK_LEDGER_SCHEMA_VERSION,
+            "target_release_manifest_hash": target["release_manifest_hash"],
+            "latest_trading_date": None,
+            "highest_equity": None,
+            "high_water_never_lowered": True,
+        }
+    source = _read_ibkr_risk_ledger(ledger)
+    source_binding = source["binding"]
+    target_binding = _ibkr_risk_binding_tuple(target)
+    if (
+        source["schema_version"] == _IBKR_RISK_LEDGER_SCHEMA_VERSION
+        and _ibkr_risk_binding_tuple(source_binding) == target_binding
+    ):
+        return {
+            "required": False,
+            "performed": False,
+            "reason": "RISK_LEDGER_ALREADY_BOUND",
+            "highest_equity": (
+                None
+                if source["highest_equity"] is None
+                else format(source["highest_equity"], "f")
+            ),
+        }
+    if (
+        source_binding["account_key"] != target["account_key"]
+        or source_binding["account_masked"] != target["account_masked"]
+        or source_binding["account_binding_fingerprint"]
+        != target["account_binding_fingerprint"]
+    ):
+        raise InstallError("IBKR risk ledger migration cannot change account binding")
+
+    archive_root = _ensure_private_directory(
+        install_root, _IBKR_RISK_LEDGER_ARCHIVE_RELATIVE.as_posix()
+    )
+    source_digest = sha256_file(ledger)
+    archive_name = (
+        f"{source_binding['release_manifest_hash']}-{source_digest}.sqlite3"
+    )
+    archive = archive_root / archive_name
+    archive_relative = archive.relative_to(install_root).as_posix()
+    _archive_ibkr_risk_ledger(ledger, archive, source_digest)
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{ledger.name}.migration-", dir=ledger.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        temporary.unlink()
+        lineage_hash = _create_ibkr_risk_ledger(
+            temporary,
+            target=target,
+            source=source,
+            source_sha256=source_digest,
+            archive_relative=archive_relative,
+            migrated_at=migrated_at,
+        )
+        staged = _read_ibkr_risk_ledger(temporary)
+        if (
+            staged["schema_version"] != _IBKR_RISK_LEDGER_SCHEMA_VERSION
+            or _ibkr_risk_binding_tuple(staged["binding"]) != target_binding
+            or staged["binding"].get("lineage_hash") != lineage_hash
+            or staged["highest_equity"] != source["highest_equity"]
+            or staged["latest_trading_date"] != source["latest_trading_date"]
+            or (
+                source["schema_version"] == _IBKR_RISK_LEDGER_SCHEMA_VERSION
+                and source_binding.get("lineage_hash") == lineage_hash
+            )
+        ):
+            raise InstallError("new IBKR risk ledger did not preserve its floor")
+        if sha256_file(ledger) != source_digest:
+            raise InstallError("IBKR risk ledger changed before release rotation")
+        os.replace(temporary, ledger)
+        directory_descriptor = os.open(ledger.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return {
+        "required": True,
+        "performed": True,
+        "reason": "PAUSED_RELEASE_SCOPED_ARCHIVE_CARRY_FORWARD",
+        "source_schema_version": source["schema_version"],
+        "target_schema_version": _IBKR_RISK_LEDGER_SCHEMA_VERSION,
+        "source_release_manifest_hash": source_binding["release_manifest_hash"],
+        "target_release_manifest_hash": target["release_manifest_hash"],
+        "source_ledger_sha256": source_digest,
+        "archive_relative_path": archive_relative,
+        "latest_trading_date": (
+            None
+            if source["latest_trading_date"] is None
+            else source["latest_trading_date"].isoformat()
+        ),
+        "highest_equity": (
+            None
+            if source["highest_equity"] is None
+            else format(source["highest_equity"], "f")
+        ),
+        "high_water_never_lowered": True,
+    }
+
+
 def _validate_python_executable(value: Path | None) -> Path:
     interpreter = (value or Path(sys.executable)).expanduser().resolve(strict=True)
     running = Path(sys.executable).resolve(strict=True)
@@ -1120,11 +2593,334 @@ def _validate_python_executable(value: Path | None) -> Path:
     return interpreter
 
 
+def _ibkr_profile_requirements(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the signed, non-secret IBKR install requirements.
+
+    The runtime policy performs the full semantic validation.  The standalone
+    installer repeats the security-critical account/root/SDK checks so it
+    cannot be tricked into copying a dependency for an unrelated release.
+    """
+
+    raw = config.get("local_provider_profile")
+    if raw is None:
+        return None
+    deployment = config.get("deployment")
+    account = config.get("account")
+    if not all(isinstance(value, dict) for value in (raw, deployment, account)):
+        raise InstallError("IBKR local provider profile is incomplete")
+    assert isinstance(raw, dict)
+    assert isinstance(deployment, dict)
+    assert isinstance(account, dict)
+    endpoint = raw.get("endpoint")
+    sdk = raw.get("sdk")
+    if not isinstance(endpoint, dict) or not isinstance(sdk, dict):
+        raise InstallError("IBKR endpoint or SDK profile is incomplete")
+    expected_fields = {
+        "profile": {
+            "schema_version", "profile_id", "provider", "environment",
+            "endpoint", "read_client_id", "command_client_id",
+            "account_binding_source", "persist_full_account_identifier", "sdk",
+        },
+        "account": {
+            "account_key", "masked_identifier", "required_last4", "allowed_type",
+            "margin_debit_allowed",
+        },
+        "deployment": {
+            "profile_id", "install_subtree", "coordinator_launchd_label",
+            "notification_launchd_label",
+        },
+        "endpoint": {"host", "port", "loopback_only"},
+        "sdk": {
+            "distribution", "ibapi_version", "protobuf_version",
+            "expected_inventory_sha256",
+            "installation_mode",
+        },
+    }
+    observed_fields = {
+        "profile": set(raw),
+        "account": set(account),
+        "deployment": set(deployment),
+        "endpoint": set(endpoint),
+        "sdk": set(sdk),
+    }
+    if observed_fields != expected_fields:
+        raise InstallError("IBKR local provider profile has unapproved fields")
+    requirements = {
+        "profile_id": str(raw.get("profile_id", "")),
+        "account_key": _configured_account_key(config),
+        "install_subtree": str(deployment.get("install_subtree", "")),
+        "coordinator_launchd_label": str(
+            deployment.get("coordinator_launchd_label", "")
+        ),
+        "notification_launchd_label": str(
+            deployment.get("notification_launchd_label", "")
+        ),
+        "ibapi_version": str(sdk.get("ibapi_version", "")),
+        "protobuf_version": str(sdk.get("protobuf_version", "")),
+        "sdk_inventory_hash": str(sdk.get("expected_inventory_sha256", "")),
+        "host": str(endpoint.get("host", "")),
+        "port": endpoint.get("port"),
+        "read_client_id": raw.get("read_client_id"),
+        "command_client_id": raw.get("command_client_id"),
+    }
+    if (
+        raw.get("schema_version") != _IBKR_PROFILE_SCHEMA
+        or raw.get("provider") != "interactive_brokers"
+        or requirements["profile_id"] != deployment.get("profile_id")
+        or requirements["account_key"] != "ibkr-live-ending-3103"
+        or account.get("masked_identifier") != "ending-3103"
+        or account.get("required_last4") != "3103"
+        or account.get("allowed_type") != "no_borrow_margin"
+        or account.get("margin_debit_allowed") is not False
+        or requirements["install_subtree"]
+        != "Application Support/Titan Momentum/full-live-ibkr-ending-3103"
+        or requirements["host"] != "127.0.0.1"
+        or endpoint.get("loopback_only") is not True
+        or isinstance(requirements["port"], bool)
+        or not isinstance(requirements["port"], int)
+        or not 1 <= requirements["port"] <= 65535
+        or isinstance(requirements["read_client_id"], bool)
+        or not isinstance(requirements["read_client_id"], int)
+        or not 0 <= requirements["read_client_id"] <= 2_147_483_647
+        or isinstance(requirements["command_client_id"], bool)
+        or not isinstance(requirements["command_client_id"], int)
+        or not 1 <= requirements["command_client_id"] < 2_147_483_647
+        or requirements["read_client_id"] == requirements["command_client_id"]
+        or requirements["read_client_id"] == requirements["command_client_id"] + 1
+        or requirements["ibapi_version"] != "10.50.2"
+        or requirements["protobuf_version"] != "5.29.5"
+        or len(requirements["sdk_inventory_hash"]) != 64
+        or any(
+            character not in HEX
+            for character in requirements["sdk_inventory_hash"]
+        )
+        or raw.get("environment") != "live"
+        or sdk.get("distribution") != "official_tws_python_api"
+        or sdk.get("installation_mode") != "installer_attested_snapshot"
+        or raw.get("persist_full_account_identifier") is not False
+        or raw.get("account_binding_source")
+        != "managed_accounts_runtime_last4_match"
+    ):
+        raise InstallError("IBKR local provider profile is invalid")
+    for field in ("coordinator_launchd_label", "notification_launchd_label"):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{2,127}", requirements[field]):
+            raise InstallError("IBKR launchd identity is invalid")
+    if requirements["coordinator_launchd_label"] == requirements["notification_launchd_label"]:
+        raise InstallError("IBKR launchd identities must be distinct")
+    return requirements
+
+
+def _distribution_version(metadata: Path, expected_name: str) -> str:
+    if metadata.is_symlink() or not metadata.is_file():
+        raise InstallError("IBKR SDK distribution metadata is missing")
+    try:
+        lines = metadata.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InstallError("IBKR SDK distribution metadata is unreadable") from exc
+    names = [line[6:].strip() for line in lines if line.startswith("Name: ")]
+    versions = [line[9:].strip() for line in lines if line.startswith("Version: ")]
+    if names != [expected_name] or len(versions) != 1:
+        raise InstallError("IBKR SDK distribution metadata is ambiguous")
+    return versions[0]
+
+
+def _sdk_source_inventory(
+    site_packages: Path,
+    *,
+    ibapi_version: str,
+    protobuf_version: str,
+) -> list[dict[str, Any]]:
+    roots = (
+        Path("ibapi"),
+        Path(f"ibapi-{ibapi_version}.dist-info"),
+        Path("google/protobuf"),
+        Path("google/_upb"),
+        Path(f"protobuf-{protobuf_version}.dist-info"),
+    )
+    if _distribution_version(
+        site_packages / roots[1] / "METADATA", "ibapi"
+    ) != ibapi_version:
+        raise InstallError("official IBKR SDK version mismatch")
+    if _distribution_version(
+        site_packages / roots[4] / "METADATA", "protobuf"
+    ) != protobuf_version:
+        raise InstallError("IBKR protobuf version mismatch")
+    records: list[dict[str, Any]] = []
+    total = 0
+    for relative_root in roots:
+        source_root = site_packages / relative_root
+        if source_root.is_symlink() or not source_root.is_dir():
+            raise InstallError("IBKR SDK package root is missing or unsafe")
+        for directory, directory_names, file_names in os.walk(
+            source_root, followlinks=False
+        ):
+            base = Path(directory)
+            for name in tuple(directory_names):
+                candidate = base / name
+                if candidate.is_symlink():
+                    raise InstallError("IBKR SDK package contains a symlink directory")
+                if name == "__pycache__":
+                    directory_names.remove(name)
+            for name in sorted(file_names):
+                if name.endswith(".pyc"):
+                    continue
+                candidate = base / name
+                if candidate.is_symlink() or not candidate.is_file():
+                    raise InstallError("IBKR SDK package contains a non-regular file")
+                size = candidate.stat().st_size
+                if size > _MAX_SDK_FILE_BYTES:
+                    raise InstallError("IBKR SDK package file exceeds size limit")
+                total += size
+                if total > _MAX_SDK_TOTAL_BYTES:
+                    raise InstallError("IBKR SDK package exceeds size limit")
+                relative = candidate.relative_to(site_packages).as_posix()
+                records.append(
+                    {
+                        "path": relative,
+                        "size": size,
+                        "sha256": sha256_file(candidate),
+                    }
+                )
+    records.sort(key=lambda record: str(record["path"]))
+    if not records or len({str(record["path"]) for record in records}) != len(records):
+        raise InstallError("IBKR SDK package inventory is empty or ambiguous")
+    return records
+
+
+def _verify_sdk_snapshot(
+    import_root: Path,
+    records: list[dict[str, Any]],
+) -> None:
+    if import_root.is_symlink() or not import_root.is_dir():
+        raise InstallError("IBKR SDK snapshot import root is unsafe")
+    expected = {str(record["path"]) for record in records}
+    observed: set[str] = set()
+    for candidate in import_root.rglob("*"):
+        if candidate.is_symlink():
+            raise InstallError("IBKR SDK snapshot contains a symlink")
+        if candidate.is_file():
+            observed.add(candidate.relative_to(import_root).as_posix())
+        elif not candidate.is_dir():
+            raise InstallError("IBKR SDK snapshot contains a special file")
+    if observed != expected:
+        raise InstallError("IBKR SDK snapshot inventory differs")
+    for record in records:
+        candidate = import_root / str(record["path"])
+        if (
+            candidate.stat().st_size != int(record["size"])
+            or sha256_file(candidate) != record["sha256"]
+            or stat.S_IMODE(candidate.stat().st_mode) & 0o022
+        ):
+            raise InstallError("IBKR SDK snapshot failed file attestation")
+
+
+def _install_ibkr_sdk_snapshot(
+    install_root: Path,
+    config: dict[str, Any],
+    sdk_venv: Path | None,
+) -> tuple[bytes, dict[str, Any]] | None:
+    requirements = _ibkr_profile_requirements(config)
+    if requirements is None:
+        if sdk_venv is not None:
+            raise InstallError("--ibkr-sdk-venv is valid only for an IBKR profile")
+        return None
+    if sdk_venv is None:
+        raise InstallError("IBKR profile requires --ibkr-sdk-venv")
+    venv = sdk_venv.expanduser().resolve(strict=True)
+    if venv.is_symlink() or not venv.is_dir():
+        raise InstallError("IBKR SDK venv must be a real directory")
+    site_packages = (
+        venv
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    if site_packages.is_symlink() or not site_packages.is_dir():
+        raise InstallError("IBKR SDK venv does not match the installer Python minor version")
+    records = _sdk_source_inventory(
+        site_packages,
+        ibapi_version=str(requirements["ibapi_version"]),
+        protobuf_version=str(requirements["protobuf_version"]),
+    )
+    inventory_hash = sha256_bytes(canonical_json(records))
+    if inventory_hash != requirements["sdk_inventory_hash"]:
+        raise InstallError(
+            "IBKR SDK inventory does not match the release-pinned dependency"
+        )
+    dependency_relative = Path("dependencies/ibkr-sdk") / inventory_hash
+    destination = install_root / dependency_relative
+    import_root = destination / "site-packages"
+    if destination.exists():
+        _verify_sdk_snapshot(import_root, records)
+    else:
+        dependency_parent = install_root / "dependencies/ibkr-sdk"
+        dependency_parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stage = Path(
+            tempfile.mkdtemp(prefix=f".sdk-{inventory_hash[:12]}-", dir=dependency_parent)
+        )
+        try:
+            staged_import = stage / "site-packages"
+            for record in records:
+                relative = Path(str(record["path"]))
+                source = site_packages / relative
+                target = staged_import / relative
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                shutil.copyfile(source, target)
+                target.chmod(0o444)
+            for directory in sorted(
+                (candidate for candidate in stage.rglob("*") if candidate.is_dir()),
+                key=lambda candidate: len(candidate.parts),
+                reverse=True,
+            ):
+                directory.chmod(0o555)
+            stage.chmod(0o555)
+            _verify_sdk_snapshot(staged_import, records)
+            os.replace(stage, destination)
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+        _verify_sdk_snapshot(import_root, records)
+    receipt = {
+        "schema_version": _IBKR_SDK_RECEIPT_SCHEMA,
+        "profile_id": requirements["profile_id"],
+        "account_key": requirements["account_key"],
+        "python_implementation": sys.implementation.name,
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "import_root": (dependency_relative / "site-packages").as_posix(),
+        "ibapi_version": requirements["ibapi_version"],
+        "protobuf_version": requirements["protobuf_version"],
+        "files": records,
+        "inventory_hash": inventory_hash,
+    }
+    receipt_bytes = canonical_json(receipt) + b"\n"
+    return receipt_bytes, {
+        "kind": "ibkr_release_pinned_sdk_snapshot",
+        "profile_id": requirements["profile_id"],
+        "receipt_path": str(_IBKR_SDK_RECEIPT_RELATIVE),
+        "receipt_sha256": sha256_bytes(receipt_bytes),
+        "inventory_hash": inventory_hash,
+        "ibapi_version": requirements["ibapi_version"],
+        "protobuf_version": requirements["protobuf_version"],
+        "source_venv_persisted": False,
+    }
+
+
 @contextmanager
 def _deployment_interlock(root: Path, account_key: str):
-    """Exclude another installer and the account writer across release commit."""
+    """Exclude installers, attended coordinators, and broker writers.
 
-    fingerprint = hashlib.sha256(account_key.encode("utf-8")).hexdigest()[:24]
+    The coordinator lock is always acquired before the broker-writer lock,
+    matching the installed CLI's maintenance interlock.  Taking both even for
+    an unattended release keeps upgrades safe across an authority-mode change.
+    """
+
+    coordinator_key = f"{_ATTENDED_COORDINATOR_LOCK_PREFIX}{account_key}"
+    coordinator_fingerprint = hashlib.sha256(
+        coordinator_key.encode("utf-8")
+    ).hexdigest()[:24]
+    writer_fingerprint = hashlib.sha256(account_key.encode("utf-8")).hexdigest()[
+        :24
+    ]
     global_lock_directory = _user_account_writer_lock_directory()
     if global_lock_directory.is_symlink() or (
         global_lock_directory.exists() and not global_lock_directory.is_dir()
@@ -1136,7 +2932,9 @@ def _deployment_interlock(root: Path, account_key: str):
     os.chmod(global_lock_directory, 0o700)
     paths = (
         root / "control/install.lock",
-        global_lock_directory / f"account-{fingerprint}.writer.lock",
+        global_lock_directory
+        / f"account-{coordinator_fingerprint}.writer.lock",
+        global_lock_directory / f"account-{writer_fingerprint}.writer.lock",
     )
     descriptors: list[int] = []
     try:
@@ -1196,6 +2994,15 @@ def _render_plist(
         raise InstallError(
             _external_failure_code("LAUNCHD_TEMPLATE_INVALID", exc)
         ) from exc
+    expected_template_label = (
+        NOTIFICATION_LAUNCHD_LABEL
+        if command == "notification-worker"
+        else LAUNCHD_LABEL
+    )
+    if not isinstance(value, dict) or value.get("Label") != expected_template_label:
+        raise InstallError("launchd template identity is invalid")
+    value = dict(value)
+    value["Label"] = label
     substitutions = {
         "__PYTHON_EXECUTABLE__": str(python_executable),
         "__LAUNCHER__": str(root / "current/scripts/titan-full-live"),
@@ -1297,6 +3104,9 @@ def _commit_install(
     archive_hash: str,
     interpreter: Path,
     config: dict[str, Any],
+    external_dependency: tuple[bytes, dict[str, Any]] | None,
+    installer_attestation: dict[str, Any],
+    source_provenance: dict[str, Any],
 ) -> dict[str, Any]:
     database = install_root / "state/full-live.sqlite3"
     current_mode = _database_mode(database)
@@ -1318,7 +3128,23 @@ def _commit_install(
         (stage / "release-manifest.json").write_bytes(manifest_bytes)
         (stage / "release-manifest.json").chmod(0o644)
         _verify_existing_release(stage, manifest, manifest_bytes)
-        plist_bytes = _render_plist(install_root, stage, interpreter)
+        ibkr_profile = _ibkr_profile_requirements(config)
+        coordinator_label = (
+            str(ibkr_profile["coordinator_launchd_label"])
+            if ibkr_profile is not None
+            else LAUNCHD_LABEL
+        )
+        notification_label = (
+            str(ibkr_profile["notification_launchd_label"])
+            if ibkr_profile is not None
+            else NOTIFICATION_LAUNCHD_LABEL
+        )
+        plist_bytes = _render_plist(
+            install_root,
+            stage,
+            interpreter,
+            label=coordinator_label,
+        )
         notification_plist_bytes = _render_plist(
             install_root,
             stage,
@@ -1326,7 +3152,7 @@ def _commit_install(
             template_relative=(
                 "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
             ),
-            label=NOTIFICATION_LAUNCHD_LABEL,
+            label=notification_label,
             command="notification-worker",
             stdout_name="notification-worker.launchd.stdout.log",
             stderr_name="notification-worker.launchd.stderr.log",
@@ -1341,12 +3167,33 @@ def _commit_install(
             "release_manifest_sha256": sha256_bytes(manifest_bytes),
             "archive_sha256": archive_hash,
             "source_commit": manifest["source_commit"],
+            "source_provenance": source_provenance,
+            "installer_schema": installer_attestation["schema_version"],
+            "installer_sha256": installer_attestation["sha256"],
+            "installer_source_commit": installer_attestation["source_commit"],
+            "installer_executable_path": installer_attestation["source_path"],
+            "installer_python_executable": installer_attestation[
+                "python_executable"
+            ],
+            "installer_python_implementation": installer_attestation[
+                "python_implementation"
+            ],
+            "installer_python_version": installer_attestation[
+                "python_version"
+            ],
+            "runtime_python_executable": str(interpreter),
             "install_root": str(install_root),
+            "config_path": str(manifest["config_path"]),
+            "deployment_profile_id": (
+                str(ibkr_profile["profile_id"])
+                if ibkr_profile is not None
+                else "legacy-robinhood-full-live"
+            ),
             "current_release": str(destination),
             "launchd": {
-                "label": LAUNCHD_LABEL,
+                "label": coordinator_label,
                 "staged_plist": str(
-                    install_root / "launchd" / f"{LAUNCHD_LABEL}.plist"
+                    install_root / "launchd" / f"{coordinator_label}.plist"
                 ),
                 "disabled": True,
                 "run_at_load": False,
@@ -1354,11 +3201,11 @@ def _commit_install(
                 "actual_loaded_state": "NOT_QUERIED",
                 "process_role": "trading_coordinator_enqueue_only",
                 "notification_worker": {
-                    "label": NOTIFICATION_LAUNCHD_LABEL,
+                    "label": notification_label,
                     "staged_plist": str(
                         install_root
                         / "launchd"
-                        / f"{NOTIFICATION_LAUNCHD_LABEL}.plist"
+                        / f"{notification_label}.plist"
                     ),
                     "disabled": True,
                     "run_at_load": False,
@@ -1371,6 +3218,15 @@ def _commit_install(
             "legacy_runtime_modified": False,
             "activation_required": True,
             "runtime_identity_migration": None,
+            "risk_high_water_migration": None,
+            "external_dependencies": (
+                external_dependency[1] if external_dependency is not None else None
+            ),
+            "sdk_receipt_sha256": (
+                external_dependency[1]["receipt_sha256"]
+                if external_dependency is not None
+                else None
+            ),
         }
 
         if destination.is_symlink():
@@ -1408,6 +3264,15 @@ def _commit_install(
             migrated_at=datetime.fromisoformat(installed_at),
         )
         install_record["runtime_identity_migration"] = migration
+        install_record["risk_high_water_migration"] = (
+            _migrate_ibkr_risk_high_water_ledger(
+                install_root,
+                manifest=manifest,
+                config=config,
+                payloads=payloads,
+                migrated_at=datetime.fromisoformat(installed_at),
+            )
+        )
 
         os.replace(temporary_link, current)
 
@@ -1415,12 +3280,18 @@ def _commit_install(
         # crash can make CLI metadata inconsistent, but every CLI command then
         # fails closed on manifest/current binding instead of running mixed code.
         _atomic_write(install_root / "release-manifest.json", manifest_bytes, 0o600)
-        plist_path = install_root / "launchd" / f"{LAUNCHD_LABEL}.plist"
+        plist_path = install_root / "launchd" / f"{coordinator_label}.plist"
         _atomic_write(plist_path, plist_bytes, 0o600)
         notification_plist_path = (
-            install_root / "launchd" / f"{NOTIFICATION_LAUNCHD_LABEL}.plist"
+            install_root / "launchd" / f"{notification_label}.plist"
         )
         _atomic_write(notification_plist_path, notification_plist_bytes, 0o600)
+        if external_dependency is not None:
+            _atomic_write(
+                install_root / _IBKR_SDK_RECEIPT_RELATIVE,
+                external_dependency[0],
+                0o600,
+            )
         _atomic_write(
             install_root / "control/install-state.json",
             canonical_json(install_record),
@@ -1436,28 +3307,49 @@ def _commit_install(
 
 def install(
     archive: Path,
-    root: Path,
+    root: Path | None,
     *,
+    trusted_source_root: Path,
+    expected_source_revision: str,
     expected_archive_sha256: str | None = None,
     python_executable: Path | None = None,
+    ibkr_sdk_venv: Path | None = None,
 ) -> dict[str, Any]:
     archive = archive.resolve(strict=True)
     expected_hash = _expected_archive_hash(archive, expected_archive_sha256)
-    actual_hash = sha256_file(archive)
-    if actual_hash != expected_hash:
-        raise InstallError("release archive checksum mismatch")
-    manifest, manifest_bytes, payloads = _read_archive(archive)
+    archive_bytes, actual_hash = _capture_verified_archive(archive, expected_hash)
+    manifest, manifest_bytes, payloads = _read_archive(archive_bytes)
     _verify_manifest(manifest, payloads)
-    install_root = _assert_install_root(root)
+    source_provenance = _verify_trusted_source_provenance(
+        manifest,
+        payloads,
+        trusted_source_root=trusted_source_root,
+        expected_source_revision=expected_source_revision,
+    )
     interpreter = _validate_python_executable(python_executable)
+    installer_attestation = _verify_running_installer(manifest, payloads)
 
     try:
-        config = json.loads(payloads["config/full_live.json"])
-        account_key = str(config["account"]["masked_identifier"])
+        config_path = str(manifest["config_path"])
+        config = json.loads(payloads[config_path])
+        if not isinstance(config, dict):
+            raise TypeError("config is not an object")
+        account_key = _configured_account_key(config)
+        if sha256_bytes(canonical_json(config)) != manifest["config_hash"]:
+            raise InstallError("selected config does not match manifest config hash")
+        deployment = config.get("deployment")
+        configured_subtree = (
+            str(deployment.get("install_subtree", ""))
+            if isinstance(deployment, dict)
+            else "Application Support/Titan Momentum/full-live"
+        )
+        if configured_subtree != manifest["install_subtree"]:
+            raise InstallError("selected config and manifest install roots differ")
+        _ibkr_profile_requirements(config)
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise InstallError("release account binding cannot be read") from exc
-    if account_key != "ending-7153":
-        raise InstallError("release account binding is not ending-7153")
+    selected_root = root or (Path.home() / str(manifest["install_subtree"]))
+    install_root = _assert_install_root(selected_root, str(manifest["install_subtree"]))
 
     install_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if install_root.is_symlink() or not install_root.is_dir():
@@ -1477,6 +3369,11 @@ def install(
         _ensure_private_directory(install_root, relative)
 
     with _deployment_interlock(install_root, account_key):
+        external_dependency = _install_ibkr_sdk_snapshot(
+            install_root,
+            config,
+            ibkr_sdk_venv,
+        )
         return _commit_install(
             install_root=install_root,
             manifest=manifest,
@@ -1485,6 +3382,9 @@ def install(
             archive_hash=actual_hash,
             interpreter=interpreter,
             config=config,
+            external_dependency=external_dependency,
+            installer_attestation=installer_attestation,
+            source_provenance=source_provenance,
         )
 
 
@@ -1494,21 +3394,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path.home() / "Library/Application Support/Titan Momentum/full-live",
+        help="exact signed install subtree (defaults below the current home directory)",
     )
     parser.add_argument("--expected-archive-sha256")
+    parser.add_argument(
+        "--trusted-source-root",
+        type=Path,
+        required=True,
+        help="explicit trusted Git repository containing the release commit",
+    )
+    parser.add_argument(
+        "--expected-source-revision",
+        required=True,
+        help="exact expected 40-character Git source commit",
+    )
     parser.add_argument(
         "--python-executable",
         type=Path,
         help="Python >=3.11 interpreter recorded in the staged launchd plist",
+    )
+    parser.add_argument(
+        "--ibkr-sdk-venv",
+        type=Path,
+        help="existing authorized venv containing official ibapi 10.50.2",
     )
     arguments = parser.parse_args(argv)
     try:
         result = install(
             arguments.archive,
             arguments.root,
+            trusted_source_root=arguments.trusted_source_root,
+            expected_source_revision=arguments.expected_source_revision,
             expected_archive_sha256=arguments.expected_archive_sha256,
             python_executable=arguments.python_executable,
+            ibkr_sdk_venv=arguments.ibkr_sdk_venv,
         )
     except (InstallError, FileNotFoundError, OSError) as exc:
         print(_external_failure_code("INSTALL_BLOCKED", exc), file=sys.stderr)

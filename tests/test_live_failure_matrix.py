@@ -171,6 +171,15 @@ def synthetic_enabled_policy() -> PolicyBundle:
     config["execution"]["supported_unattended_mutation"] = True
     config["execution"]["per_mutation_user_confirmation_required"] = False
     config["execution"]["local_mutation_interlock_enabled"] = True
+    config["exits"] = {
+        "target_exit_mode": "first_target_completed_minute_full_exit",
+        "target_index": 0,
+        "target_trigger": "fresh_aligned_completed_one_minute_close_at_or_above_target",
+        "quantity": "full_broker_confirmed_sellable_position",
+        "cancel_working_sells_before_exit": True,
+        "require_strictly_newer_cancel_evidence": True,
+        "deadline_feasibility_gate": True,
+    }
     config["execution"]["local_mutation_interlock_enabled"] = True
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"

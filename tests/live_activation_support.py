@@ -13,6 +13,7 @@ from titan_brain.live.activation import (
     ReadinessEvidence,
 )
 from titan_brain.live.models import BrokerSnapshot
+from titan_brain.live.risk_evidence_binding import risk_high_water_receipt_hash
 from titan_brain.live.state import LiveStateStore, object_hash
 
 
@@ -80,6 +81,7 @@ def stage_canonical_activation(
     created_at: datetime,
     expires_at: datetime,
     writer_owner_id: str | None = None,
+    readiness_overrides: dict[str, object] | None = None,
 ) -> tuple[ActivationRecord, str]:
     """Persist a v2 activation backed by a real durable flat snapshot."""
 
@@ -181,7 +183,32 @@ def stage_canonical_activation(
         broker_account_binding_fingerprint="a" * 64,
         broker_authorization_binding_id="b" * 64,
         component_provenance_hash="c" * 64,
+        coordinator_component_provenance_hash="d" * 64,
+        execution_authority_mode="unattended",
+        attended_mutation_supported=False,
+        broker_command_connected=True,
+        broker_command_next_valid_id_received=True,
+        broker_command_account_authenticated=True,
+        broker_command_write_authority_granted=False,
+        entry_risk_evidence_ready=True,
+        weekly_realized_pnl_complete=True,
+        peak_equity_complete=True,
+        risk_evidence_as_of=created - timedelta(seconds=1),
+        risk_evidence_age_seconds=1.0,
+        risk_baseline_identity_hash="4" * 64,
+        risk_baseline_receipt_hash="5" * 64,
+        risk_high_water_identity_hash="6" * 64,
+        risk_high_water_lineage_hash="7" * 64,
+        risk_high_water_peak_equity="1000",
+        risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+            identity_hash="6" * 64,
+            baseline_receipt_hash="5" * 64,
+            lineage_hash="7" * 64,
+            peak_equity=1000,
+        ),
     )
+    if readiness_overrides:
+        readiness = replace(readiness, **readiness_overrides)
     provisional = ActivationRecord(
         activation_id="0" * 64,
         release_manifest_hash=str(runtime["release_manifest_hash"]),
@@ -218,9 +245,15 @@ def activate_canonical_runtime(
     created_at: datetime,
     activated_at: datetime,
     expires_at: datetime,
+    writer_owner_id: str | None = None,
+    readiness_overrides: dict[str, object] | None = None,
 ) -> tuple[ActivationRecord, str]:
     record, owner = stage_canonical_activation(
-        store, created_at=created_at, expires_at=expires_at
+        store,
+        created_at=created_at,
+        expires_at=expires_at,
+        writer_owner_id=writer_owner_id,
+        readiness_overrides=readiness_overrides,
     )
     store.heartbeat_writer_lease(
         account_key=record.account_key,

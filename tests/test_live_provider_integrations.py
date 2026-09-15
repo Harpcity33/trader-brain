@@ -8,11 +8,17 @@ import json
 import unittest
 
 from titan_brain.scoring import BASELINE_SETUP_WEIGHTS, EQUITY_EXECUTION_WEIGHTS
+from titan_brain.live.broker.ibkr_read import IbkrWholeAccountReadBridge
 from titan_brain.live.composition import RuntimeComposition, RuntimeCompositionError
 from titan_brain.live.discovery_composition import (
     NormalizedQualityEvidenceProvider,
     SUPPORTED_DISCOVERY_COMPOSITION_ID,
+    SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID,
+    SupportedIbkrDiscoveryProviderComposition,
     SupportedDiscoveryProviderComposition,
+)
+from titan_brain.live.ibkr_instrument_provider import (  # noqa: E402
+    IbkrPipelineInstrumentEvidenceProvider,
 )
 from titan_brain.live.market_data import MarketDataCache, MarketSessionState
 from titan_brain.live.massive_adapter import (
@@ -99,7 +105,7 @@ class FakeRest:
         self.calls.append((path, dict(parameters), timeout_seconds))
         if path == "/v1/marketstatus/now":
             return {"status": "open"}
-        if path == "/v3/quotes/XYZ":
+        if path in {"/v3/quotes/XYZ", "/v3/quotes/RISK"}:
             return {
                 "results": [
                     {
@@ -111,7 +117,10 @@ class FakeRest:
                     }
                 ]
             }
-        if path.startswith("/v2/aggs/ticker/XYZ/range/1/minute/"):
+        if path.startswith((
+            "/v2/aggs/ticker/XYZ/range/1/minute/",
+            "/v2/aggs/ticker/RISK/range/1/minute/",
+        )):
             start = NOW.replace(second=0, microsecond=0) - timedelta(minutes=1)
             return {
                 "results": [
@@ -173,6 +182,31 @@ class Tradable:
         return symbol == "XYZ"
 
 
+class AllTradable(Tradable):
+    def is_tradable(self, symbol, *, as_of):
+        self.calls.append((symbol, as_of))
+        return True
+
+
+class FakeIbkrEvidenceProvider(IbkrPipelineInstrumentEvidenceProvider):
+    def __init__(self, *, authenticated=True):
+        self.authenticated = authenticated
+
+    def readiness(self, *, as_of, timeout_seconds):
+        del timeout_seconds
+        return {
+            "ready": self.authenticated,
+            "authenticated": self.authenticated,
+            "observed_at": as_of,
+            "source": "ibkr:tws-contract-details",
+            "blocker": None if self.authenticated else "IBKR_NOT_AUTHENTICATED",
+        }
+
+    def get_instrument_evidence(self, symbol, *, now):
+        del symbol, now
+        return None
+
+
 class Authorizer:
     evidence = authorization()
 
@@ -224,7 +258,7 @@ def quality_record(**updates):
             "independent_geometry_revalidation": True,
             "causal_completed_bar_structure": True,
             "fresh_executable_quote": True,
-            "robinhood_tradable": True,
+            "broker_tradable": True,
             "acceptable_spread": True,
             "adequate_displayed_depth": True,
             "acceptable_extension": True,
@@ -352,9 +386,83 @@ class ProviderIntegrationTests(unittest.TestCase):
         self.assertEqual(str(cache.quotes["XYZ"].bid), "10.01")
         self.assertTrue(cache.quotes["XYZ"].tradable)
         self.assertIn("nbbo_top_of_book", cache.quotes["XYZ"].source)
-        self.assertIn("robinhood_instrument", cache.quotes["XYZ"].source)
+        self.assertIn("broker_instrument", cache.quotes["XYZ"].source)
         self.assertEqual(len(cache.bars["XYZ"]), 1)
         self.assertGreaterEqual(len(tradability.calls), 1)
+
+    def test_owned_risk_symbol_bootstraps_without_discovery_and_survives_rotation(self) -> None:
+        stream = FakeStream()
+        source = MassiveRestStreamSource(
+            candidates=CandidateSource(),
+            rest=FakeRest(),
+            stream=stream,
+            session_state=entry_session,
+            health_max_age_seconds=15,
+            candidate_max_age_seconds=120,
+            maximum_watched_symbols=2,
+        )
+        self.addCleanup(source.close)
+        cache = MarketDataCache(max_active=2)
+        tradability = AllTradable()
+
+        self.assertEqual(
+            source.ensure_risk_symbols(
+                cache,
+                symbols=("RISK",),
+                session_start=NOW - timedelta(minutes=31),
+                now=NOW,
+                tradability=tradability,
+            ),
+            (),
+        )
+        self.assertEqual(stream.symbol_sets[-1], ("RISK",))
+        self.assertTrue(source.wait_for_backfills(timeout_seconds=2))
+        self.assertEqual(source.evidence_snapshot("RISK", now=NOW).readiness.phase, "READY")
+
+        source.hydrate_cache(
+            cache,
+            structures=(structure(),),
+            session_start=NOW - timedelta(minutes=31),
+            now=NOW,
+            tradability=tradability,
+        )
+        self.assertEqual(stream.symbol_sets[-1], ("RISK", "XYZ"))
+        self.assertIn("RISK", source._watched)
+        self.assertIn("XYZ", source._watched)
+
+    def test_owned_risk_symbol_evicts_candidate_at_stream_capacity(self) -> None:
+        stream = FakeStream()
+        source = MassiveRestStreamSource(
+            candidates=CandidateSource(),
+            rest=FakeRest(),
+            stream=stream,
+            session_state=entry_session,
+            health_max_age_seconds=15,
+            candidate_max_age_seconds=120,
+            maximum_watched_symbols=1,
+        )
+        self.addCleanup(source.close)
+        cache = MarketDataCache(max_active=1)
+        tradability = AllTradable()
+
+        source.hydrate_cache(
+            cache,
+            structures=(structure(),),
+            session_start=NOW - timedelta(minutes=31),
+            now=NOW,
+            tradability=tradability,
+        )
+        self.assertEqual(stream.symbol_sets[-1], ("XYZ",))
+        source.ensure_risk_symbols(
+            cache,
+            symbols=("RISK",),
+            session_start=NOW - timedelta(minutes=31),
+            now=NOW,
+            tradability=tradability,
+        )
+        self.assertEqual(stream.symbol_sets[-1], ("RISK",))
+        self.assertEqual(source._watched, ("RISK",))
+        self.assertEqual(source.prepared_structures(now=NOW, limit=64), ())
 
     def test_bounded_urllib_transport_uses_only_injected_authorizer(self) -> None:
         captured = {}
@@ -512,6 +620,49 @@ class ProviderIntegrationTests(unittest.TestCase):
             provider_binding_id=BINDING,
         )
         self.assertFalse(mismatched.tradability_ready(now=NOW))
+
+    def test_ibkr_composition_keeps_massive_market_and_ibkr_instrument_authority(self) -> None:
+        instrument = FakeIbkrEvidenceProvider()
+        provider = SupportedIbkrDiscoveryProviderComposition(
+            source=self.source(),
+            read_bridge=object.__new__(IbkrWholeAccountReadBridge),
+            instrument_evidence=instrument,
+            quality_reader=QualityReader(),
+            provider_binding_id=BINDING,
+            timeout_seconds=2,
+        )
+        self.assertEqual(provider.identity, SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID)
+        self.assertTrue(provider.tradability_ready(now=NOW))
+        leaves = {
+            role: component
+            for role, component, _members in provider.release_components()
+        }
+        self.assertEqual(set(leaves), {
+            "market_source",
+            "ibkr_read_bridge",
+            "instrument_evidence_provider",
+            "quality_evidence_reader",
+        })
+        self.assertIs(leaves["instrument_evidence_provider"], instrument)
+        executor = provider.build_executor(
+            policy=MinimalLivePolicy(),
+            state=object(),
+            broker=object(),
+            writer_lock=object(),
+            latency=None,
+            authority=object(),
+        )
+        self.assertIs(executor.pipeline.instrument_evidence, instrument)
+        self.assertIs(executor.source, provider.market_source)
+
+        blocked = SupportedIbkrDiscoveryProviderComposition(
+            source=self.source(),
+            read_bridge=object.__new__(IbkrWholeAccountReadBridge),
+            instrument_evidence=FakeIbkrEvidenceProvider(authenticated=False),
+            quality_reader=QualityReader(),
+            provider_binding_id=BINDING,
+        )
+        self.assertFalse(blocked.tradability_ready(now=NOW))
 
     def test_runtime_composition_rejects_captured_session_callable(self) -> None:
         marker = MarketSessionState.ENTRY_ELIGIBLE

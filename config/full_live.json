@@ -3,6 +3,7 @@
   "runtime_id": "titan_full_live_autonomy_2026-09-08_v1",
   "strategy_id": "titan_live_attended_compat_premarket_2026-08-27_v2",
   "account": {
+    "account_key": "ending-7153",
     "masked_identifier": "ending-7153",
     "required_last4": "7153",
     "allowed_type": "limited_margin",
@@ -77,6 +78,7 @@
     "a_plus_execution_score": null
   },
   "execution": {
+    "execution_authority_mode": "unattended",
     "order_ack_timeout_seconds": 10,
     "reconcile_interval_seconds": 2,
     "unknown_reconcile_interval_seconds": 1,

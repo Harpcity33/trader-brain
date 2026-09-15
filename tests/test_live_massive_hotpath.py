@@ -93,6 +93,14 @@ class Tradable:
         return symbol != "BAD"
 
 
+class MutableTradable:
+    def __init__(self, value: bool) -> None:
+        self.value = value
+
+    def is_tradable(self, symbol, *, as_of):
+        return self.value
+
+
 class QueueStream:
     def __init__(self) -> None:
         self.authorization = authorization()
@@ -374,6 +382,40 @@ class MassiveHotPathTests(unittest.TestCase):
             "massive_stock_quotes_shares_effective_2025-11-03",
         )
         self.assertEqual(cached.depth_scope, "top_of_book")
+
+    def test_same_cache_refreshes_broker_eligibility_across_regular_open(self) -> None:
+        rest = ImmediateRest()
+        source = self.source(rest, QueueStream())
+        cache = MarketDataCache()
+        eligibility = MutableTradable(False)
+        current = now_utc().replace(second=0, microsecond=0)
+        # Equality is required for the exact 07:00 analysis slot: there is no
+        # completed minute yet, but binding the continuous source is valid.
+        source.hydrate_cache(
+            cache,
+            structures=(structure(),),
+            session_start=current,
+            now=current,
+            tradability=eligibility,
+        )
+        self.assertTrue(source.wait_for_backfills(timeout_seconds=2))
+        quote = cache.quote_for("XYZ")
+        self.assertIsNotNone(quote)
+        assert quote is not None
+        self.assertFalse(quote.tradable)
+
+        eligibility.value = True
+        source.hydrate_cache(
+            cache,
+            structures=(structure(),),
+            session_start=current,
+            now=now_utc(),
+            tradability=eligibility,
+        )
+        refreshed = cache.quote_for("XYZ")
+        self.assertIsNotNone(refreshed)
+        assert refreshed is not None
+        self.assertTrue(refreshed.tradable)
 
     def test_historical_round_lot_replay_is_explicitly_converted(self) -> None:
         cache = MarketDataCache()

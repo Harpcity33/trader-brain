@@ -10,12 +10,13 @@ import re
 from typing import Any, Mapping
 
 
-MANIFEST_SCHEMA = "titan_full_live_release_2026-09-08_v1"
+MANIFEST_SCHEMA = "titan_full_live_release_2026-09-14_v2"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 MANIFEST_FIELDS = {
     "schema_version",
     "release_name",
+    "config_path",
     "source_commit",
     "source_tree",
     "config_hash",
@@ -124,7 +125,6 @@ def load_release_manifest(
         "python_requires": ">=3.11",
         "entrypoint": "scripts/titan-full-live",
         "default_mode": "PAUSED",
-        "install_subtree": "Application Support/Titan Momentum/full-live",
         "launchd_template": "deployment/com.harpcity.trader-brain-full-live.plist.in",
         "notification_launchd_template": (
             "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
@@ -133,6 +133,15 @@ def load_release_manifest(
     for field, expected_value in semantics.items():
         if raw.get(field) != expected_value:
             raise ValueError(f"release manifest semantic mismatch: {field}")
+    config_path = _canonical_relative_path(raw.get("config_path"))
+    config_pure = PurePosixPath(config_path)
+    if config_pure.parent != PurePosixPath("config") or config_pure.suffix != ".json":
+        raise ValueError("release manifest config_path is invalid")
+    if raw.get("install_subtree") not in {
+        "Application Support/Titan Momentum/full-live",
+        "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+    }:
+        raise ValueError("release manifest install_subtree is invalid")
     if not isinstance(raw.get("source_commit"), str) or not GIT_COMMIT.fullmatch(
         str(raw["source_commit"])
     ):
@@ -175,6 +184,8 @@ def load_release_manifest(
         raise ValueError("release manifest file inventory is not sorted")
     if hashlib.sha256(canonical_json(files).encode("utf-8")).hexdigest() != raw["source_tree"]:
         raise ValueError("release manifest source_tree does not match its inventory")
+    if config_path not in seen:
+        raise ValueError("release manifest config_path is not in its inventory")
     if root is not None:
         _strict_installed_inventory(root, seen, raw)
     return raw

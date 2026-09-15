@@ -20,7 +20,7 @@ import tempfile
 from typing import Mapping
 
 
-MANIFEST_SCHEMA = "titan_full_live_release_2026-09-08_v1"
+MANIFEST_SCHEMA = "titan_full_live_release_2026-09-14_v2"
 RELEASE_NAME = "titan-full-live"
 FIXED_EPOCH = 0
 MAX_SOURCE_FILE_BYTES = 16 * 1024 * 1024
@@ -30,10 +30,13 @@ FIXED_RELEASE_PATHS = (
     "README.md",
     "ARCHITECTURE.md",
     "CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md",
+    "scripts/install_full_live_paused.py",
     "scripts/titan-full-live",
     "deployment/com.harpcity.trader-brain-full-live.plist.in",
     "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
     "validation/full-live/2026-09-08/OPERATIONS.md",
+    "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+    "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
 )
 
 
@@ -142,20 +145,19 @@ def _assert_clean_release_source(root: Path) -> None:
         root,
         "ls-files",
         "--others",
-        "--exclude-standard",
         "-z",
         "--",
         ".",
     )
-    untracked_release_paths = sorted(
-        path.decode("utf-8")
+    untracked_paths = sorted(
+        os.fsdecode(path)
         for path in untracked.split(b"\0")
-        if path and _is_release_path(path.decode("utf-8"))
+        if path
     )
-    if untracked_release_paths:
+    if untracked_paths:
         raise ValueError(
-            "release inputs must be committed before building: "
-            + ", ".join(untracked_release_paths)
+            "untracked repository files must be committed or removed before building: "
+            + ", ".join(untracked_paths)
         )
 
 
@@ -174,6 +176,15 @@ def _resolve_source_revision(root: Path, requested: str | None) -> str:
     if resolved != head:
         raise ValueError("source revision must resolve exactly to repository HEAD")
     return head
+
+
+def _resolve_external_output_directory(root: Path, output_dir: Path) -> Path:
+    output = output_dir.resolve()
+    try:
+        output.relative_to(root)
+    except ValueError:
+        return output
+    raise ValueError("release output directory must be outside the source repository")
 
 
 def _git_tree_entries(root: Path, revision: str) -> dict[str, tuple[str, str, str]]:
@@ -258,7 +269,7 @@ def collect_committed_files(
             "path": relative,
             "sha256": sha256_bytes(payloads[relative]),
             "size": len(payloads[relative]),
-            "mode": "0755" if relative == "scripts/titan-full-live" else "0644",
+            "mode": "0755" if entries[relative][0] == "100755" else "0644",
         }
         for relative in selected
     ]
@@ -269,8 +280,38 @@ def build_manifest(
     files: list[dict[str, object]],
     payloads: Mapping[str, bytes],
     source_revision: str,
+    *,
+    config_path: str = "config/full_live.json",
 ) -> tuple[dict[str, object], bytes]:
-    config = json.loads(payloads["config/full_live.json"].decode("utf-8"))
+    config_relative = PurePosixPath(str(config_path))
+    if (
+        config_relative.parent != PurePosixPath("config")
+        or config_relative.suffix != ".json"
+        or config_relative.as_posix() not in payloads
+    ):
+        raise ValueError("release config must be one committed JSON file in config")
+    config_path = config_relative.as_posix()
+    config = json.loads(payloads[config_path].decode("utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError("release config must be an object")
+    approval = config.get("owner_policy_approval")
+    if approval is not None:
+        if not isinstance(approval, dict):
+            raise ValueError("owner policy approval must be an object")
+        for path_field, hash_field in (
+            ("proposal_path", "proposal_sha256"),
+            ("approval_record_path", "approval_record_sha256"),
+        ):
+            relative = approval.get(path_field)
+            digest = approval.get(hash_field)
+            if (
+                not isinstance(relative, str)
+                or relative not in FIXED_RELEASE_PATHS
+                or relative not in payloads
+                or not isinstance(digest, str)
+                or sha256_bytes(payloads[relative]) != digest
+            ):
+                raise ValueError("owner policy approval artifact binding is invalid")
     risk_relative = str(config["risk"]["limits_path"])
     if risk_relative not in payloads:
         raise ValueError("configured risk limits file is not in the committed release")
@@ -289,9 +330,23 @@ def build_manifest(
             }
         )
     )
+    deployment = config.get("deployment")
+    if deployment is not None and not isinstance(deployment, dict):
+        raise ValueError("release deployment profile must be an object")
+    install_subtree = str(
+        deployment.get("install_subtree")
+        if isinstance(deployment, dict)
+        else "Application Support/Titan Momentum/full-live"
+    )
+    if install_subtree not in {
+        "Application Support/Titan Momentum/full-live",
+        "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+    }:
+        raise ValueError("release install subtree is not an approved isolated target")
     descriptor: dict[str, object] = {
         "schema_version": MANIFEST_SCHEMA,
         "release_name": RELEASE_NAME,
+        "config_path": config_path,
         "source_commit": source_revision,
         "source_tree": sha256_bytes(canonical_json(files)),
         "config_hash": config_hash,
@@ -300,7 +355,7 @@ def build_manifest(
         "python_requires": ">=3.11",
         "entrypoint": "scripts/titan-full-live",
         "default_mode": "PAUSED",
-        "install_subtree": "Application Support/Titan Momentum/full-live",
+        "install_subtree": install_subtree,
         "launchd_template": "deployment/com.harpcity.trader-brain-full-live.plist.in",
         "notification_launchd_template": (
             "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in"
@@ -369,14 +424,23 @@ def _atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
             temporary.unlink()
 
 
-def build(source_root: Path, output_dir: Path, source_revision: str | None = None) -> dict[str, str]:
+def build(
+    source_root: Path,
+    output_dir: Path,
+    source_revision: str | None = None,
+    *,
+    config_path: str = "config/full_live.json",
+) -> dict[str, str]:
     root = source_root.resolve()
     revision = _resolve_source_revision(root, source_revision)
+    output = _resolve_external_output_directory(root, output_dir)
     _assert_clean_release_source(root)
     files, payloads = collect_committed_files(root, revision)
-    manifest, manifest_bytes = build_manifest(files, payloads, revision)
+    manifest, manifest_bytes = build_manifest(
+        files, payloads, revision, config_path=config_path
+    )
     release_id = str(manifest["release_manifest_hash"])
-    archive = output_dir.resolve() / f"{RELEASE_NAME}-{release_id[:20]}.tar.gz"
+    archive = output / f"{RELEASE_NAME}-{release_id[:20]}.tar.gz"
     # Recheck immediately before publishing. Archive bytes come only from Git
     # objects at ``revision``, so a later worktree race cannot contaminate the
     # committed payload even if the build is interrupted here.
@@ -396,19 +460,35 @@ def build(source_root: Path, output_dir: Path, source_revision: str | None = Non
         "manifest_sha256": sha256_bytes(manifest_bytes),
         "release_id": release_id,
         "source_commit": revision,
+        "config_path": str(manifest["config_path"]),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--output-dir", type=Path, default=Path("dist/full-live"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="release destination outside the source repository",
+    )
     parser.add_argument(
         "--source-revision",
         help="exact 40-character repository HEAD (defaults to the verified HEAD)",
     )
+    parser.add_argument(
+        "--config",
+        default="config/full_live.json",
+        help="committed config/*.json release profile",
+    )
     arguments = parser.parse_args(argv)
-    result = build(arguments.source_root, arguments.output_dir, arguments.source_revision)
+    result = build(
+        arguments.source_root,
+        arguments.output_dir,
+        arguments.source_revision,
+        config_path=arguments.config,
+    )
     print(json.dumps(result, sort_keys=True, indent=2))
     return 0
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Protocol
 from uuid import UUID, uuid5
 
 from .broker import (
@@ -59,11 +59,12 @@ from .models import (
 from .money import whole_shares
 from .plans import ExpiringPlan
 from .policy import PolicyBundle
-from .risk_runtime import RiskDecision
+from .risk_runtime import RiskDecision, entry_lifecycle_fee_reserve
 from .state import LiveStateStore, object_hash
 
 
 _EXECUTION_NAMESPACE = UUID("f88ff54e-d86f-4e97-977f-b5b2d86ed995")
+_MAX_KNOWN_NO_ACCEPT_CANCEL_ATTEMPTS = 3
 
 
 def _start_latency(
@@ -263,6 +264,25 @@ class SafetyExecutionOutcome:
     broker_order_id: str | None = None
 
 
+class PreparedOrderPlanSealer(Protocol):
+    """Persist the exact broker-local plan for one prepared durable intent.
+
+    The callback is a data-integrity boundary, not mutation authority.  It
+    must raise on denial and return ``None`` on success.  Implementations may
+    be called again after a process restart while the same intent remains
+    PREPARED, so sealing must be exact and idempotent.
+    """
+
+    def __call__(
+        self,
+        *,
+        intent_id: str,
+        plan_id: str,
+        kind: IntentKind,
+        request: OrderRequest,
+    ) -> None: ...
+
+
 class EntryExecutionCoordinator:
     """Submit one validated long-equity entry through a supported broker."""
 
@@ -274,6 +294,7 @@ class EntryExecutionCoordinator:
         state: LiveStateStore,
         broker: BrokerClient,
         authority: MutationAuthority,
+        plan_sealer: PreparedOrderPlanSealer | None = None,
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
     ) -> None:
@@ -282,6 +303,7 @@ class EntryExecutionCoordinator:
         self.state = state
         self.broker = broker
         self.authority = authority
+        self.plan_sealer = plan_sealer
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.latency = latency
 
@@ -446,6 +468,16 @@ class EntryExecutionCoordinator:
             observed_at=self._now(),
             metadata={"inserted": inserted},
         )
+
+        seal_failure = self._seal_prepared_entry(
+            plan=plan,
+            request=request,
+            intent_id=intent_id,
+            reservation_id=reservation_id,
+            replay=not inserted,
+        )
+        if seal_failure is not None:
+            return seal_failure
 
         authority_failures = self._authority_failures(
             snapshot=broker_snapshot,
@@ -777,12 +809,27 @@ class EntryExecutionCoordinator:
         else:
             if not risk_decision.allowed:
                 failures.extend(risk_decision.failures or ("RISK_DECISION_DENIED",))
+            try:
+                expected_stress = (
+                    plan.stress_risk
+                    + entry_lifecycle_fee_reserve(
+                        self.policy,
+                        quantity=plan.quantity,
+                    )
+                )
+            except (TypeError, ValueError):
+                expected_stress = None
+                failures.append("COMMISSION_FEE_RESERVE_INVALID")
             expected = (
                 (risk_decision.proposal_planned_risk, plan.planned_risk, "RISK_PLANNED_MISMATCH"),
-                (risk_decision.proposal_stress_risk, plan.stress_risk, "RISK_STRESS_MISMATCH"),
                 (risk_decision.proposal_reserve, plan.execution_reserve, "RISK_RESERVE_MISMATCH"),
             )
             failures.extend(code for actual, wanted, code in expected if actual != wanted)
+            if (
+                expected_stress is not None
+                and risk_decision.proposal_stress_risk != expected_stress
+            ):
+                failures.append("RISK_STRESS_MISMATCH")
             if any(
                 value < 0
                 for value in (
@@ -790,6 +837,7 @@ class EntryExecutionCoordinator:
                     risk_decision.remaining_portfolio_headroom,
                     risk_decision.remaining_stress_headroom,
                     risk_decision.remaining_buying_power,
+                    risk_decision.remaining_cash_headroom,
                 )
             ):
                 failures.append("RISK_HEADROOM_NEGATIVE")
@@ -868,7 +916,7 @@ class EntryExecutionCoordinator:
         evidence: EvidenceDecision,
     ) -> tuple[DurablePlan, RiskReservation, OrderIntent]:
         reservation_id, intent_id = self._stable_ids(plan)
-        account_key = str(self.policy.config["account"]["masked_identifier"])
+        account_key = self.policy.account_key
         evidence_body = {
             "plan_id": plan.plan_id,
             "completed_bar_end": plan.completed_bar_end.isoformat(),
@@ -1122,6 +1170,76 @@ class EntryExecutionCoordinator:
             or reservation["state"] != ReservationState.RELEASED.value
         )
 
+    def _seal_prepared_entry(
+        self,
+        *,
+        plan: ExpiringPlan,
+        request: OrderRequest,
+        intent_id: str,
+        reservation_id: str,
+        replay: bool,
+    ) -> ExecutionOutcome | None:
+        """Seal after durable prepare and before any broker review.
+
+        An ordinary callback failure is conclusively pre-broker and can
+        release the entry reservation.  ``BaseException`` is deliberately not
+        caught: a process death leaves PREPARED state (and possibly an already
+        appended idempotent seal), which a restart can safely resume without a
+        broker retry ambiguity.
+        """
+
+        if self.plan_sealer is None:
+            return None
+        try:
+            result = self.plan_sealer(
+                intent_id=intent_id,
+                plan_id=plan.plan_id,
+                kind=IntentKind.ENTRY,
+                request=request,
+            )
+            if result is not None:
+                raise TypeError("prepared plan sealer must return None")
+        except Exception as exc:
+            failed_at = self._now()
+            transition_failed = False
+            try:
+                self.state.transition_intent(
+                    intent_id,
+                    IntentState.FAILED,
+                    occurred_at=failed_at,
+                    detail={
+                        "phase": "review",
+                        "code": "AUTONOMOUS_PLAN_SEAL_FAILED",
+                        "error_type": type(exc).__name__,
+                        "known_no_accept": True,
+                    },
+                )
+            except Exception:
+                transition_failed = True
+            risk_reserved = self._release_known_no_exposure(
+                reservation_id=reservation_id,
+                occurred_at=failed_at,
+                reason="AUTONOMOUS_PLAN_SEAL_FAILED",
+            )
+            failures = ["AUTONOMOUS_PLAN_SEAL_FAILED"]
+            if transition_failed:
+                failures.append("AUTONOMOUS_PLAN_SEAL_FAILURE_NOT_DURABLE")
+            return ExecutionOutcome(
+                status=ExecutionStatus.FAILED,
+                plan_id=plan.plan_id,
+                reservation_id=reservation_id,
+                intent_id=intent_id,
+                client_ref_id=request.client_ref_id,
+                risk_reserved=risk_reserved,
+                replay=replay,
+                message=(
+                    "exact autonomous plan sealing failed before broker review; "
+                    "no broker mutation was attempted"
+                ),
+                failure_codes=tuple(failures),
+            )
+        return None
+
     def _ensure_unknown_artifacts(
         self,
         *,
@@ -1132,7 +1250,7 @@ class EntryExecutionCoordinator:
         code: str,
         message: str,
     ) -> None:
-        account_key = str(self.policy.config["account"]["masked_identifier"])
+        account_key = self.policy.account_key
         incident_id = str(uuid5(_EXECUTION_NAMESPACE, f"unknown-incident:{intent_id}"))
         if self.state.row("incidents", "incident_id", incident_id) is None:
             self.state.record_incident(
@@ -1220,7 +1338,7 @@ class EntryExecutionCoordinator:
         reservation_id: str,
     ) -> None:
         expected = self._order_tuple(
-            str(self.policy.config["account"]["masked_identifier"]),
+            self.policy.account_key,
             request,
         )
         if (
@@ -1411,6 +1529,7 @@ class SafetyExecutionCoordinator:
         state: LiveStateStore,
         broker: BrokerClient,
         authority: MutationAuthority,
+        plan_sealer: PreparedOrderPlanSealer | None = None,
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
     ) -> None:
@@ -1418,6 +1537,7 @@ class SafetyExecutionCoordinator:
         self.state = state
         self.broker = broker
         self.authority = authority
+        self.plan_sealer = plan_sealer
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.latency = latency
 
@@ -1573,6 +1693,16 @@ class SafetyExecutionCoordinator:
             observed_at=self._now(),
             metadata={"inserted": inserted},
         )
+
+        seal_failure = self._seal_prepared_sell(
+            plan_id=normalized_plan,
+            kind=normalized_kind,
+            request=exact_request,
+            intent_id=intent_id,
+            replay=not inserted,
+        )
+        if seal_failure is not None:
+            return seal_failure
 
         authority_failures = self._authority_failures(
             snapshot=broker_snapshot,
@@ -1772,7 +1902,10 @@ class SafetyExecutionCoordinator:
         normalized_plan = self._required(plan_id, "plan_id")
         if not isinstance(target, OrderSnapshot):
             raise TypeError("target must be an OrderSnapshot")
-        operation_key = target.broker_order_id
+        operation_key, cancel_attempt, attempt_failure = self._cancel_operation_identity(
+            plan_id=normalized_plan,
+            target=target,
+        )
         kind = IntentKind.CANCEL
         client_ref_id = self._stable_client_ref(
             plan_id=normalized_plan,
@@ -1784,6 +1917,17 @@ class SafetyExecutionCoordinator:
             kind=kind,
             operation_key=operation_key,
         )
+        if attempt_failure is not None:
+            return self._blocked(
+                plan_id=normalized_plan,
+                kind=kind,
+                intent_id=intent_id,
+                client_ref_id=client_ref_id,
+                message="cancel retry is not authorized by conclusive newer evidence",
+                failures=(attempt_failure,),
+                replay=True,
+                broker_order_id=target.broker_order_id,
+            )
 
         existing = self.state.row("order_intents", "intent_id", intent_id)
         if existing is not None:
@@ -1869,6 +2013,8 @@ class SafetyExecutionCoordinator:
             # Provider update time is the cancel causality floor. A later
             # local receipt of unchanged broker facts is telemetry only.
             "target_evidence_floor_at": target.broker_updated_at.isoformat(),
+            "operation_key": operation_key,
+            "cancel_attempt": cancel_attempt,
             "client_ref_id": client_ref_id,
         }
         intent = OrderIntent(
@@ -2115,6 +2261,36 @@ class SafetyExecutionCoordinator:
                     "cancel reached a terminal broker state; refresh positions and exit capacity"
                 ),
             )
+        if current is IntentState.UNKNOWN and order.state.working:
+            # This is positive evidence, not an absence inference: the exact
+            # order is still present in a strictly newer broker fact and is
+            # not pending cancellation.  Resolve this attempt as ineffective
+            # so a later, independently fresh receipt may authorize one
+            # bounded new cancel identity.  The same receipt cannot dispatch.
+            self.state.transition_intent(
+                intent_id,
+                IntentState.FAILED,
+                occurred_at=order.received_at,
+                detail={
+                    "phase": "cancel_reconciliation",
+                    "known_no_accept": True,
+                    "positive_working_order_evidence": True,
+                    "broker_state": order.state.value,
+                    "broker_updated_at": order.broker_updated_at.isoformat(),
+                },
+            )
+            self._resolve_unknown_incident(intent_id, order.received_at)
+            refreshed = self.state.row("order_intents", "intent_id", intent_id)
+            return replace(
+                self._outcome_from_existing(refreshed, replay=True),
+                requires_reconciliation=True,
+                message=(
+                    "strictly newer positive broker evidence proves the prior "
+                    "cancel ineffective; a later fresh receipt may authorize "
+                    "one bounded cancel attempt"
+                ),
+                failure_codes=("CANCEL_PREVIOUS_ATTEMPT_INEFFECTIVE",),
+            )
         return SafetyExecutionOutcome(
             status=(
                 ExecutionStatus.ACKNOWLEDGED
@@ -2238,6 +2414,63 @@ class SafetyExecutionCoordinator:
         except Exception as exc:
             failures.append(f"BROKER_CAPABILITY_PROBE_FAILED:{type(exc).__name__}")
         return tuple(dict.fromkeys(failures)), plan_row
+
+    def _seal_prepared_sell(
+        self,
+        *,
+        plan_id: str,
+        kind: IntentKind,
+        request: OrderRequest,
+        intent_id: str,
+        replay: bool,
+    ) -> SafetyExecutionOutcome | None:
+        """Seal an exact prepared protection/exit before broker review."""
+
+        if self.plan_sealer is None:
+            return None
+        try:
+            result = self.plan_sealer(
+                intent_id=intent_id,
+                plan_id=plan_id,
+                kind=kind,
+                request=request,
+            )
+            if result is not None:
+                raise TypeError("prepared plan sealer must return None")
+        except Exception as exc:
+            failed_at = self._now()
+            transition_failed = False
+            try:
+                self.state.transition_intent(
+                    intent_id,
+                    IntentState.FAILED,
+                    occurred_at=failed_at,
+                    detail={
+                        "phase": "review",
+                        "code": "AUTONOMOUS_PLAN_SEAL_FAILED",
+                        "error_type": type(exc).__name__,
+                        "known_no_accept": True,
+                        "kind": kind.value,
+                    },
+                )
+            except Exception:
+                transition_failed = True
+            failures = ["AUTONOMOUS_PLAN_SEAL_FAILED"]
+            if transition_failed:
+                failures.append("AUTONOMOUS_PLAN_SEAL_FAILURE_NOT_DURABLE")
+            return self._failed(
+                plan_id=plan_id,
+                kind=kind,
+                intent_id=intent_id,
+                client_ref_id=request.client_ref_id,
+                message=(
+                    "exact autonomous safety plan sealing failed before broker "
+                    "review; no broker mutation was attempted"
+                ),
+                failures=tuple(failures),
+                replay=replay,
+            )
+        return None
 
     def _cancel_preflight(
         self,
@@ -2944,6 +3177,102 @@ class SafetyExecutionCoordinator:
         ):
             raise ValueError("durable cancel replay conflicts with exact target")
 
+    def _cancel_operation_identity(
+        self,
+        *,
+        plan_id: str,
+        target: OrderSnapshot,
+    ) -> tuple[str, int, str | None]:
+        """Choose one bounded cancel identity without retrying ambiguity.
+
+        The first logical cancel keeps the historical broker-order-id identity.
+        A later identity is minted only when the immediately prior attempt has
+        durable terminal proof of ``known_no_accept`` and the target arrived in
+        a strictly newer broker receipt.  Accepted, pending, SUBMITTING,
+        UNKNOWN, or otherwise ambiguous attempts always replay their old
+        identity and never grant another broker call.
+        """
+
+        rows = self.state.rows(
+            "SELECT * FROM order_intents WHERE account_key=? AND plan_id=? "
+            "AND kind='CANCEL' ORDER BY created_at, intent_id",
+            (self._account_key, plan_id),
+        )
+        attempts: list[tuple[int, Mapping[str, object], Mapping[str, object]]] = []
+        for row in rows:
+            try:
+                payload = json.loads(str(row["order_tuple_json"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if payload.get("target_broker_order_id") != target.broker_order_id:
+                continue
+            raw_attempt = payload.get("cancel_attempt", 1)
+            if type(raw_attempt) is not int or raw_attempt <= 0:
+                continue
+            attempts.append((raw_attempt, row, payload))
+        if not attempts:
+            return target.broker_order_id, 1, None
+
+        attempt, row, payload = max(attempts, key=lambda item: item[0])
+        operation_key = str(
+            payload.get("operation_key")
+            or (
+                target.broker_order_id
+                if attempt == 1
+                else f"{target.broker_order_id}:attempt:{attempt}"
+            )
+        )
+        state = IntentState(str(row["state"]))
+        if state not in {IntentState.FAILED, IntentState.REJECTED}:
+            return operation_key, attempt, None
+        if not self._intent_has_known_no_accept(row):
+            return operation_key, attempt, None
+        if attempt >= _MAX_KNOWN_NO_ACCEPT_CANCEL_ATTEMPTS:
+            return (
+                operation_key,
+                attempt,
+                "CANCEL_KNOWN_NO_ACCEPT_ATTEMPTS_EXHAUSTED",
+            )
+        prior_updated = self._aware(
+            datetime.fromisoformat(str(row["updated_at"])),
+            "prior cancel updated_at",
+        )
+        if target.received_at <= prior_updated:
+            return (
+                operation_key,
+                attempt,
+                "CANCEL_RETRY_REQUIRES_STRICTLY_NEWER_BROKER_RECEIPT",
+            )
+        next_attempt = attempt + 1
+        return (
+            f"{target.broker_order_id}:attempt:{next_attempt}",
+            next_attempt,
+            None,
+        )
+
+    def _intent_has_known_no_accept(self, row: Mapping[str, object]) -> bool:
+        state = IntentState(str(row["state"]))
+        if state not in {IntentState.FAILED, IntentState.REJECTED}:
+            return False
+        events = self.state.rows(
+            "SELECT payload_json FROM audit_events "
+            "WHERE entity_type='order_intent' AND entity_id=? AND event_type=? "
+            "ORDER BY sequence DESC LIMIT 1",
+            (row["intent_id"], f"INTENT_{state.value}"),
+        )
+        if len(events) != 1:
+            return False
+        try:
+            detail = json.loads(str(events[0]["payload_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if state is IntentState.REJECTED:
+            return detail.get("known_reject") is True
+        return bool(
+            detail.get("known_no_accept") is True
+            or detail.get("phase") in {"review", "review_validation"}
+        )
+
     def _sell_tuple(
         self,
         *,
@@ -3006,7 +3335,7 @@ class SafetyExecutionCoordinator:
 
     @property
     def _account_key(self) -> str:
-        return str(self.policy.config["account"]["masked_identifier"])
+        return self.policy.account_key
 
     @property
     def _account_masked(self) -> str:
@@ -3090,6 +3419,7 @@ __all__ = [
     "EntryExecutionCoordinator",
     "ExecutionOutcome",
     "ExecutionStatus",
+    "PreparedOrderPlanSealer",
     "SafetyExecutionCoordinator",
     "SafetyExecutionOutcome",
 ]

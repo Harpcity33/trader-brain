@@ -31,11 +31,12 @@ from titan_brain.live.pipeline import (
     LiveValidationEvidence,
     PipelineStatus,
     PipelineThresholds,
+    PremarketAnalysisStatus,
     REQUIRED_HARD_GATE_FACTS,
     build_account_risk_snapshot,
 )
 from titan_brain.live.policy import PolicyBundle, sha256_json
-from titan_brain.live.risk_runtime import SessionLatch
+from titan_brain.live.risk_runtime import SessionLatch, entry_lifecycle_fee_reserve
 from titan_brain.live.state import LiveStateStore
 from titan_brain.scoring import BASELINE_SETUP_WEIGHTS, EQUITY_EXECUTION_WEIGHTS
 
@@ -58,6 +59,15 @@ def enabled_policy() -> PolicyBundle:
     config["execution"]["supported_unattended_mutation"] = True
     config["execution"]["per_mutation_user_confirmation_required"] = False
     config["execution"]["local_mutation_interlock_enabled"] = True
+    config["exits"] = {
+        "target_exit_mode": "first_target_completed_minute_full_exit",
+        "target_index": 0,
+        "target_trigger": "fresh_aligned_completed_one_minute_close_at_or_above_target",
+        "quantity": "full_broker_confirmed_sellable_position",
+        "cancel_working_sells_before_exit": True,
+        "require_strictly_newer_cancel_evidence": True,
+        "deadline_feasibility_gate": True,
+    }
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
@@ -103,6 +113,53 @@ def enabled_policy() -> PolicyBundle:
         config=config,
         config_hash=config_hash,
         policy_hash=policy_hash,
+    )
+    result.validate()
+    result.require_activation_ready()
+    return result
+
+
+def policy_with_commission_reserve() -> PolicyBundle:
+    base = enabled_policy()
+    config = copy.deepcopy(base.config)
+    config["execution"][
+        "minimum_commission_reserve_per_order_dollars"
+    ] = "1.00"
+    result = replace(
+        base,
+        config=config,
+        config_hash=sha256_json(config),
+    )
+    result.validate()
+    result.require_activation_ready()
+    return result
+
+
+def premarket_analysis_policy() -> PolicyBundle:
+    base = enabled_policy()
+    config = copy.deepcopy(base.config)
+    config["sessions"].update(
+        {
+            "premarket_mode": "analysis_only",
+            "premarket_orders_enabled": False,
+            "premarket_analysis_interval_minutes": 30,
+            "regular_entry_start": "09:35",
+        }
+    )
+    config["discovery"].update(
+        {
+            "score_policy": "ranking_only",
+            "minimum_setup_score": None,
+            "minimum_execution_score": None,
+            "a_plus_setup_score": None,
+            "a_plus_execution_score": None,
+            "a_plus_enabled": False,
+        }
+    )
+    result = replace(
+        base,
+        config=config,
+        config_hash=sha256_json(config),
     )
     result.validate()
     result.require_activation_ready()
@@ -174,6 +231,42 @@ def cache_for(*symbols: str) -> MarketDataCache:
     return cache
 
 
+def premarket_cache_for(as_of: datetime, *symbols: str) -> MarketDataCache:
+    cache = MarketDataCache()
+    end = as_of - timedelta(minutes=1)
+    for sequence, symbol in enumerate(symbols, start=1):
+        cache.record_completed_bar(
+            CompletedBar.build(
+                symbol=symbol,
+                start_at=end - timedelta(minutes=1),
+                end_at=end,
+                open="9.80",
+                high="10.10",
+                low="9.75",
+                close="10.01",
+                volume=800_000,
+                sequence=sequence,
+                source_event_id=f"massive-premarket-bar-{symbol}",
+            ),
+            received_at=as_of,
+        )
+        cache.record_quote(
+            Quote.build(
+                symbol=symbol,
+                bid="10.00",
+                ask="10.02",
+                bid_size=500,
+                ask_size=500,
+                venue_bid_at=as_of - timedelta(seconds=1),
+                venue_ask_at=as_of - timedelta(seconds=1),
+                observed_at=as_of - timedelta(seconds=1),
+                source="massive_stream_nbbo_top_of_book+ibkr_contract_details",
+                tradable=False,
+            )
+        )
+    return cache
+
+
 def validation_for(
     item: PreparedStructure,
     *,
@@ -211,6 +304,23 @@ class StaticInstrumentProvider:
             exchange_listed=True,
             robinhood_tradable=True,
             regular_hours_eligible=True,
+        )
+
+    def get_premarket_analysis_evidence(
+        self, symbol, *, now, regular_session_open
+    ):
+        return InstrumentEvidence(
+            evidence_id=f"ibkr-analysis-evidence-{symbol}",
+            symbol=symbol,
+            instrument_id=f"ibkr-contract-{symbol}",
+            observed_at=now,
+            source="ibkr:tws-contract-details",
+            asset_type="stock",
+            exchange_listed=True,
+            robinhood_tradable=True,
+            regular_hours_eligible=True,
+            eligibility_at=regular_session_open,
+            eligibility_scope="upcoming_regular_session_analysis",
         )
 
 
@@ -280,7 +390,16 @@ class PipelineTests(unittest.TestCase):
         self.store.close()
         self.temporary.cleanup()
 
-    def pipeline(self, items, *, policy=None, cache=None, broker=None, latency=None):
+    def pipeline(
+        self,
+        items,
+        *,
+        policy=None,
+        cache=None,
+        broker=None,
+        latency=None,
+        thresholds=None,
+    ):
         policy = policy or self.policy
         broker = broker or self.broker
         return FullLiveEntryPipeline(
@@ -293,7 +412,7 @@ class PipelineTests(unittest.TestCase):
             quality_evidence=StaticQualityProvider(
                 {item.symbol: validation_for(item) for item in items}
             ),
-            thresholds=PipelineThresholds(70, 65, 95, 90),
+            thresholds=thresholds or PipelineThresholds(70, 65, 95, 90),
             clock=lambda: NOW,
             latency=latency,
         )
@@ -334,6 +453,68 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(self.store.rows("SELECT * FROM plans")), 1)
         self.assertEqual(len(self.store.rows("SELECT * FROM risk_reservations")), 1)
         self.assertEqual(len(self.store.rows("SELECT * FROM order_intents")), 1)
+
+    def test_active_reservation_fee_is_quantity_and_policy_bound(self) -> None:
+        policy = policy_with_commission_reserve()
+        item = structure()
+        result = self.pipeline([item], policy=policy).run_once(
+            structures=[item],
+            broker_snapshot=self.snapshot,
+            latch=SessionLatch(NOW.date()),
+        )
+        self.assertEqual(result.status, PipelineStatus.ACKNOWLEDGED)
+        assert result.selected is not None
+
+        snapshot, failures = build_account_risk_snapshot(
+            policy=policy,
+            state=self.store,
+            broker_snapshot=self.snapshot,
+            now=NOW,
+        )
+        self.assertEqual(failures, ())
+        assert snapshot is not None
+        self.assertEqual(len(snapshot.exposures), 1)
+        exposure = snapshot.exposures[0]
+        self.assertEqual(
+            exposure.fee_reserve,
+            entry_lifecycle_fee_reserve(
+                policy,
+                quantity=result.selected.quantity,
+            ),
+        )
+        self.assertEqual(
+            exposure.stress_risk,
+            exposure.planned_risk
+            + exposure.execution_reserve
+            + exposure.fee_reserve,
+        )
+
+        mismatched_policy = replace(policy, config_hash="0" * 64)
+        mismatched, binding_failures = build_account_risk_snapshot(
+            policy=mismatched_policy,
+            state=self.store,
+            broker_snapshot=self.snapshot,
+            now=NOW,
+        )
+        self.assertIsNone(mismatched)
+        self.assertIn(
+            "ACTIVE_RESERVATION_POLICY_BINDING_MISMATCH",
+            binding_failures,
+        )
+
+        with self.store.transaction() as connection:
+            connection.execute(
+                "UPDATE risk_reservations "
+                "SET stress_risk_cents=stress_risk_cents+1"
+            )
+        inconsistent, fee_failures = build_account_risk_snapshot(
+            policy=policy,
+            state=self.store,
+            broker_snapshot=self.snapshot,
+            now=NOW,
+        )
+        self.assertIsNone(inconsistent)
+        self.assertIn("ACTIVE_RESERVATION_FEE_BINDING_MISMATCH", fee_failures)
 
     def test_pipeline_records_distinct_compute_risk_durable_and_ack_stages(self) -> None:
         item = structure()
@@ -856,6 +1037,193 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertIn("REGULAR_ENTRY_LANE_CLOSED", result.candidates[0].failures)
         self.assertIsNone(result.attempted_plan_id)
+
+    def test_premarket_analysis_schedule_exact_boundaries_and_dedup_contract(self) -> None:
+        policy = premarket_analysis_policy()
+        at_open = NOW.replace(hour=7, minute=0, second=0, microsecond=0)
+        item = replace(structure(), observed_at=at_open)
+        executor = FullLiveDiscoveryExecutor(
+            source=StaticPreparedSource([item]),
+            pipeline=self.pipeline(
+                [item],
+                policy=policy,
+                cache=premarket_cache_for(at_open, "XYZ"),
+                thresholds=PipelineThresholds.from_policy(policy),
+            ),
+        )
+
+        first = executor.premarket_analysis_due(now=at_open)
+        self.assertTrue(first.due)
+        self.assertEqual(first.scheduled_for, at_open.astimezone(ZoneInfo("UTC")))
+        self.assertEqual(
+            first.next_due_at,
+            (at_open + timedelta(minutes=30)).astimezone(ZoneInfo("UTC")),
+        )
+        at_next = at_open + timedelta(minutes=30)
+        next_slot = executor.premarket_analysis_due(
+            now=at_next,
+            last_completed_slot=first.scheduled_for,
+        )
+        self.assertTrue(next_slot.due)
+        self.assertEqual(next_slot.scheduled_for, at_next.astimezone(ZoneInfo("UTC")))
+        duplicate = executor.premarket_analysis_due(
+            now=at_next + timedelta(minutes=29, seconds=59),
+            last_completed_slot=next_slot.scheduled_for,
+        )
+        self.assertFalse(duplicate.due)
+        self.assertEqual(duplicate.reason, "PREMARKET_SLOT_COMPLETE")
+        invalid = executor.premarket_analysis_due(
+            now=at_next,
+            last_completed_slot=at_open + timedelta(minutes=1),
+        )
+        self.assertFalse(invalid.due)
+        self.assertEqual(
+            invalid.reason, "PREMARKET_LAST_COMPLETED_SLOT_INVALID"
+        )
+
+    def test_premarket_analysis_is_deterministic_read_only_and_never_approves(self) -> None:
+        policy = premarket_analysis_policy()
+        premarket = NOW.replace(hour=8, minute=0)
+        item = replace(
+            structure(),
+            observed_at=premarket - timedelta(seconds=2),
+            targets=(Decimal("11.20"), Decimal("12.00")),
+            payload={
+                **structure().payload,
+                "relative_volume_score": 80,
+                "catalyst_context_score": 70,
+                "sector_market_sympathy_score": 60,
+                "prior_90_day_behavior_score": 50,
+                "gap_behavior_score": 75,
+            },
+        )
+        source = StaticPreparedSource([item])
+        executor = FullLiveDiscoveryExecutor(
+            source=source,
+            pipeline=self.pipeline(
+                [item],
+                policy=policy,
+                cache=premarket_cache_for(premarket, "XYZ"),
+                thresholds=PipelineThresholds.from_policy(policy),
+            ),
+        )
+        before = tuple(self.broker.calls)
+        first = executor.analyze(now=premarket)
+        second = executor.analyze(now=premarket)
+
+        self.assertEqual(first.status, PremarketAnalysisStatus.COMPLETED)
+        self.assertEqual(first.analysis_id, second.analysis_id)
+        self.assertFalse(first.execution_authority)
+        self.assertFalse(first.approved_to_buy)
+        self.assertIn("no candidate is approved to buy", first.message)
+        self.assertEqual(len(first.candidates), 1)
+        candidate = first.candidates[0]
+        self.assertEqual(candidate.rank, 1)
+        self.assertEqual(candidate.instrument_source, "ibkr:tws-contract-details")
+        self.assertEqual(
+            candidate.regular_session_eligibility_at,
+            NOW.replace(hour=9, minute=30).astimezone(ZoneInfo("UTC")),
+        )
+        self.assertFalse(candidate.execution_authority)
+        self.assertFalse(candidate.approved_to_buy)
+        self.assertNotIn("SETUP_SCORE_BELOW_MINIMUM", candidate.hard_gate_failures)
+        self.assertNotIn(
+            "EXECUTION_SCORE_BELOW_MINIMUM", candidate.hard_gate_failures
+        )
+        self.assertIn(
+            "ACCOUNT_CAPACITY_NOT_EVALUATED", candidate.deferred_execution_gates
+        )
+        self.assertEqual(tuple(self.broker.calls), before)
+        self.assertEqual(self.store.rows("SELECT * FROM plans"), [])
+        self.assertEqual(self.store.rows("SELECT * FROM order_intents"), [])
+        self.assertEqual(self.store.rows("SELECT * FROM risk_reservations"), [])
+        self.assertIs(
+            executor._premarket_analysis.market_data, executor.market_data
+        )
+        self.assertIs(
+            executor._premarket_analysis.tradability, executor._tradability
+        )
+
+    def test_premarket_analysis_never_reads_candidates_outside_lane(self) -> None:
+        policy = premarket_analysis_policy()
+        item = structure()
+        source = StaticPreparedSource([item])
+        executor = FullLiveDiscoveryExecutor(
+            source=source,
+            pipeline=self.pipeline(
+                [item],
+                policy=policy,
+                thresholds=PipelineThresholds.from_policy(policy),
+            ),
+        )
+        result = executor.analyze(now=NOW.replace(hour=9, minute=25))
+        self.assertEqual(result.status, PremarketAnalysisStatus.OUTSIDE_LANE)
+        self.assertEqual(source.calls, [])
+        self.assertFalse(result.execution_authority)
+
+    def test_ranking_only_removes_only_score_floors_and_keeps_hard_gates(self) -> None:
+        policy = premarket_analysis_policy()
+        item = structure()
+        evidence = validation_for(item, setup_score=1, execution_score=1)
+        evidence = replace(
+            evidence,
+            hard_gate_facts={
+                **evidence.hard_gate_facts,
+                "acceptable_extension": False,
+            },
+        )
+        pipeline = FullLiveEntryPipeline(
+            policy=policy,
+            market_data=cache_for("XYZ"),
+            state=self.store,
+            broker=self.broker,
+            authority=self.authority,
+            instrument_evidence=StaticInstrumentProvider(),
+            quality_evidence=StaticQualityProvider({"XYZ": evidence}),
+            thresholds=PipelineThresholds.from_policy(policy),
+            clock=lambda: NOW,
+        )
+        scored = pipeline._score_candidate(item, NOW)
+        self.assertNotIn("SETUP_SCORE_BELOW_MINIMUM", scored.failures)
+        self.assertNotIn("EXECUTION_SCORE_BELOW_MINIMUM", scored.failures)
+        self.assertIn("HARD_GATE_FAILED:acceptable_extension", scored.failures)
+        self.assertEqual(
+            PipelineThresholds.from_policy(policy),
+            PipelineThresholds(
+                None,
+                None,
+                None,
+                None,
+                score_policy="ranking_only",
+                a_plus_enabled=False,
+            ),
+        )
+
+    def test_pipeline_threshold_policy_rejects_every_ambiguous_shape(self) -> None:
+        base = premarket_analysis_policy()
+        malformed = (
+            {"score_policy": "ranking_only", "minimum_setup_score": 1},
+            {"score_policy": "ranking_only", "a_plus_enabled": True},
+            {"score_policy": "unknown"},
+            {
+                "score_policy": "threshold_gated",
+                "a_plus_enabled": True,
+                "minimum_setup_score": 70,
+                "minimum_execution_score": None,
+                "a_plus_setup_score": 95,
+                "a_plus_execution_score": 90,
+            },
+        )
+        for update in malformed:
+            with self.subTest(update=update):
+                config = copy.deepcopy(base.config)
+                config["discovery"].update(update)
+                with self.assertRaises(ValueError):
+                    PipelineThresholds.from_policy(replace(base, config=config))
+        missing = copy.deepcopy(base.config)
+        missing["discovery"].pop("minimum_setup_score")
+        with self.assertRaisesRegex(ValueError, "score fields are missing"):
+            PipelineThresholds.from_policy(replace(base, config=missing))
 
 
 if __name__ == "__main__":

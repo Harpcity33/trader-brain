@@ -33,6 +33,11 @@ from titan_brain.live.authority import (
 )
 from titan_brain.live.exits import ExitAction, plan_safe_close
 from titan_brain.live.lifecycle_actions import ProductionLifecycleActions
+from titan_brain.live.market_data import CompletedBar
+from titan_brain.live.massive_adapter import (
+    MassiveSymbolEvidenceSnapshot,
+    MassiveSymbolReadiness,
+)
 from titan_brain.live.models import (
     BrokerOrderState,
     ExpiringPlan,
@@ -76,6 +81,45 @@ class MutableClock:
         self.value += timedelta(seconds=seconds)
 
 
+class TargetEvidenceSource:
+    def __init__(self, bar: CompletedBar, *, ready: bool = True) -> None:
+        self.bar = bar
+        self.ready = ready
+
+    def evidence_snapshot(
+        self, symbol: str, *, now: datetime
+    ) -> MassiveSymbolEvidenceSnapshot:
+        readiness = MassiveSymbolReadiness(
+            symbol=symbol,
+            phase="READY" if self.ready else "BACKFILL_PENDING",
+            ready=self.ready,
+            quote_received_at=now,
+            completed_bar_end=self.bar.end_at,
+            blocker=None if self.ready else "COMPLETED_BAR_STALE",
+        )
+        return MassiveSymbolEvidenceSnapshot(
+            sampled_at=now,
+            symbol=symbol,
+            quote=None,
+            latest_completed_bar=self.bar,
+            readiness=readiness,
+        )
+
+
+class TargetDiscovery:
+    def __init__(self, source: TargetEvidenceSource) -> None:
+        self.source = source
+
+    def execute(self, **_kwargs):
+        return ()
+
+    def final_entry_evidence_failures(self, **_kwargs):
+        return ()
+
+    def target_evidence_snapshot(self, symbol, *, now):
+        return self.source.evidence_snapshot(symbol, now=now)
+
+
 def enabled_policy() -> PolicyBundle:
     base = PolicyBundle.load(ROOT)
     config = copy.deepcopy(base.config)
@@ -84,6 +128,17 @@ def enabled_policy() -> PolicyBundle:
     config["execution"]["supported_unattended_mutation"] = True
     config["execution"]["per_mutation_user_confirmation_required"] = False
     config["execution"]["local_mutation_interlock_enabled"] = True
+    config["exits"] = {
+        "target_exit_mode": "first_target_completed_minute_full_exit",
+        "target_index": 0,
+        "target_trigger": (
+            "fresh_aligned_completed_one_minute_close_at_or_above_target"
+        ),
+        "quantity": "full_broker_confirmed_sellable_position",
+        "cancel_working_sells_before_exit": True,
+        "require_strictly_newer_cancel_evidence": True,
+        "deadline_feasibility_gate": True,
+    }
     config["evidence"]["max_spread_bps"] = "25"
     config["evidence"]["minimum_depth_multiple"] = "5"
     config["risk"]["limits_live_provenance_verified"] = True
@@ -307,7 +362,10 @@ class LifecycleFixture(unittest.TestCase):
         )
 
     def seed_entry(
-        self, fill_quantities: tuple[int, ...] = (2,)
+        self,
+        fill_quantities: tuple[int, ...] = (2,),
+        *,
+        targets: tuple[Decimal, ...] = (),
     ) -> tuple[ExpiringPlan, OrderSnapshot, AccountSnapshot]:
         total = sum(fill_quantities)
         plan = ExpiringPlan(
@@ -327,6 +385,7 @@ class LifecycleFixture(unittest.TestCase):
             policy_hash=self.policy.policy_hash,
             config_hash=self.policy.config_hash,
             evidence_hash="b" * 64,
+            targets=targets,
         )
         reservation = RiskReservation(
             reservation_id="reservation-xyz",
@@ -416,13 +475,18 @@ class LifecycleFixture(unittest.TestCase):
         return plan, order, account
 
     def adapter(
-        self, broker: FakeBrokerClient, *, allow_mutations: bool = True
+        self,
+        broker: FakeBrokerClient,
+        *,
+        allow_mutations: bool = True,
+        discovery=None,
     ) -> ProductionLifecycleActions:
         return ProductionLifecycleActions(
             policy=self.policy,
             state=self.store,
             broker=broker,
             writer_lock=self.lock,
+            discovery=discovery,
             clock=self.clock,
             allow_mutations=allow_mutations,
         )
@@ -440,6 +504,351 @@ class LifecycleFixture(unittest.TestCase):
 
 
 class ProductionLifecycleActionsTests(LifecycleFixture):
+    @staticmethod
+    def target_bar(
+        *, close: str = "11.10", end_at: datetime = NOW
+    ) -> CompletedBar:
+        return CompletedBar.build(
+            symbol="XYZ",
+            start_at=end_at - timedelta(minutes=1),
+            end_at=end_at,
+            open="10.90",
+            high=max(Decimal("11.20"), Decimal(close)),
+            low=min(Decimal("10.10"), Decimal(close)),
+            close=close,
+            volume=25000,
+            sequence=100,
+            source_event_id=f"massive:A:XYZ:{end_at.isoformat()}",
+        )
+
+    def test_target_exit_requires_the_exact_owner_approved_policy_mode(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,), targets=(Decimal("11.00"),))
+        broker = FakeBrokerClient(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(
+            broker,
+            discovery=TargetDiscovery(TargetEvidenceSource(self.target_bar())),
+        )
+        # Preserve the runtime-bound hashes so this unit isolates the target
+        # owner-decision gate rather than the independent identity gate.
+        config = copy.deepcopy(actions.policy.config)
+        config["exits"]["target_exit_mode"] = "disabled_pending_owner_approval"
+        actions.policy = replace(actions.policy, config=config)
+
+        assessment = actions.target_exits(snapshot=account, now=self.clock())
+
+        self.assertEqual(assessment.decisions, ())
+        self.assertIn(
+            "TARGET_EXIT_POLICY_OWNER_APPROVAL_REQUIRED",
+            assessment.blockers,
+        )
+        self.assertEqual(
+            self.store.rows(
+                "SELECT * FROM incidents WHERE category=?",
+                ("AUTONOMOUS_PROFIT_TARGET_EXIT_LATCH",),
+            ),
+            [],
+        )
+
+    def test_completed_first_target_latches_before_protection_cancel(self) -> None:
+        self.arm()
+        plan, entry, account = self.seed_entry(
+            (1,), targets=(Decimal("11.00"), Decimal("12.00"))
+        )
+        stop = OrderSnapshot(
+            broker_order_id="working-stop",
+            account_masked=ACCOUNT_MASKED,
+            symbol="XYZ",
+            side=BrokerSide.SELL,
+            order_type=EquityOrderType.STOP_MARKET,
+            state=BrokerOrderState.CONFIRMED,
+            requested_quantity=Decimal("1"),
+            cumulative_filled_quantity=Decimal("0"),
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GTC,
+            stop_price=Decimal("9.50"),
+            client_ref_id=str(uuid4()),
+            broker_updated_at=self.clock(),
+            received_at=self.clock(),
+        )
+        protected = replace(
+            account,
+            equity_orders=(entry, stop),
+            equity_positions=(position(1, held=1),),
+        )
+        source = TargetEvidenceSource(self.target_bar())
+        actions = self.adapter(
+            FakeBrokerClient(initial_snapshot=protected, clock=self.clock),
+            discovery=TargetDiscovery(source),
+        )
+
+        assessment = actions.target_exits(
+            snapshot=protected, now=self.clock()
+        )
+
+        self.assertEqual(len(assessment.decisions), 1)
+        self.assertEqual(
+            assessment.decisions[0].action, ExitAction.CANCEL_EXIT_ORDERS
+        )
+        self.assertEqual(
+            assessment.decisions[0].cancel_order_ids, ("working-stop",)
+        )
+        self.assertTrue(
+            any(item.startswith("TARGET_EXIT_LATCHED:XYZ") for item in assessment.actions)
+        )
+        latches = self.store.rows(
+            "SELECT * FROM incidents WHERE category=? AND resolved_at IS NULL",
+            ("AUTONOMOUS_PROFIT_TARGET_EXIT_LATCH",),
+        )
+        self.assertEqual(len(latches), 1)
+        self.assertIn(plan.plan_id, str(latches[0]["detail_json"]))
+
+        # A pullback cannot abandon the already latched exit after a restart.
+        source.bar = self.target_bar(close="10.20")
+        self.clock.advance()
+        newer = replace(
+            protected,
+            observed_at=self.clock(),
+            received_at=self.clock(),
+        )
+        replay = actions.target_exits(snapshot=newer, now=self.clock())
+        self.assertEqual(
+            replay.decisions[0].action, ExitAction.CANCEL_EXIT_ORDERS
+        )
+        self.assertTrue(
+            any(item.startswith("TARGET_EXIT_LATCH_ACTIVE:XYZ") for item in replay.actions)
+        )
+
+        self.clock.advance()
+        unexplained_flat = replace(
+            newer,
+            observed_at=self.clock(),
+            received_at=self.clock(),
+            equity_positions=(),
+            equity_orders=(entry,),
+        )
+        unresolved = actions.target_exits(snapshot=unexplained_flat, now=self.clock())
+        self.assertIn(
+            "TARGET_EXIT_FLATNESS_OWNERSHIP_UNRESOLVED:XYZ:ValueError",
+            unresolved.blockers,
+        )
+        self.assertIsNone(
+            self.store.rows(
+                "SELECT resolved_at FROM incidents WHERE category=?",
+                ("AUTONOMOUS_PROFIT_TARGET_EXIT_LATCH",),
+            )[0]["resolved_at"]
+        )
+
+        # Broker flatness is conclusive only after an exactly referenced,
+        # terminal sell fill explains the durable position delta.  This is the
+        # same ordering the service uses: reconcile the exhaustive snapshot,
+        # then assess whether the latch can be retired.
+        exit_ref = str(uuid4())
+        exit_tuple = {
+            "account_key": ACCOUNT_KEY,
+            "account_masked": ACCOUNT_MASKED,
+            "symbol": "XYZ",
+            "side": "sell",
+            "order_type": "market",
+            "quantity": 1,
+            "market_hours": "regular_hours",
+            "time_in_force": "gfd",
+            "limit_price": None,
+            "stop_price": None,
+            "client_ref_id": exit_ref,
+            "operation": "place_equity_order",
+            "plan_id": plan.plan_id,
+            "kind": "EXIT",
+            "operation_key": f"target-exit:{plan.plan_id}:1",
+        }
+        exit_intent = OrderIntent(
+            intent_id="intent-target-exit-xyz",
+            plan_id=plan.plan_id,
+            reservation_id=None,
+            account_key=ACCOUNT_KEY,
+            kind=IntentKind.EXIT,
+            client_ref=exit_ref,
+            order_tuple=exit_tuple,
+            tuple_hash=object_hash(exit_tuple),
+            created_at=self.clock(),
+            acknowledgement_deadline_at=self.clock() + timedelta(seconds=10),
+        )
+        self.store.prepare_safety_intent(exit_intent)
+        self.clock.advance()
+        self.store.transition_intent(
+            exit_intent.intent_id,
+            IntentState.SUBMITTING,
+            occurred_at=self.clock(),
+        )
+        self.clock.advance()
+        self.store.transition_intent(
+            exit_intent.intent_id,
+            IntentState.ACKNOWLEDGED,
+            occurred_at=self.clock(),
+        )
+        self.clock.advance()
+        exit_order = OrderSnapshot(
+            broker_order_id="target-exit-order-xyz",
+            account_masked=ACCOUNT_MASKED,
+            symbol="XYZ",
+            side=BrokerSide.SELL,
+            order_type=EquityOrderType.MARKET,
+            state=BrokerOrderState.FILLED,
+            requested_quantity=Decimal("1"),
+            cumulative_filled_quantity=Decimal("1"),
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id=exit_ref,
+            broker_updated_at=self.clock(),
+            received_at=self.clock(),
+            fills=(
+                FillSnapshot(
+                    fill_id="target-exit-fill-xyz",
+                    quantity=Decimal("1"),
+                    price=Decimal("11.00"),
+                    executed_at=self.clock(),
+                ),
+            ),
+        )
+        flat = replace(
+            unexplained_flat,
+            observed_at=self.clock(),
+            received_at=self.clock(),
+            equity_orders=(entry, exit_order),
+        )
+        reconciled = actions.reconcile(snapshot=flat, now=self.clock())
+        self.assertEqual(reconciled.blockers, ())
+
+        resolved = actions.target_exits(snapshot=flat, now=self.clock())
+        self.assertIn(
+            f"TARGET_EXIT_LATCH_RESOLVED_FLAT:XYZ:{plan.plan_id}",
+            resolved.actions,
+        )
+        self.assertIsNotNone(
+            self.store.rows(
+                "SELECT resolved_at FROM incidents WHERE category=?",
+                ("AUTONOMOUS_PROFIT_TARGET_EXIT_LATCH",),
+            )[0]["resolved_at"]
+        )
+
+    def test_target_exit_rejects_non_minute_or_unready_bar_evidence(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,), targets=(Decimal("11.00"),))
+        bad = CompletedBar.build(
+            symbol="XYZ",
+            start_at=NOW - timedelta(seconds=30),
+            end_at=NOW,
+            open="10.90",
+            high="11.20",
+            low="10.80",
+            close="11.10",
+            volume=25000,
+            sequence=100,
+            source_event_id="massive:A:XYZ:bad-width",
+        )
+        actions = self.adapter(
+            FakeBrokerClient(initial_snapshot=account, clock=self.clock),
+            discovery=TargetDiscovery(TargetEvidenceSource(bad)),
+        )
+
+        assessment = actions.target_exits(snapshot=account, now=self.clock())
+
+        self.assertEqual(assessment.decisions, ())
+        self.assertTrue(
+            any(
+                item.startswith("TARGET_EXIT_COMPLETED_BAR_INVALID:XYZ")
+                for item in assessment.blockers
+            )
+        )
+
+    def test_prepared_protection_is_replayable_and_not_an_unresolved_wedge(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = FakeBrokerClient(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(broker)
+
+        class SimulatedProcessDeath(BaseException):
+            pass
+
+        def die_after_prepare(**_kwargs):
+            raise SimulatedProcessDeath()
+
+        actions.safety.plan_sealer = die_after_prepare
+        with self.assertRaises(SimulatedProcessDeath):
+            actions.protect(
+                snapshot=account,
+                decision=self.protection_decision(account),
+                now=self.clock(),
+            )
+        prepared = self.store.rows(
+            "SELECT state FROM order_intents WHERE kind='PROTECTION'"
+        )
+        self.assertEqual([row["state"] for row in prepared], ["PREPARED"])
+
+        reconciliation = actions.reconcile(snapshot=account, now=self.clock())
+        self.assertEqual(reconciliation.blockers, ())
+        self.assertIn("REPLAYABLE_PROTECTION_PREPARED", reconciliation.actions)
+
+        actions.safety.plan_sealer = None
+        replay = actions.protect(
+            snapshot=account,
+            decision=self.protection_decision(account),
+            now=self.clock(),
+        )
+        self.assertTrue(replay.startswith("PROTECTION:ACKNOWLEDGED"), replay)
+        self.assertEqual(
+            len(
+                tuple(
+                    order
+                    for order in broker.get_account_snapshot(
+                        ACCOUNT_MASKED
+                    ).equity_orders
+                    if order.side is BrokerSide.SELL
+                )
+            ),
+            1,
+        )
+
+    def test_prepared_safe_close_replays_exact_operation_instead_of_new_ordinal(self) -> None:
+        self.arm()
+        _, _, account = self.seed_entry((1,))
+        broker = FakeBrokerClient(initial_snapshot=account, clock=self.clock)
+        actions = self.adapter(broker)
+        decision = plan_safe_close(
+            position=position(1),
+            orders=account.equity_orders,
+            symbol="XYZ",
+            snapshot_received_at=account.observed_at,
+        )
+        self.assertIs(decision.action, ExitAction.SUBMIT_SAFE_CLOSE)
+
+        class SimulatedProcessDeath(BaseException):
+            pass
+
+        def die_after_prepare(**_kwargs):
+            raise SimulatedProcessDeath()
+
+        actions.safety.plan_sealer = die_after_prepare
+        with self.assertRaises(SimulatedProcessDeath):
+            actions.closeout(snapshot=account, decision=decision, now=self.clock())
+        before = self.store.rows(
+            "SELECT intent_id,state,order_tuple_json FROM order_intents "
+            "WHERE kind='EXIT'"
+        )
+        self.assertEqual(len(before), 1)
+        self.assertEqual(before[0]["state"], "PREPARED")
+
+        actions.safety.plan_sealer = None
+        replay = actions.closeout(
+            snapshot=account, decision=decision, now=self.clock()
+        )
+        self.assertTrue(replay.startswith("EXIT:ACKNOWLEDGED"), replay)
+        after = self.store.rows(
+            "SELECT intent_id,state FROM order_intents WHERE kind='EXIT'"
+        )
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0]["intent_id"], before[0]["intent_id"])
+
     def test_final_cancel_authority_accepts_monotone_rereceipt_and_returns_target(self) -> None:
         self.arm()
         _, _, account = self.seed_entry((1,))
@@ -687,6 +1096,7 @@ class ProductionLifecycleActionsTests(LifecycleFixture):
             remaining_portfolio_headroom=Decimal("50.00"),
             remaining_stress_headroom=Decimal("50.00"),
             remaining_buying_power=Decimal("500.00"),
+            remaining_cash_headroom=Decimal("500.00"),
         )
 
         with self.assertRaises(MutationAuthorityDenied) as caught:
@@ -770,7 +1180,7 @@ class ProductionLifecycleActionsTests(LifecycleFixture):
 
     def test_each_fill_gets_one_exact_stop_on_distinct_fresh_snapshots(self) -> None:
         self.arm()
-        _, _, account = self.seed_entry((1, 1))
+        _, _, account = self.seed_entry((1, 1, 1))
         broker = FakeBrokerClient(initial_snapshot=account, clock=self.clock)
         actions = self.adapter(broker)
 
@@ -789,6 +1199,7 @@ class ProductionLifecycleActionsTests(LifecycleFixture):
                 (
                     ProtectionState.WORKING.value,
                     ProtectionState.REQUIRED.value,
+                    ProtectionState.REQUIRED.value,
                 )
             ),
         )
@@ -799,20 +1210,23 @@ class ProductionLifecycleActionsTests(LifecycleFixture):
         )
         self.assertEqual(same_snapshot, "BLOCKED:SNAPSHOT_ALREADY_USED_FOR_MUTATION")
 
-        self.clock.advance()
-        newer = broker.get_account_snapshot(ACCOUNT_MASKED)
-        second = actions.protect(
-            snapshot=newer,
-            decision=self.protection_decision(newer),
-            now=self.clock(),
-        )
-        self.assertTrue(second.startswith("PROTECTION:ACKNOWLEDGED"), second)
+        for _ in range(2):
+            self.clock.advance()
+            newer = broker.get_account_snapshot(ACCOUNT_MASKED)
+            result = actions.protect(
+                snapshot=newer,
+                decision=self.protection_decision(newer),
+                now=self.clock(),
+            )
+            self.assertTrue(
+                result.startswith("PROTECTION:ACKNOWLEDGED"), result
+            )
         stops = tuple(
             order
             for order in broker.get_account_snapshot(ACCOUNT_MASKED).equity_orders
             if order.side is BrokerSide.SELL
         )
-        self.assertEqual(len(stops), 2)
+        self.assertEqual(len(stops), 3)
         self.assertTrue(
             all(
                 (
@@ -970,7 +1384,9 @@ class ProductionLifecycleActionsTests(LifecycleFixture):
             decision=self.protection_decision(account),
             now=self.clock(),
         )
-        self.assertEqual(result, "EXIT:BLOCKED:SNAPSHOT_ALREADY_USED_FOR_MUTATION")
+        self.assertEqual(
+            result, "PROTECTION:REJECTED:BROKER_KNOWN_REJECTION"
+        )
         placed = [call[1] for call in broker.calls if call[0] == FakeBrokerClient.PLACE]
         self.assertEqual(len(placed), 1)
 

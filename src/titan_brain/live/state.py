@@ -824,6 +824,22 @@ class LiveStateStore:
             raise StateConflict("activation readiness does not bind the durable runtime")
         if record.requested_mode != "live" or record.owner_acknowledged_blockers:
             raise StateConflict("activation blockers cannot be acknowledged away")
+        authority_mode = readiness.execution_authority_mode
+        if authority_mode is None:
+            raise StateConflict(
+                "activation readiness execution authority mode is missing"
+            )
+        if authority_mode == "attended_only":
+            authority_contract_ready = bool(
+                readiness.attended_mutation_supported is True
+                and not readiness.unattended_mutation_supported
+                and readiness.per_mutation_confirmation_required
+            )
+        else:
+            authority_contract_ready = bool(
+                readiness.unattended_mutation_supported
+                and not readiness.per_mutation_confirmation_required
+            )
         hard_boolean_gates = (
             readiness.runtime_identity_valid,
             readiness.broker_read_attempted,
@@ -831,8 +847,13 @@ class LiveStateStore:
             readiness.account_active,
             readiness.broker_authenticated,
             readiness.daemon_accessible_supported_client,
-            readiness.unattended_mutation_supported,
-            not readiness.per_mutation_confirmation_required,
+            readiness.broker_command_connected is True,
+            readiness.broker_command_next_valid_id_received is True,
+            readiness.broker_command_account_authenticated is True,
+            readiness.entry_risk_evidence_ready is True,
+            readiness.weekly_realized_pnl_complete is True,
+            readiness.peak_equity_complete is True,
+            authority_contract_ready,
             readiness.standard_orders_reconciled,
             readiness.option_positions_reconciled,
             readiness.option_orders_reconciled,
@@ -870,18 +891,28 @@ class LiveStateStore:
             or readiness.probe_completed_at is None
             or readiness.probe_elapsed_monotonic_seconds is None
             or readiness.probe_clock_stable is not True
+            or readiness.broker_command_write_authority_granted is not False
+            or readiness.risk_evidence_as_of is None
+            or readiness.risk_baseline_identity_hash is None
+            or readiness.risk_baseline_receipt_hash is None
+            or readiness.risk_high_water_identity_hash is None
+            or readiness.risk_high_water_lineage_hash is None
+            or readiness.risk_high_water_peak_equity is None
+            or readiness.risk_high_water_receipt_hash is None
             or (
                 readiness.daemon_accessible_supported_client
                 and (
                     readiness.broker_account_binding_fingerprint is None
                     or readiness.broker_authorization_binding_id is None
                     or readiness.component_provenance_hash is None
+                    or readiness.coordinator_component_provenance_hash is None
                 )
             )
         ):
             raise StateConflict("activation readiness is incomplete or blocked")
         age_limits = (
             (readiness.broker_snapshot_age_seconds, 5.0),
+            (readiness.risk_evidence_age_seconds, 5.0),
             (readiness.durable_snapshot_age_seconds, 5.0),
             (readiness.quote_age_seconds, 5.0),
             (readiness.completed_bar_age_seconds, 120.0),
@@ -1382,14 +1413,100 @@ class LiveStateStore:
             )
             return generation
 
+    def autonomous_interlock_snapshot(
+        self, *, account_key: str
+    ) -> tuple[
+        int,
+        tuple[Mapping[str, Any], ...],
+        tuple[Mapping[str, Any], ...],
+        tuple[Mapping[str, Any], ...],
+        tuple[Mapping[str, Any], ...],
+    ]:
+        """Read the exact runtime/lease/activation join on this held DB handle.
+
+        The autonomous mutation interlock must never reopen a database path that
+        could have been replaced after startup.  This narrow read surface uses
+        the already-validated :class:`LiveStateStore` connection and one SQLite
+        snapshot.  A caller attempting it from inside a write transaction is
+        rejected rather than observing uncommitted authority state.
+        """
+
+        with self._lock:
+            if self._conn.in_transaction:
+                raise StateConflict(
+                    "autonomous interlock cannot run inside a state transaction"
+                )
+            self._conn.execute("BEGIN")
+            try:
+                schema_version = int(
+                    self._conn.execute("PRAGMA user_version").fetchone()[0]
+                )
+                schema_rows = tuple(
+                    dict(row)
+                    for row in self._conn.execute(
+                        "SELECT version FROM schema_meta WHERE singleton=1"
+                    ).fetchall()
+                )
+                runtimes = tuple(
+                    dict(row)
+                    for row in self._conn.execute(
+                        "SELECT * FROM runtime_identity WHERE singleton=1"
+                    ).fetchall()
+                )
+                leases = tuple(
+                    dict(row)
+                    for row in self._conn.execute(
+                        "SELECT * FROM account_writer_lease WHERE account_key=?",
+                        (account_key,),
+                    ).fetchall()
+                )
+                activated_at = (
+                    runtimes[0].get("activated_at") if len(runtimes) == 1 else None
+                )
+                activations = tuple(
+                    dict(row)
+                    for row in self._conn.execute(
+                        """SELECT * FROM activation_records
+                             WHERE account_key=? AND consumed_at=?""",
+                        (account_key, activated_at),
+                    ).fetchall()
+                )
+            finally:
+                self._conn.rollback()
+        return schema_version, schema_rows, runtimes, leases, activations
+
     def heartbeat_writer_lease(
-        self, *, account_key: str, owner_id: str, observed_at: datetime
+        self,
+        *,
+        account_key: str,
+        owner_id: str,
+        observed_at: datetime,
+        generation: int | None = None,
+        process_id: int | None = None,
     ) -> None:
+        if generation is not None and (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation <= 0
+        ):
+            raise ValueError("generation must be positive")
+        if process_id is not None and (
+            isinstance(process_id, bool)
+            or not isinstance(process_id, int)
+            or process_id <= 0
+        ):
+            raise ValueError("process_id must be positive")
         with self.transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM account_writer_lease WHERE account_key=?", (account_key,)
             ).fetchone()
-            if row is None or row["released_at"] is not None or row["owner_id"] != owner_id:
+            if (
+                row is None
+                or row["released_at"] is not None
+                or row["owner_id"] != owner_id
+                or (generation is not None and int(row["generation"]) != generation)
+                or (process_id is not None and int(row["process_id"]) != process_id)
+            ):
                 raise StateConflict("writer lease ownership was lost")
             if _iso(observed_at) < row["heartbeat_at"]:
                 raise OutOfOrderEvent("writer heartbeat moved backwards")
@@ -1399,15 +1516,37 @@ class LiveStateStore:
             )
 
     def release_writer_lease(
-        self, *, account_key: str, owner_id: str, released_at: datetime
+        self,
+        *,
+        account_key: str,
+        owner_id: str,
+        released_at: datetime,
+        generation: int | None = None,
+        process_id: int | None = None,
     ) -> bool:
+        if generation is not None and (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation <= 0
+        ):
+            raise ValueError("generation must be positive")
+        if process_id is not None and (
+            isinstance(process_id, bool)
+            or not isinstance(process_id, int)
+            or process_id <= 0
+        ):
+            raise ValueError("process_id must be positive")
         with self.transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM account_writer_lease WHERE account_key=?", (account_key,)
             ).fetchone()
             if row is None or row["released_at"] is not None:
                 return False
-            if row["owner_id"] != owner_id:
+            if (
+                row["owner_id"] != owner_id
+                or (generation is not None and int(row["generation"]) != generation)
+                or (process_id is not None and int(row["process_id"]) != process_id)
+            ):
                 raise StateConflict("only the current writer may release its lease")
             connection.execute(
                 "UPDATE account_writer_lease SET released_at=?, heartbeat_at=? WHERE account_key=?",

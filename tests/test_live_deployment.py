@@ -5,14 +5,17 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import plistlib
+import runpy
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -23,8 +26,15 @@ from titan_brain.live.release import (
 )
 from titan_brain.live import cli as live_cli
 from titan_brain.live.policy import PolicyBundle
+from titan_brain.live.provider_profile import (
+    IbkrLocalProviderProfile,
+    ProviderProfileError,
+)
 from titan_brain.live.state import LiveStateStore
-from titan_brain.live.writer_lock import AccountWriterLock
+from titan_brain.live.writer_lock import (
+    AccountWriterLock,
+    attended_coordinator_lock_key,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +51,7 @@ def load_script(name: str, relative: str):
 
 builder = load_script("build_full_live_release", "scripts/build_full_live_release.py")
 installer = load_script("install_full_live_paused", "scripts/install_full_live_paused.py")
+validator = load_script("validate_repository", "scripts/validate_repository.py")
 
 
 class GitReleaseFixture:
@@ -83,15 +94,101 @@ class GitReleaseFixture:
             text=True,
         )
 
-    def build(self, output: str = "dist") -> dict[str, str]:
+    def build(
+        self,
+        output: str = "dist",
+        *,
+        config_path: str = "config/full_live.json",
+    ) -> dict[str, str]:
         return builder.build(
             self.source_root,
             self.base / output,
             source_revision=self.source_revision,
+            config_path=config_path,
         )
 
 
 class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
+
+    def test_approved_policy_artifacts_are_bound_and_packaged(self) -> None:
+        result = self.build(config_path="config/full_live_ibkr.json")
+        manifest = load_release_manifest(result["manifest"], verify_files_root=self.source_root)
+        records = {item["path"]: item for item in manifest["files"]}
+        config = json.loads((self.source_root / "config/full_live_ibkr.json").read_text())
+        approval = config["owner_policy_approval"]
+        self.assertEqual(records[approval["proposal_path"]]["sha256"], approval["proposal_sha256"])
+        self.assertEqual(records[approval["approval_record_path"]]["sha256"], approval["approval_record_sha256"])
+        self.assertEqual(config["execution"]["per_mutation_user_confirmation_required"], True)
+
+    def test_committed_approval_artifact_tampering_blocks_release(self) -> None:
+        approval_path = self.source_root / "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md"
+        approval_path.write_text(approval_path.read_text() + "\nUnapproved amendment.\n")
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "alter approval without a new binding")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        with self.assertRaisesRegex(ValueError, "owner policy approval artifact binding"):
+            self.build(config_path="config/full_live_ibkr.json")
+
+    def test_approval_path_outside_packaged_artifacts_blocks_release(self) -> None:
+        config_path = self.source_root / "config/full_live_ibkr.json"
+        config = json.loads(config_path.read_text())
+        config["owner_policy_approval"]["proposal_path"] = "../../owner-approval.md"
+        config_path.write_text(json.dumps(config))
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "unpackaged approval binding")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        with self.assertRaisesRegex(ValueError, "owner policy approval artifact binding"):
+            self.build(config_path="config/full_live_ibkr.json")
+
+    def test_repository_validator_protects_every_target_account_suffix(self) -> None:
+        account_pattern = validator.prohibited_content_patterns()[
+            "unmasked_target_broker_account_number"
+        ]
+        for suffix in validator.PROTECTED_ACCOUNT_LAST4:
+            synthetic_unmasked = ("9" * 5) + suffix
+            self.assertIsNotNone(account_pattern.search(synthetic_unmasked))
+            self.assertIsNone(account_pattern.search(f"ending-{suffix}"))
+            self.assertIsNone(account_pattern.search(f"****{suffix}"))
+
+    def test_ibkr_profile_reserves_distinct_attended_read_client_id(self) -> None:
+        config = json.loads(
+            (ROOT / "config/full_live_ibkr.json").read_text(encoding="utf-8")
+        )
+        profile = IbkrLocalProviderProfile.from_config(config)
+        assert profile is not None
+        self.assertEqual(profile.read_client_id, 19735)
+        self.assertEqual(profile.command_client_id, 19736)
+        self.assertEqual(profile.attended_read_client_id, 19737)
+        self.assertEqual(profile.for_attended_command().read_client_id, 19737)
+        self.assertEqual(
+            profile.sdk_inventory_hash,
+            "3869276715cc00367a2927bfeda3b8c9741b9d81f6df25a3d6f93aae52b70ddc",
+        )
+
+    def test_ibkr_profile_refuses_full_account_identifier_field(self) -> None:
+        config = json.loads(
+            (ROOT / "config/full_live_ibkr.json").read_text(encoding="utf-8")
+        )
+        config["account"]["account_number"] = "U0000000"
+        with self.assertRaisesRegex(ProviderProfileError, "unapproved field"):
+            IbkrLocalProviderProfile.from_config(config)
+
+    def test_installer_accepts_read_zero_without_selecting_it(self) -> None:
+        config = json.loads((ROOT / "config/full_live_ibkr.json").read_text())
+        self.assertEqual(config["local_provider_profile"]["read_client_id"], 19735)
+        config["local_provider_profile"]["read_client_id"] = 0
+        requirements = installer._ibkr_profile_requirements(config)
+        self.assertEqual(requirements["read_client_id"], 0)
+        self.assertEqual(requirements["command_client_id"], 19736)
+
+    def test_installer_rejects_unsafe_client_id_pairs(self) -> None:
+        for read_id, command_id in ((0, 0), (1, 1), (2, 1), (0, 2147483647), (-1, 1), (False, 1)):
+            with self.subTest(read_id=read_id, command_id=command_id):
+                config = json.loads((ROOT / "config/full_live_ibkr.json").read_text())
+                config["local_provider_profile"]["read_client_id"] = read_id
+                config["local_provider_profile"]["command_client_id"] = command_id
+                with self.assertRaisesRegex(installer.InstallError, "profile is invalid"):
+                    installer._ibkr_profile_requirements(config)
 
     def test_repeated_build_is_byte_for_byte_deterministic(self) -> None:
         first = self.build("one")
@@ -126,7 +223,15 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
         self.assertIn("config/full_live.json", inventory)
         self.assertIn("config/risk_limits.json", inventory)
         self.assertIn("src/titan_brain/live/state.py", inventory)
+        self.assertIn("src/titan_brain/live/attended_control.py", inventory)
+        self.assertIn("scripts/install_full_live_paused.py", inventory)
         self.assertIn("scripts/titan-full-live", inventory)
+        installer_record = next(
+            item
+            for item in manifest["files"]
+            if item["path"] == "scripts/install_full_live_paused.py"
+        )
+        self.assertEqual(installer_record["mode"], "0755")
         self.assertEqual(
             manifest["notification_launchd_template"],
             "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
@@ -160,6 +265,31 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
             builder.canonical_json(body)
         ).hexdigest()
         with self.assertRaisesRegex(installer.InstallError, "source_tree"):
+            installer._verify_manifest(manifest, payloads)
+
+    def test_manifest_rejects_missing_internal_runtime_import(self) -> None:
+        result = self.build()
+        manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+        payloads = {
+            entry["path"]: (self.source_root / entry["path"]).read_bytes()
+            for entry in manifest["files"]
+        }
+        missing = "src/titan_brain/live/activation.py"
+        manifest["files"] = [
+            entry for entry in manifest["files"] if entry["path"] != missing
+        ]
+        payloads.pop(missing)
+        manifest["source_tree"] = hashlib.sha256(
+            builder.canonical_json(manifest["files"])
+        ).hexdigest()
+        body = dict(manifest)
+        body.pop("release_manifest_hash")
+        manifest["release_manifest_hash"] = hashlib.sha256(
+            builder.canonical_json(body)
+        ).hexdigest()
+        with self.assertRaisesRegex(
+            installer.InstallError, "internal import is missing"
+        ):
             installer._verify_manifest(manifest, payloads)
 
     def test_archive_has_only_normalized_regular_members(self) -> None:
@@ -197,6 +327,22 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
             "notification-worker",
         ):
             self.assertIn(command, completed.stdout)
+
+    def test_launcher_recognizes_attended_command_only_in_command_position(self) -> None:
+        namespace = runpy.run_path(
+            str(ROOT / "scripts/titan-full-live"),
+            run_name="titan_full_live_launcher_test",
+        )
+        selector = namespace["_release_bound_command_inputs"]
+        self.assertIsNone(
+            selector(
+                release_root=ROOT / "does-not-need-to-exist",
+                install_root=ROOT / "also-does-not-need-to-exist",
+                full_live_config_name="full_live.json",
+                release_manifest_hash=None,
+                arguments=("status", "--install-root", "attended-review"),
+            )
+        )
 
     def test_invalid_source_revision_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "40-character Git commit"):
@@ -249,12 +395,44 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be committed"):
             self.build()
 
-    def test_archive_payloads_are_bound_to_exact_head_blobs(self) -> None:
-        # Unrelated untracked files are not release inputs and cannot affect the
-        # archive. Every actual member must equal the blob stored at HEAD.
-        (self.source_root / "operator-notes.txt").write_text(
-            "not a release input\n", encoding="utf-8"
+    def test_untracked_test_file_is_rejected(self) -> None:
+        uncommitted = self.source_root / "tests/test_uncommitted.py"
+        uncommitted.parent.mkdir(parents=True, exist_ok=True)
+        uncommitted.write_text("raise AssertionError('not reviewed')\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "must be committed or removed"):
+            self.build()
+
+    def test_untracked_non_release_script_is_rejected_even_when_ignored(self) -> None:
+        exclude = self.source_root / ".git/info/exclude"
+        exclude.write_text("scripts/uncommitted-helper.py\n", encoding="utf-8")
+        uncommitted = self.source_root / "scripts/uncommitted-helper.py"
+        uncommitted.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        self.assertEqual(
+            self.git("ls-files", "--others", "--exclude-standard").stdout,
+            "",
         )
+        with self.assertRaisesRegex(ValueError, "must be committed or removed"):
+            self.build()
+
+    def test_output_directory_must_be_outside_repository(self) -> None:
+        for output in (self.source_root, self.source_root / "dist/full-live"):
+            with self.subTest(output=output):
+                with self.assertRaisesRegex(ValueError, "must be outside"):
+                    builder.build(
+                        self.source_root,
+                        output,
+                        source_revision=self.source_revision,
+                    )
+
+    def test_archive_payloads_are_bound_to_exact_head_blobs(self) -> None:
+        # Even a worktree change deliberately hidden from Git status cannot
+        # contaminate the archive: payloads come from the exact HEAD tree.
+        readme = self.source_root / "README.md"
+        self.git("update-index", "--assume-unchanged", "README.md")
+        readme.write_text(
+            "mutable worktree bytes that must never be packaged\n", encoding="utf-8"
+        )
+        self.assertEqual(self.git("status", "--short").stdout, "")
         result = self.build()
         manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
         with tarfile.open(result["archive"], "r:gz") as bundle:
@@ -275,6 +453,8 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
                     capture_output=True,
                 ).stdout
                 self.assertEqual(archived, committed, relative)
+                if relative == "README.md":
+                    self.assertNotEqual(archived, readme.read_bytes())
 
 
 class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
@@ -310,8 +490,604 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         return installer.install(
             Path(self.result["archive"]),
             self.install_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
             python_executable=Path(sys.executable),
         )
+
+    def write_forged_archive(
+        self,
+        name: str,
+        manifest: dict[str, object],
+        payloads: dict[str, bytes],
+    ) -> Path:
+        descriptor = dict(manifest)
+        descriptor.pop("release_manifest_hash", None)
+        manifest["release_manifest_hash"] = hashlib.sha256(
+            builder.canonical_json(descriptor)
+        ).hexdigest()
+        manifest_bytes = builder.canonical_json(manifest) + b"\n"
+        archive = self.base / f"{name}.tar.gz"
+        builder.write_archive(archive, manifest, manifest_bytes, payloads)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        Path(str(archive) + ".sha256").write_text(
+            f"{digest}  {archive.name}\n", encoding="ascii"
+        )
+        return archive
+
+    def test_install_record_attests_running_installer_and_interpreter(self) -> None:
+        record = self.install()
+        expected = hashlib.sha256(
+            (ROOT / "scripts/install_full_live_paused.py").read_bytes()
+        ).hexdigest()
+        self.assertEqual(record["installer_sha256"], expected)
+        self.assertEqual(record["installer_schema"], installer.INSTALL_SCHEMA)
+        self.assertEqual(record["installer_source_commit"], self.source_revision)
+        self.assertEqual(
+            record["source_provenance"],
+            {
+                "repository": str(self.source_root.resolve()),
+                "expected_revision": self.source_revision,
+                "verified_release_files": len(
+                    json.loads(Path(self.result["manifest"]).read_text())["files"]
+                ),
+                "git_replacement_objects_disabled": True,
+            },
+        )
+        self.assertEqual(
+            Path(record["installer_python_executable"]),
+            Path(sys.executable).resolve(),
+        )
+        self.assertEqual(
+            Path(record["runtime_python_executable"]),
+            Path(sys.executable).resolve(),
+        )
+        self.assertIsNone(record["sdk_receipt_sha256"])
+
+    def test_mismatched_running_installer_is_rejected_before_install_mutation(self) -> None:
+        other = self.base / "unattested-installer.py"
+        other.write_text("raise SystemExit(1)\n", encoding="utf-8")
+        other.chmod(0o755)
+        with mock.patch.object(installer, "__file__", str(other)):
+            with self.assertRaisesRegex(
+                installer.InstallError, "does not match the release-attested installer"
+            ):
+                self.install()
+        self.assertFalse(self.install_root.exists())
+
+    def test_install_requires_explicit_trusted_repository_and_revision(self) -> None:
+        with self.assertRaisesRegex(TypeError, "trusted_source_root"):
+            installer.install(Path(self.result["archive"]), self.install_root)
+        self.assertFalse(self.install_root.exists())
+
+    def test_expected_revision_must_match_archive_before_install_mutation(self) -> None:
+        with self.assertRaisesRegex(installer.InstallError, "source_commit"):
+            installer.install(
+                Path(self.result["archive"]),
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision="f" * 40,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_recomputed_forged_archive_payload_is_rejected_by_git(self) -> None:
+        manifest, _manifest_bytes, payloads = installer._read_archive(
+            Path(self.result["archive"]).read_bytes()
+        )
+        forged = payloads["README.md"] + b"\nforged but internally rehashed\n"
+        payloads["README.md"] = forged
+        for record in manifest["files"]:
+            if record["path"] == "README.md":
+                record["size"] = len(forged)
+                record["sha256"] = hashlib.sha256(forged).hexdigest()
+        manifest["source_tree"] = hashlib.sha256(
+            builder.canonical_json(manifest["files"])
+        ).hexdigest()
+        archive = self.write_forged_archive("rehashed-payload", manifest, payloads)
+        installer._verify_manifest(manifest, payloads)
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "differs from trusted Git commit: README.md"
+        ):
+            installer.install(
+                archive,
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_recomputed_forged_manifest_metadata_is_rejected_by_git(self) -> None:
+        manifest, _manifest_bytes, payloads = installer._read_archive(
+            Path(self.result["archive"]).read_bytes()
+        )
+        manifest["policy_hash"] = "f" * 64
+        archive = self.write_forged_archive("rehashed-metadata", manifest, payloads)
+        installer._verify_manifest(manifest, payloads)
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "descriptor differs from trusted Git commit"
+        ):
+            installer.install(
+                archive,
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_recomputed_forged_manifest_mode_is_rejected_by_git(self) -> None:
+        manifest, _manifest_bytes, payloads = installer._read_archive(
+            Path(self.result["archive"]).read_bytes()
+        )
+        for record in manifest["files"]:
+            if record["path"] == "README.md":
+                record["mode"] = "0755"
+        manifest["source_tree"] = hashlib.sha256(
+            builder.canonical_json(manifest["files"])
+        ).hexdigest()
+        archive = self.write_forged_archive("rehashed-mode", manifest, payloads)
+        installer._verify_manifest(manifest, payloads)
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "mode differs from trusted Git commit: README.md"
+        ):
+            installer.install(
+                archive,
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_missing_trusted_repository_is_rejected_before_install_mutation(self) -> None:
+        with self.assertRaisesRegex(installer.InstallError, "repository is missing"):
+            installer.install(
+                Path(self.result["archive"]),
+                self.install_root,
+                trusted_source_root=self.base / "missing-trusted-repository",
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_git_replace_cannot_substitute_expected_source_commit(self) -> None:
+        original_revision = self.source_revision
+        manifest, _manifest_bytes, payloads = installer._read_archive(
+            Path(self.result["archive"]).read_bytes()
+        )
+        readme = self.source_root / "README.md"
+        forged = readme.read_bytes() + b"\nreplacement-object payload\n"
+        readme.write_bytes(forged)
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", "replacement source")
+        replacement_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("replace", original_revision, replacement_revision)
+
+        payloads["README.md"] = forged
+        for record in manifest["files"]:
+            if record["path"] == "README.md":
+                record["size"] = len(forged)
+                record["sha256"] = hashlib.sha256(forged).hexdigest()
+        manifest["source_tree"] = hashlib.sha256(
+            builder.canonical_json(manifest["files"])
+        ).hexdigest()
+        archive = self.write_forged_archive("git-replace-forgery", manifest, payloads)
+
+        with self.assertRaisesRegex(
+            installer.InstallError, "differs from trusted Git commit: README.md"
+        ):
+            installer.install(
+                archive,
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=original_revision,
+                python_executable=Path(sys.executable),
+            )
+        self.assertFalse(self.install_root.exists())
+
+    def test_git_environment_cannot_redirect_trusted_source_queries(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "GIT_DIR": str(self.base / "untrusted.git"),
+                "GIT_OBJECT_DIRECTORY": str(self.base / "untrusted-objects"),
+                "GIT_REPLACE_REF_BASE": "refs/untrusted/replace/",
+            },
+        ):
+            record = self.install()
+        self.assertEqual(
+            record["source_provenance"]["expected_revision"],
+            self.source_revision,
+        )
+
+    def make_ibkr_sdk_venv(self) -> Path:
+        venv = self.base / "authorized-ibkr-sdk-venv"
+        site = (
+            venv
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+        files = {
+            "ibapi/__init__.py": '__version__ = "10.50.2"\n',
+            "ibapi/client.py": "class EClient: pass\n",
+            "ibapi-10.50.2.dist-info/METADATA": (
+                "Metadata-Version: 2.4\nName: ibapi\nVersion: 10.50.2\n"
+                "Requires-Dist: protobuf==5.29.5\n"
+            ),
+            "google/protobuf/__init__.py": '__version__ = "5.29.5"\n',
+            "google/protobuf/message.py": "class Message: pass\n",
+            "google/_upb/_message.abi3.so": "synthetic-test-binary",
+            "protobuf-5.29.5.dist-info/METADATA": (
+                "Metadata-Version: 2.4\nName: protobuf\nVersion: 5.29.5\n"
+            ),
+        }
+        for relative, body in files.items():
+            target = site / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(body, encoding="utf-8")
+        return venv
+
+    def pin_fixture_sdk_inventory(self, venv: Path) -> str:
+        site = (
+            venv
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+        records = installer._sdk_source_inventory(
+            site,
+            ibapi_version="10.50.2",
+            protobuf_version="5.29.5",
+        )
+        inventory_hash = hashlib.sha256(
+            installer.canonical_json(records)
+        ).hexdigest()
+        config_path = self.source_root / "config/full_live_ibkr.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["local_provider_profile"]["sdk"][
+            "expected_inventory_sha256"
+        ] = inventory_hash
+        config_path.write_text(
+            json.dumps(config, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.git("add", "config/full_live_ibkr.json")
+        self.git("commit", "--quiet", "-m", "pin synthetic SDK inventory")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        return inventory_hash
+
+    def test_ibkr_profile_installs_only_to_isolated_root_with_attested_sdk(self) -> None:
+        sdk_venv = self.make_ibkr_sdk_venv()
+        unpinned = self.build(
+            "ibkr-profile-unpinned",
+            config_path="config/full_live_ibkr.json",
+        )
+        ibkr_root = self.application_root / "full-live-ibkr-ending-3103"
+        with self.assertRaisesRegex(
+            installer.InstallError, "does not match the release-pinned dependency"
+        ):
+            installer.install(
+                Path(unpinned["archive"]),
+                ibkr_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+                ibkr_sdk_venv=sdk_venv,
+            )
+        self.assertFalse((ibkr_root / "current").exists())
+
+        pinned_inventory = self.pin_fixture_sdk_inventory(sdk_venv)
+        result = self.build(
+            "ibkr-profile",
+            config_path="config/full_live_ibkr.json",
+        )
+        manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["config_path"], "config/full_live_ibkr.json")
+        self.assertEqual(
+            manifest["install_subtree"],
+            "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+        )
+        with self.assertRaisesRegex(installer.InstallError, "signed subtree"):
+            installer.install(
+                Path(result["archive"]),
+                self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
+                python_executable=Path(sys.executable),
+                ibkr_sdk_venv=sdk_venv,
+            )
+        record = installer.install(
+            Path(result["archive"]),
+            ibkr_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
+            python_executable=Path(sys.executable),
+            ibkr_sdk_venv=sdk_venv,
+        )
+        self.assertEqual(record["deployment_profile_id"], "ibkr-local-live-ending-3103-v1")
+        self.assertEqual(record["config_path"], "config/full_live_ibkr.json")
+        self.assertEqual(
+            record["launchd"]["label"],
+            "com.harpcity.trader-brain-full-live-ibkr-3103",
+        )
+        self.assertEqual(
+            record["launchd"]["notification_worker"]["label"],
+            "com.harpcity.trader-brain-full-live-ibkr-3103-notifications",
+        )
+        external = record["external_dependencies"]
+        self.assertEqual(external["kind"], "ibkr_release_pinned_sdk_snapshot")
+        self.assertEqual(external["inventory_hash"], pinned_inventory)
+        self.assertFalse(external["source_venv_persisted"])
+        current = Path(record["current_release"])
+        policy = PolicyBundle.load(
+            current,
+            config_relative="config/full_live_ibkr.json",
+        )
+        self.assertEqual(policy.account_key, "ibkr-live-ending-3103")
+        self.assertEqual(policy.account_last4, "3103")
+        self.assertEqual(policy.config["local_provider_profile"]["endpoint"]["port"], 4001)
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = live_cli.main(
+                ["local-profile-status", "--install-root", str(ibkr_root)]
+            )
+        self.assertEqual(code, 0)
+        status = json.loads(stdout.getvalue())
+        self.assertEqual(status["sdk"]["status"], "ATTESTED")
+        self.assertEqual(status["account_masked"], "ending-3103")
+        self.assertEqual(status["endpoint"], {
+            "host": "127.0.0.1",
+            "loopback_only": True,
+            "network_probe_performed": False,
+            "port": 4001,
+        })
+        self.assertEqual(status["client_ids"], {
+            "read": 19735,
+            "command": 19736,
+            "isolated": True,
+        })
+        launched = subprocess.run(
+            [
+                sys.executable,
+                str(current / "scripts/titan-full-live"),
+                "local-profile-status",
+                "--install-root",
+                str(ibkr_root),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        launched_status = json.loads(launched.stdout)
+        self.assertEqual(launched_status["account_key"], "ibkr-live-ending-3103")
+        self.assertEqual(launched_status["account_masked"], "ending-3103")
+        self.assertEqual(launched_status["endpoint"]["port"], 4001)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            attended_code = live_cli.main(
+                [
+                    "attended-review",
+                    "--install-root",
+                    str(ibkr_root),
+                    "--purpose",
+                    "entry",
+                    "--side",
+                    "buy",
+                    "--symbol",
+                    "XYZ",
+                    "--quantity",
+                    "10",
+                    "--order-type",
+                    "limit",
+                    "--time-in-force",
+                    "gfd",
+                    "--limit-price",
+                    "10.00",
+                ]
+            )
+        self.assertEqual(attended_code, 2)
+        self.assertIn("IBKR_ATTENDED_SIGNED_TRANSPORT_NOT_SUPPORTED", stderr.getvalue())
+        self.assertFalse((self.install_root / "state/full-live.sqlite3").exists())
+
+    def test_ibkr_sdk_snapshot_tamper_fails_closed(self) -> None:
+        sdk_venv = self.make_ibkr_sdk_venv()
+        pinned_inventory = self.pin_fixture_sdk_inventory(sdk_venv)
+        result = self.build(
+            "ibkr-profile-tamper",
+            config_path="config/full_live_ibkr.json",
+        )
+        ibkr_root = self.application_root / "full-live-ibkr-ending-3103"
+        record = installer.install(
+            Path(result["archive"]),
+            ibkr_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
+            python_executable=Path(sys.executable),
+            ibkr_sdk_venv=sdk_venv,
+        )
+        self.assertEqual(
+            record["external_dependencies"]["inventory_hash"],
+            pinned_inventory,
+        )
+        initialized = self.run_cli(
+            "init-state", "--install-root", str(ibkr_root)
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        receipt = json.loads(
+            (ibkr_root / "control/ibkr-sdk-attestation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        target = ibkr_root / receipt["import_root"] / receipt["files"][0]["path"]
+        target.chmod(0o644)
+        target.write_text("tampered\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = live_cli.main(
+                ["local-profile-status", "--install-root", str(ibkr_root)]
+            )
+        self.assertEqual(code, 2)
+        status = json.loads(stdout.getvalue())
+        self.assertEqual(status["sdk"]["status"], "BLOCKED")
+        self.assertEqual(
+            record["external_dependencies"]["receipt_sha256"],
+            hashlib.sha256(
+                (ibkr_root / "control/ibkr-sdk-attestation.json").read_bytes()
+            ).hexdigest(),
+        )
+        current = Path(record["current_release"])
+        notification_test = subprocess.run(
+            [
+                sys.executable,
+                str(current / "scripts/titan-full-live"),
+                "notification-test",
+                "--install-root",
+                str(ibkr_root),
+                "--event-id",
+                "tampered-sdk-independent-route-test",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            notification_test.returncode, 0, notification_test.stderr
+        )
+        self.assertTrue(json.loads(notification_test.stdout)["queued"])
+        notification_worker = subprocess.run(
+            [
+                sys.executable,
+                str(current / "scripts/titan-full-live"),
+                "notification-worker",
+                "--install-root",
+                str(ibkr_root),
+                "--once",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            notification_worker.returncode, 0, notification_worker.stderr
+        )
+        self.assertEqual(json.loads(notification_worker.stdout)["sent"], 1)
+
+        autonomous = subprocess.run(
+            [
+                sys.executable,
+                str(current / "scripts/titan-full-live"),
+                "doctor",
+                "--install-root",
+                str(ibkr_root),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(autonomous.returncode, 0)
+        self.assertIn(
+            "IBKR SDK snapshot file failed attestation", autonomous.stderr
+        )
+
+    def test_installed_notification_setup_works_with_missing_sdk_without_provider_access(self) -> None:
+        sdk_venv = self.make_ibkr_sdk_venv()
+        self.pin_fixture_sdk_inventory(sdk_venv)
+        result = self.build("notification-setup", config_path="config/full_live_ibkr.json")
+        ibkr_root = self.application_root / "full-live-ibkr-ending-3103"
+        record = installer.install(
+            Path(result["archive"]), ibkr_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
+            python_executable=Path(sys.executable), ibkr_sdk_venv=sdk_venv,
+        )
+        current = Path(record["current_release"])
+        receipt = json.loads((ibkr_root / "control/ibkr-sdk-attestation.json").read_text())
+        sdk_root = ibkr_root / receipt["import_root"]
+        sdk_root.parent.chmod(0o755)
+        sdk_root.rename(sdk_root.with_name(sdk_root.name + "-offline"))
+        self.assertFalse(sdk_root.exists())
+        state_before = {
+            p.relative_to(ibkr_root).as_posix(): p.read_bytes()
+            for p in (ibkr_root / "state").rglob("*") if p.is_file()
+        }
+        # Run the installed launcher and its installed modules in an isolated
+        # process. Reject all provider/secret access; only metadata is simulated.
+        harness = textwrap.dedent("""\
+            import runpy, socket, subprocess, sys, urllib.request
+            from pathlib import Path
+            release = Path(sys.argv[1])
+            install = sys.argv[2]
+            sys.path.insert(0, str(release / "src"))
+            def forbidden(*args, **kwargs):
+                raise AssertionError("provider or secret access from setup diagnostics")
+            socket.create_connection = forbidden
+            socket.socket.connect = forbidden
+            urllib.request.urlopen = forbidden
+            subprocess.run = forbidden
+            from titan_brain.live import cli, provider_clients, provider_profile
+            cli._runtime_composition = forbidden
+            provider_profile.activate_installed_sdk = forbidden
+            provider_clients.MacOSKeychain.read = forbidden
+            provider_clients.MacOSKeychain.read_text = forbidden
+            provider_clients.MacOSKeychain.metadata_status = lambda self, item: "MISSING"
+            sys.argv = [str(release / "scripts/titan-full-live"),
+                        "notification-setup-status", "--install-root", install]
+            runpy.run_path(sys.argv[0], run_name="__main__")
+        """)
+        launched = subprocess.run(
+            [sys.executable, "-I", "-S", "-B", "-c", harness, str(current), str(ibkr_root)],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        self.assertEqual(launched.returncode, 2, launched.stderr)
+        self.assertEqual(launched.stderr, "")
+        report = json.loads(launched.stdout)
+        self.assertEqual(report["selected_profile"], "ibkr_gmail")
+        self.assertEqual(report["credential_account"], "ibkr-live-ending-3103")
+        self.assertEqual(len(report["keychain_items"]), 5)
+        for field in (
+            "credential_contents_read", "broker_checks_performed",
+            "market_data_checks_performed", "network_checks_performed",
+            "delivery_attempted", "readiness_evidence_issued", "ready_for_delivery",
+        ):
+            self.assertIs(report[field], False)
+        self.assertEqual(state_before, {
+            p.relative_to(ibkr_root).as_posix(): p.read_bytes()
+            for p in (ibkr_root / "state").rglob("*") if p.is_file()
+        })
+
+    def test_installer_uses_configured_opaque_account_key(self) -> None:
+        config_path = self.source_root / "config/full_live.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["account"]["account_key"] = "ibkr-live-7153"
+        config_path.write_text(
+            json.dumps(config, indent=2) + "\n", encoding="utf-8"
+        )
+        self.git("add", "config/full_live.json")
+        self.git("commit", "--quiet", "-m", "parameterize account namespace")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        result = self.build("parameterized-account")
+        root = self.install_root
+        installer.install(
+            Path(result["archive"]),
+            root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
+            python_executable=Path(sys.executable),
+        )
+        initialized = self.run_cli("init-state", "--install-root", str(root))
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        with LiveStateStore(root / "state/full-live.sqlite3") as state:
+            runtime = state.runtime_status()
+        self.assertIsNotNone(runtime)
+        assert runtime is not None
+        self.assertEqual(runtime["account_key"], "ibkr-live-7153")
 
     def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Exercise command behavior with an in-process test lock resolver.
@@ -628,6 +1404,8 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         upgraded = installer.install(
             Path(next_result["archive"]),
             self.install_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
             python_executable=Path(sys.executable),
         )
         self.assertNotEqual(first["release_id"], upgraded["release_id"])
@@ -922,6 +1700,8 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             installer.install(
                 Path(next_result["archive"]),
                 self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
                 python_executable=Path(sys.executable),
             )
         self.assertEqual((self.install_root / "current").resolve(), old_release)
@@ -967,6 +1747,8 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             installer.install(
                 Path(next_result["archive"]),
                 self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
                 python_executable=Path(sys.executable),
             )
         self.assertEqual((self.install_root / "current").resolve(), old_release)
@@ -982,6 +1764,8 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         migrated = installer.install(
             Path(next_result["archive"]),
             self.install_root,
+            trusted_source_root=self.source_root,
+            expected_source_revision=self.source_revision,
             python_executable=Path(sys.executable),
         )
         migration = migrated["runtime_identity_migration"]
@@ -1060,6 +1844,20 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
         finally:
             lock.release()
 
+    def test_attended_coordinator_lock_blocks_release_switch(self) -> None:
+        lock = AccountWriterLock(
+            self.fixed_lock_directory,
+            attended_coordinator_lock_key("ending-7153"),
+            owner_id="running-attended-coordinator",
+        )
+        lock.acquire()
+        try:
+            with self.assertRaisesRegex(installer.InstallError, "interlock is held"):
+                self.install()
+            self.assertFalse((self.install_root / "current").exists())
+        finally:
+            lock.release()
+
     def test_parallel_install_roots_share_one_account_global_interlock(self) -> None:
         first = self.base / "installation-a/full-live"
         second = self.base / "unrelated/installation-b/full-live"
@@ -1098,19 +1896,58 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             installer.install(
                 corrupt,
                 self.install_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
                 expected_archive_sha256=self.result["archive_sha256"],
             )
         with self.assertRaisesRegex(installer.InstallError, "must be under"):
             installer.install(
                 archive,
                 self.application_root,
+                trusted_source_root=self.source_root,
+                expected_source_revision=self.source_revision,
                 python_executable=Path(sys.executable),
             )
         self.assertEqual(self.legacy.read_text(encoding="utf-8"), "legacy-unchanged")
 
-    def test_installer_has_no_service_or_process_launch_path(self) -> None:
+    def test_archive_path_replacement_during_verification_fails_closed(self) -> None:
+        archive = Path(self.result["archive"])
+        replacement = Path(
+            self.build_next_release("archive replacement race")["archive"]
+        )
+        assert_identity = installer._assert_archive_path_identity
+        first_check_complete = False
+
+        def replace_after_first_identity_check(path, expected):
+            nonlocal first_check_complete
+            assert_identity(path, expected)
+            if not first_check_complete:
+                first_check_complete = True
+                replacement.replace(path)
+
+        with mock.patch.object(
+            installer,
+            "_assert_archive_path_identity",
+            side_effect=replace_after_first_identity_check,
+        ):
+            with self.assertRaisesRegex(
+                installer.InstallError, "release archive changed"
+            ):
+                installer.install(
+                    archive,
+                    self.install_root,
+                    trusted_source_root=self.source_root,
+                    expected_source_revision=self.source_revision,
+                    expected_archive_sha256=self.result["archive_sha256"],
+                    python_executable=Path(sys.executable),
+                )
+        self.assertTrue(first_check_complete)
+        self.assertFalse(self.install_root.exists())
+
+    def test_installer_has_no_service_launch_path(self) -> None:
         source = (ROOT / "scripts/install_full_live_paused.py").read_text(encoding="utf-8")
-        self.assertNotIn("import subprocess", source)
+        self.assertIn('["git", "--no-replace-objects"', source)
+        self.assertNotIn('["launchctl"', source)
         self.assertNotIn("os.system", source)
         self.assertNotIn("Popen", source)
         template = plistlib.loads(

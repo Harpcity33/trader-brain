@@ -127,6 +127,11 @@ class Quote:
     def newest_venue_at(self) -> datetime:
         return max(self.venue_bid_at, self.venue_ask_at)
 
+    @property
+    def oldest_venue_at(self) -> datetime:
+        """Both sides must be fresh before their prices/sizes gate an entry."""
+        return min(self.venue_bid_at, self.venue_ask_at)
+
 
 @dataclass(frozen=True)
 class CompletedBar:
@@ -377,6 +382,17 @@ class MarketDataCache:
         with self._lock:
             return self.quotes.get(_symbol(symbol))
 
+    def update_quote_tradability(self, symbol: str, *, tradable: bool) -> None:
+        """Join independent eligibility without changing executable quote times."""
+
+        if not isinstance(tradable, bool):
+            raise ValueError("tradability must be boolean")
+        normalized = _symbol(symbol)
+        with self._lock:
+            quote = self.quotes.get(normalized)
+            if quote is not None and quote.tradable != tradable:
+                self.quotes[normalized] = replace(quote, tradable=tradable)
+
     def bar_for(self, symbol: str, end_at: datetime) -> CompletedBar | None:
         normalized = _symbol(symbol)
         completed_at = _aware(end_at, "end_at")
@@ -460,11 +476,11 @@ class MarketDataCache:
         if quote is None:
             failures.append("QUOTE_MISSING")
         else:
-            quote_age = (current - quote.newest_venue_at).total_seconds()
+            quote_age = (current - quote.oldest_venue_at).total_seconds()
             spread = quote.spread_bps
-            if quote_age < -1:
+            if (current - quote.newest_venue_at).total_seconds() < -1:
                 failures.append("QUOTE_FUTURE_DATED")
-            elif quote_age > quote_max_age_seconds:
+            if quote_age > quote_max_age_seconds:
                 failures.append("QUOTE_STALE")
             if not quote.tradable:
                 failures.append("ROBINHOOD_NOT_TRADABLE")

@@ -6,12 +6,17 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
+from titan_brain.live import cli
+from titan_brain.live.cli import InstallLayout
 from titan_brain.live.control import ControlError, ControlInbox, HmacControlAuthenticator
 from titan_brain.live.composition import RuntimeComposition, RuntimeCompositionError
 from titan_brain.live.models import BrokerSnapshot
 from titan_brain.live.state import LiveStateStore, canonical_json
+from titan_brain.live.writer_lock import AccountWriterLock
 from tests.live_activation_support import activate_canonical_runtime
 
 
@@ -258,6 +263,185 @@ class ControlInboxTests(unittest.TestCase):
                     "production_authorization_binding_id": "e" * 64,
                 },
             )
+
+
+class EmergencyControlCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.source_root = Path(__file__).resolve().parents[1]
+        self.layout = InstallLayout(self.root)
+        self.layout.release_root = self.source_root
+        self.layout.lock_path = self.root / "locks"
+        self.account_key = "ibkr-live-ending-3103"
+        self.binding = "f" * 64
+        self.policy = SimpleNamespace(
+            account_key=self.account_key,
+            runtime_id="full-live-emergency-control-test",
+            config_hash="b" * 64,
+            policy_hash="c" * 64,
+            execution_authority_mode="unattended",
+            config={
+                "execution": {
+                    "execution_authority_mode": "unattended",
+                    "broker_adapter": "supported_production_transport",
+                    "production_account_binding_fingerprint": "d" * 64,
+                    "production_authorization_binding_id": self.binding,
+                },
+                "evidence": {"broker_snapshot_max_age_seconds": 5},
+            },
+        )
+        control_source = self.source_root / "src/titan_brain/live/control.py"
+        encoded = control_source.read_bytes()
+        self.manifest = {
+            "release_manifest_hash": RELEASE,
+            "source_commit": "emergency-control-test",
+            "files": [
+                {
+                    "path": "src/titan_brain/live/control.py",
+                    "sha256": hashlib.sha256(encoded).hexdigest(),
+                    "size": len(encoded),
+                }
+            ],
+        }
+        with LiveStateStore(self.layout.state_path) as store:
+            store.initialize_runtime(
+                runtime_id=self.policy.runtime_id,
+                account_key=self.account_key,
+                release_manifest_hash=RELEASE,
+                config_hash=self.policy.config_hash,
+                policy_hash=self.policy.policy_hash,
+                initialized_at=NOW,
+            )
+            activate_canonical_runtime(
+                store,
+                created_at=NOW + timedelta(seconds=1),
+                activated_at=NOW + timedelta(seconds=2),
+                expires_at=NOW + timedelta(minutes=5),
+                writer_owner_id="emergency-control-service",
+            )
+        self.service_lock = AccountWriterLock(
+            self.layout.lock_path,
+            self.account_key,
+            owner_id="emergency-control-service",
+            broker_account_binding_fingerprint=(
+                self.policy.config["execution"][
+                    "production_account_binding_fingerprint"
+                ]
+            ),
+            authorization_binding_id=self.binding,
+        )
+        self.service_lock.acquire()
+        self.addCleanup(self.service_lock.release)
+        self.composition = RuntimeComposition(
+            control_authentication_key=(
+                b"runtime-only-emergency-control-secret-material"
+            ),
+            control_authorization_binding_id=self.binding,
+        )
+
+    def test_emergency_commands_enqueue_without_a_provider_assembly(self) -> None:
+        commands = (
+            (
+                cli.command_pause_new_entries,
+                SimpleNamespace(
+                    install_root=str(self.root),
+                    reason="operator pause",
+                    runtime_composition=self.composition,
+                ),
+                "PAUSE_NEW_ENTRIES",
+            ),
+            (
+                cli.command_managed_closeout,
+                SimpleNamespace(
+                    install_root=str(self.root),
+                    reason="operator closeout",
+                    runtime_composition=self.composition,
+                ),
+                "MANAGED_CLOSEOUT",
+            ),
+            (
+                cli.command_deactivate,
+                SimpleNamespace(
+                    install_root=str(self.root),
+                    reason="operator flat deactivation",
+                    flatness_snapshot_id="flat-snapshot-test",
+                    confirm=(
+                        "DEACTIVATE FULL LIVE ibkr-live-ending-3103 "
+                        "FLAT flat-snapshot-test"
+                    ),
+                    runtime_composition=self.composition,
+                ),
+                "DEACTIVATE_FLAT",
+            ),
+        )
+        with mock.patch.object(
+            cli, "InstallLayout", return_value=self.layout
+        ), mock.patch.object(
+            self.layout,
+            "load_release",
+            return_value=(self.manifest, self.policy),
+        ), mock.patch.object(cli, "_print"):
+            for handler, arguments, expected in commands:
+                with self.subTest(command=expected):
+                    self.assertEqual(handler(arguments), 0)
+
+        requests = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted((self.layout.control_path / "inbox").glob("*.json"))
+        ]
+        self.assertEqual(
+            {item["command"] for item in requests},
+            {
+                "PAUSE_NEW_ENTRIES",
+                "MANAGED_CLOSEOUT",
+                "DEACTIVATE_FLAT",
+            },
+        )
+        for request in requests:
+            self.assertEqual(request["account_key"], self.account_key)
+            self.assertEqual(request["runtime_id"], self.policy.runtime_id)
+            self.assertEqual(request["release_manifest_hash"], RELEASE)
+        closeout = next(
+            item for item in requests if item["command"] == "MANAGED_CLOSEOUT"
+        )
+        self.assertEqual(
+            closeout["control_authorization_binding_id"], self.binding
+        )
+        self.assertEqual(len(closeout["control_authorization_tag"]), 64)
+        self.assertNotIn(
+            "runtime-only-emergency-control-secret-material",
+            json.dumps(requests, sort_keys=True),
+        )
+
+    def test_status_reads_only_local_state_and_never_resolves_composition(self) -> None:
+        provider_factory = mock.Mock(
+            side_effect=AssertionError("status resolved provider composition")
+        )
+        arguments = SimpleNamespace(
+            install_root=str(self.root),
+            runtime_composition=provider_factory,
+        )
+        with mock.patch.object(
+            cli, "InstallLayout", return_value=self.layout
+        ), mock.patch.object(
+            self.layout,
+            "load_release",
+            return_value=(self.manifest, self.policy),
+        ), mock.patch.object(
+            cli,
+            "LiveStateStore",
+            side_effect=AssertionError("status opened a writable state store"),
+        ), mock.patch.object(cli, "_print") as output:
+            self.assertEqual(cli.command_status(arguments), 0)
+        provider_factory.assert_not_called()
+        report = output.call_args.args[0]
+        self.assertTrue(report["runtime_bindings_valid"])
+        self.assertTrue(report["service_writer_lease_present"])
+        self.assertFalse(report["provider_checks_performed"])
+        self.assertEqual(report["runtime"]["account_key"], self.account_key)
+        self.assertEqual(report["control_requests"]["inbox"], 0)
 
 
 if __name__ == "__main__":

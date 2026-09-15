@@ -9,16 +9,56 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from titan_brain.risk import RiskLimits
 
 from .calendar import ExchangeCalendar
 from .money import decimal_value, whole_shares
+from .provider_profile import IbkrLocalProviderProfile, ProviderProfileError
+
+
+_IBKR_AUTONOMOUS_AUTHORITY_SCHEMA = (
+    "titan_ibkr_autonomous_provider_authority_2026-09-14_v1"
+)
+_IBKR_AUTONOMOUS_POLICY_RECEIPT_SCHEMA = (
+    "titan_ibkr_autonomous_owner_policy_pricing_receipt_2026-09-14_v1"
+)
+_IBKR_DAILY_RISK_BASELINE_SCHEMA = (
+    "titan_ibkr_daily_risk_baseline_2026-09-14_v1"
+)
+IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH = Path(
+    "state/ibkr-risk-high-water.sqlite3"
+)
+_NONSECRET_LOCATOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{2,127}\Z")
+DOLLAR_HEADROOM_MODEL = "account_day_dollar_headroom"
+_DOLLAR_POLICY_APPROVAL = {
+    "proposal_path": "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+    "proposal_sha256": "cc9de013e880864b8d7400837a71c8742b3116a2fe7269f252cfc88bd50617cf",
+    "approval_record_path": "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    "approval_record_sha256": "d27a1cc0c79629292f1353652440c984d3c7d510bcf3e08c4c595f25da7f4aae",
+}
+_DOLLAR_RISK_CONTRACT = {
+    "schema_version": "titan_account_day_dollar_headroom_2026-09-14_v1",
+    "model": DOLLAR_HEADROOM_MODEL,
+    "currency": "USD",
+    "daily_realized_loss_lock_dollars": "100.00",
+    "profit_goal_dollars": "150.00",
+    "post_goal_floor_dollars": "125.00",
+    "capacity_basis": "broker_confirmed_current_day_realized_pnl",
+    "all_open_pending_uncovered_unresolved_downside_required": True,
+    "positive_execution_reserve_required": True,
+    "commission_reserve_required": True,
+    "unleveraged_cash_and_buying_power_required": True,
+    "loss_lock_is_irreversible_for_session": True,
+    "live_drawdown_review_policy": "unverified_existing_rule_no_percentage_assumed",
+    "owner_approval": _DOLLAR_POLICY_APPROVAL,
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -46,9 +86,22 @@ class PolicyBundle:
     policy_hash: str
 
     @classmethod
-    def load(cls, root: str | Path) -> "PolicyBundle":
+    def load(
+        cls,
+        root: str | Path,
+        *,
+        config_relative: str = "config/full_live.json",
+    ) -> "PolicyBundle":
         base = Path(root).resolve()
-        config_path = base / "config/full_live.json"
+        relative_config = Path(str(config_relative))
+        if (
+            relative_config.is_absolute()
+            or relative_config.parent != Path("config")
+            or relative_config.suffix != ".json"
+            or ".." in relative_config.parts
+        ):
+            raise ValueError("full-live config path must be one JSON file in config")
+        config_path = base / relative_config
         calendar_path = base / "config/nyse_calendar_2026.json"
         with config_path.open("r", encoding="utf-8") as handle:
             config = json.load(handle)
@@ -98,8 +151,69 @@ class PolicyBundle:
         return str(self.config["account"]["required_last4"])
 
     @property
+    def account_key(self) -> str:
+        """Return the signed, non-secret state/control-plane account key.
+
+        Older releases used ``masked_identifier`` for both the display binding
+        and the database/lock namespace.  Keep that interpretation when the
+        explicit key is absent so an installed ending-7153 release remains
+        readable, while allowing a new broker route to use an independently
+        configured opaque key.
+        """
+
+        account = self.config["account"]
+        return str(account.get("account_key", account["masked_identifier"]))
+
+    @property
     def risk_limits(self) -> RiskLimits:
+        if self.dollar_headroom_risk:
+            raise ValueError("dollar-headroom policy has no percentage limits")
         return RiskLimits.from_mapping(self.risk_raw)
+
+    @property
+    def dollar_headroom_risk(self) -> bool:
+        return self.config["risk"].get("model") == DOLLAR_HEADROOM_MODEL
+
+    @property
+    def risk_provenance_verified(self) -> bool:
+        """Recognize the exact approved dollar contract, not a new approval flag.
+
+        The release builder and manifest verifier bind the referenced original
+        approval bytes. This check also binds the executable risk semantics to
+        those fixed identities. Broker risk evidence and private policy/pricing
+        receipts remain independently mandatory.
+        """
+
+        if not self.dollar_headroom_risk:
+            return self.config["risk"].get("limits_live_provenance_verified") is True
+        approval = self.config.get("owner_policy_approval")
+        if not (
+            canonical_json(self.risk_raw) == canonical_json(_DOLLAR_RISK_CONTRACT)
+            and isinstance(approval, Mapping)
+            and all(approval.get(k) == v for k, v in _DOLLAR_POLICY_APPROVAL.items())
+            and self.account_key == "ibkr-live-ending-3103"
+        ):
+            return False
+        try:
+            return all(
+                hashlib.sha256(
+                    (self.root / _DOLLAR_POLICY_APPROVAL[f"{name}_path"]).read_bytes()
+                ).hexdigest() == _DOLLAR_POLICY_APPROVAL[f"{name}_sha256"]
+                for name in ("proposal", "approval_record")
+            )
+        except OSError:
+            return False
+
+    @property
+    def execution_authority_mode(self) -> str:
+        """Return the manifest-bound broker-mutation authority contract.
+
+        Absence is deliberately not interpreted as autonomous authority.  The
+        validator rejects the empty value before a policy can be loaded.
+        """
+
+        value = self.config["execution"].get("execution_authority_mode")
+        return value if isinstance(value, str) else ""
 
     @property
     def activation_blockers(self) -> tuple[str, ...]:
@@ -115,18 +229,40 @@ class PolicyBundle:
                 execution.get("production_authorization_binding_id", "")
             ).strip():
                 blockers.append("BROKER_AUTHORIZATION_BINDING_UNAVAILABLE")
-        if execution.get("supported_unattended_mutation") is not True:
-            blockers.append("SUPPORTED_UNATTENDED_MUTATION_NOT_ATTESTED")
-        if execution.get("per_mutation_user_confirmation_required") is not False:
-            blockers.append("PER_MUTATION_CONFIRMATION_STILL_REQUIRED")
+        if execution.get("broker_adapter") == "ibkr_local_gateway_staged":
+            blockers.append("IBKR_LOCAL_GATEWAY_TRANSPORT_STAGED_ONLY")
+        if self.execution_authority_mode == "unattended":
+            if execution.get("supported_unattended_mutation") is not True:
+                blockers.append("SUPPORTED_UNATTENDED_MUTATION_NOT_ATTESTED")
+            if execution.get("per_mutation_user_confirmation_required") is not False:
+                blockers.append("PER_MUTATION_CONFIRMATION_STILL_REQUIRED")
+        else:
+            if execution.get("supported_unattended_mutation") is not False:
+                blockers.append("ATTENDED_MODE_EXPOSES_UNATTENDED_MUTATION")
+            if execution.get("per_mutation_user_confirmation_required") is not True:
+                blockers.append("ATTENDED_CONFIRMATION_NOT_REQUIRED")
         if execution.get("local_mutation_interlock_enabled") is not True:
             blockers.append("LOCAL_MUTATION_INTERLOCK_NOT_ENABLED")
         if evidence.get("max_spread_bps") is None:
             blockers.append("NUMERIC_SPREAD_GATE_UNRESOLVED")
         if evidence.get("minimum_depth_multiple") is None:
             blockers.append("NUMERIC_DEPTH_GATE_UNRESOLVED")
-        if self.config["risk"].get("limits_live_provenance_verified") is not True:
+        exits = self.config.get("exits")
+        if (
+            not isinstance(exits, Mapping)
+            or exits.get("target_exit_mode")
+            != "first_target_completed_minute_full_exit"
+        ):
+            blockers.append("AUTONOMOUS_TARGET_EXIT_POLICY_UNRESOLVED")
+        if (
+            not isinstance(exits, Mapping)
+            or exits.get("deadline_feasibility_gate") is not True
+        ):
+            blockers.append("CLOSEOUT_DEADLINE_FEASIBILITY_GATE_UNAVAILABLE")
+        if not self.risk_provenance_verified:
             blockers.append("RISK_LIMITS_LIVE_PROVENANCE_NOT_VERIFIED")
+        if self.dollar_headroom_risk:
+            blockers.append("LIVE_DRAWDOWN_REVIEW_POLICY_UNVERIFIED")
         if (
             self.config["notifications"].get("destination_bridge_configured") is not True
             or self.config["notifications"].get("delivery_sink") == "local_jsonl_staging"
@@ -136,7 +272,10 @@ class PolicyBundle:
         if (
             self.live_entries_configured
             and discovery.get("provider_composition_id")
-            != "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+            not in {
+                "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+                "titan.massive_rest_stream.ibkr_contract.quality.v1",
+            }
         ):
             blockers.append("SUPPORTED_DISCOVERY_COMPOSITION_NOT_CONFIGURED")
         if discovery.get("pipeline_configured") is not True:
@@ -145,22 +284,36 @@ class PolicyBundle:
             blockers.append("LIVE_INSTRUMENT_EVIDENCE_PROVIDER_UNAVAILABLE")
         if discovery.get("quality_revalidation_provider") == "unavailable":
             blockers.append("LIVE_QUALITY_REVALIDATION_PROVIDER_UNAVAILABLE")
-        if discovery.get("provider_composition_id") == (
-            "titan.massive_rest_stream.robinhood_instrument.quality.v1"
-        ):
+        if discovery.get("provider_composition_id") in {
+            "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "titan.massive_rest_stream.ibkr_contract.quality.v1",
+        }:
             binding = str(discovery.get("provider_binding_id", ""))
             if len(binding) != 64 or any(
                 value not in "0123456789abcdef" for value in binding
             ):
                 blockers.append("DISCOVERY_PROVIDER_BINDING_ID_MISSING_OR_INVALID")
-        for field in (
+        score_fields = (
             "minimum_setup_score",
             "minimum_execution_score",
             "a_plus_setup_score",
             "a_plus_execution_score",
-        ):
-            if discovery.get(field) is None:
-                blockers.append(f"LIVE_SCORE_THRESHOLD_UNRESOLVED:{field}")
+        )
+        score_policy = discovery.get("score_policy", "threshold_gated")
+        a_plus_enabled = discovery.get("a_plus_enabled", True)
+        if score_policy == "ranking_only":
+            if a_plus_enabled is not False:
+                blockers.append("RANKING_ONLY_REQUIRES_A_PLUS_DISABLED")
+            if any(discovery.get(field) is not None for field in score_fields):
+                blockers.append("RANKING_ONLY_CONTAINS_HIDDEN_SCORE_FLOOR")
+        elif score_policy == "threshold_gated":
+            if a_plus_enabled is not True:
+                blockers.append("THRESHOLD_GATED_REQUIRES_A_PLUS_ENABLED")
+            for field in score_fields:
+                if discovery.get(field) is None:
+                    blockers.append(f"LIVE_SCORE_THRESHOLD_UNRESOLVED:{field}")
+        else:
+            blockers.append("UNSUPPORTED_SCORE_POLICY")
         return tuple(dict.fromkeys(str(item) for item in blockers))
 
     @property
@@ -170,9 +323,22 @@ class PolicyBundle:
     def validate(self) -> None:
         if self.config.get("schema_version") != "titan_full_live_config_2026-09-08_v1":
             raise ValueError("unsupported full-live configuration schema")
-        if self.account_last4 != "7153" or len(self.account_last4) != 4:
-            raise ValueError("full-live account binding mismatch")
         account = self.config["account"]
+        if not isinstance(account, Mapping):
+            raise ValueError("full-live account binding is invalid")
+        if not self.account_last4.isascii() or not self.account_last4.isdecimal() or len(self.account_last4) != 4:
+            raise ValueError("full-live account last4 is invalid")
+        masked_identifier = str(account.get("masked_identifier", ""))
+        if masked_identifier != f"ending-{self.account_last4}":
+            raise ValueError("full-live masked account binding mismatch")
+        account_key = self.account_key
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{2,127}", account_key):
+            raise ValueError("full-live account key is invalid")
+        # The signed policy is not a credential store.  An opaque control
+        # plane key can distinguish the broker account, but may not contain a
+        # full numeric broker identifier.
+        if re.search(r"[0-9]{5,}", account_key):
+            raise ValueError("full-live account key exposes a broker identifier")
         if account.get("margin_debit_allowed") is not False:
             raise ValueError("margin debit must remain disabled")
         scope = self.config["scope"]
@@ -194,8 +360,53 @@ class PolicyBundle:
             raise ValueError("minimum price policy changed")
         if int(scope["minimum_session_volume_inclusive"]) != 750_000:
             raise ValueError("minimum volume policy changed")
-        if self.config["sessions"].get("premarket_mode") != "attended_only":
+        sessions = self.config["sessions"]
+        premarket_mode = sessions.get("premarket_mode")
+        if premarket_mode not in {"attended_only", "analysis_only"}:
             raise ValueError("premarket cannot be promoted to unattended authority")
+        if premarket_mode == "analysis_only":
+            if sessions.get("premarket_orders_enabled") is not False:
+                raise ValueError("analysis-only premarket cannot permit orders")
+            if int(sessions.get("premarket_analysis_interval_minutes", 0)) != 30:
+                raise ValueError("premarket analysis interval must remain 30 minutes")
+            if sessions.get("regular_entry_start") != "09:35":
+                raise ValueError("regular-hours entry start must remain 09:35")
+        if sessions.get("regular_entry_cutoff") != "15:30":
+            raise ValueError("regular-hours entry cutoff must remain 15:30")
+        if int(sessions.get("closeout_start_minutes_before_close", 0)) != 10:
+            raise ValueError("closeout must begin at 15:50 on a normal session")
+        if int(sessions.get("flat_deadline_minutes_before_close", 0)) != 5:
+            raise ValueError("flatness deadline must remain 15:55 on a normal session")
+        exits = self.config.get("exits")
+        if exits is not None and not isinstance(exits, Mapping):
+            raise ValueError("full-live exit policy is invalid")
+        if isinstance(exits, Mapping):
+            target_exit_mode = exits.get("target_exit_mode")
+            if target_exit_mode not in {
+                "disabled_pending_owner_approval",
+                "first_target_completed_minute_full_exit",
+            }:
+                raise ValueError("unsupported full-live target exit mode")
+            if exits.get("deadline_feasibility_gate") is not True:
+                raise ValueError("closeout deadline feasibility gate is mandatory")
+            if target_exit_mode == "first_target_completed_minute_full_exit":
+                expected_target_exit = {
+                    "target_index": 0,
+                    "target_trigger": (
+                        "fresh_aligned_completed_one_minute_close_at_or_above_target"
+                    ),
+                    "quantity": "full_broker_confirmed_sellable_position",
+                    "cancel_working_sells_before_exit": True,
+                    "require_strictly_newer_cancel_evidence": True,
+                    "deadline_feasibility_gate": True,
+                }
+                if any(
+                    exits.get(field) != value
+                    for field, value in expected_target_exit.items()
+                ):
+                    raise ValueError(
+                        "full-live target exit contract is incomplete or changed"
+                    )
         risk = self.config["risk"]
         if decimal_value(risk["daily_realized_loss_lock_dollars"], "daily_lock") != Decimal("100.00"):
             raise ValueError("daily dollar lock changed")
@@ -259,6 +470,8 @@ class PolicyBundle:
         else:
             raise ValueError("unreviewed notification sink configured")
         execution = self.config["execution"]
+        if self.execution_authority_mode not in {"unattended", "attended_only"}:
+            raise ValueError("unreviewed execution authority mode configured")
         for field in (
             "supported_unattended_mutation",
             "per_mutation_user_confirmation_required",
@@ -266,6 +479,11 @@ class PolicyBundle:
         ):
             if not isinstance(execution.get(field), bool):
                 raise ValueError(f"execution authority gate {field} must be boolean")
+        if self.execution_authority_mode == "attended_only":
+            if execution.get("supported_unattended_mutation") is not False:
+                raise ValueError("attended-only mode cannot attest unattended mutation")
+            if execution.get("per_mutation_user_confirmation_required") is not True:
+                raise ValueError("attended-only mode requires per-mutation confirmation")
         if execution.get("automatic_retry_unknown_submission") is not False:
             raise ValueError("unknown submissions may never be retried automatically")
         if execution.get("one_account_writer_required") is not True:
@@ -273,8 +491,14 @@ class PolicyBundle:
         if execution.get("broker_adapter") not in {
             "robinhood_codex_connector",
             "supported_production_transport",
+            "ibkr_local_gateway_staged",
         }:
             raise ValueError("unreviewed broker adapter configured")
+        if (
+            execution.get("broker_adapter") == "ibkr_local_gateway_staged"
+            and self.live_entries_configured
+        ):
+            raise ValueError("staged IBKR transport cannot enable live entries")
         if execution.get("broker_adapter") == "supported_production_transport":
             if not str(execution.get("production_transport_id", "")).strip():
                 raise ValueError(
@@ -299,16 +523,335 @@ class PolicyBundle:
                     "access_token",
                     "refresh_token",
                     "client_secret",
+                    "ibkr_autonomous_authority_key",
+                    "ibkr_autonomous_authority_hmac_key",
+                    "ibkr_autonomous_policy_receipt_key",
+                    "ibkr_autonomous_policy_receipt_hmac_key",
+                    "ibkr_daily_risk_baseline_key",
+                    "ibkr_daily_risk_baseline_hmac_key",
+                    "hmac_key",
                 )
             ):
                 raise ValueError(
                     "broker identifiers and secrets cannot be stored in signed policy"
                 )
+        try:
+            ibkr_profile = IbkrLocalProviderProfile.from_config(self.config)
+        except ProviderProfileError as exc:
+            raise ValueError(str(exc)) from exc
+        if (
+            execution.get("broker_adapter") == "supported_production_transport"
+            and ibkr_profile is not None
+        ):
+            if execution.get("production_transport_id") != "ibkr-tws-api-10.50.2-v1":
+                raise ValueError("IBKR supported production transport identity is invalid")
+            provider_contract = str(execution.get("ibkr_provider_contract_id", ""))
+            if len(provider_contract) != 64 or any(
+                character not in "0123456789abcdef"
+                for character in provider_contract
+            ):
+                raise ValueError("IBKR provider contract must be a nonsecret 256-bit receipt")
+            ledger_path = Path(str(execution.get("ibkr_ledger_relative_path", "")))
+            if (
+                ledger_path.is_absolute()
+                or not ledger_path.parts
+                or ".." in ledger_path.parts
+                or ledger_path.suffix != ".sqlite3"
+            ):
+                raise ValueError("IBKR execution ledger path must stay under the install root")
+            try:
+                existing_order_reserve = Decimal(
+                    str(execution["ibkr_existing_order_reserve_dollars"])
+                )
+            except (KeyError, ValueError):
+                raise ValueError("IBKR existing-order reserve must be positive") from None
+            if (
+                not existing_order_reserve.is_finite()
+                or existing_order_reserve <= 0
+            ):
+                raise ValueError("IBKR existing-order reserve must be positive")
+            if execution.get("local_mutation_interlock_enabled") is not True:
+                raise ValueError("IBKR supported transport requires the local mutation interlock")
+            if not self.risk_provenance_verified:
+                raise ValueError("IBKR supported transport requires verified risk provenance")
+            if execution.get("durable_intent_before_submit") is not True:
+                raise ValueError(
+                    "IBKR supported transport requires a durable intent before submit"
+                )
+            if self.execution_authority_mode == "unattended":
+                if (
+                    not isinstance(exits, Mapping)
+                    or exits.get("target_exit_mode")
+                    != "first_target_completed_minute_full_exit"
+                ):
+                    raise ValueError(
+                        "IBKR unattended transport requires an approved target exit policy"
+                    )
+                try:
+                    minimum_commission_reserve = Decimal(
+                        str(
+                            execution[
+                                "minimum_commission_reserve_per_order_dollars"
+                            ]
+                        )
+                    )
+                except (InvalidOperation, KeyError, ValueError):
+                    raise ValueError(
+                        "IBKR unattended minimum commission reserve must be positive"
+                    ) from None
+                if (
+                    not minimum_commission_reserve.is_finite()
+                    or minimum_commission_reserve <= 0
+                ):
+                    raise ValueError(
+                        "IBKR unattended minimum commission reserve must be positive"
+                    )
+                if execution.get("supported_unattended_mutation") is not True:
+                    raise ValueError(
+                        "IBKR unattended transport requires supported unattended mutation"
+                    )
+                if execution.get("per_mutation_user_confirmation_required") is not False:
+                    raise ValueError(
+                        "IBKR unattended transport cannot require per-mutation confirmation"
+                    )
+                if (
+                    execution.get("ibkr_autonomous_authority_schema")
+                    != _IBKR_AUTONOMOUS_AUTHORITY_SCHEMA
+                ):
+                    raise ValueError(
+                        "IBKR unattended authority schema is missing or invalid"
+                    )
+                authority_relative_raw = execution.get(
+                    "ibkr_autonomous_authority_relative_path"
+                )
+                if type(authority_relative_raw) is not str:
+                    raise ValueError(
+                        "IBKR unattended authority path must be a relative JSON file"
+                    )
+                authority_relative = Path(authority_relative_raw)
+                if (
+                    not authority_relative_raw
+                    or authority_relative.is_absolute()
+                    or authority_relative_raw != authority_relative.as_posix()
+                    or "\\" in authority_relative_raw
+                    or not authority_relative.parts
+                    or any(part in {".", ".."} for part in authority_relative.parts)
+                    or authority_relative.parent != Path("control/ibkr")
+                    or authority_relative.suffix != ".json"
+                ):
+                    raise ValueError(
+                        "IBKR unattended authority path must be a private JSON file under control/ibkr"
+                    )
+                if execution.get("ibkr_autonomous_authority_key_source") != "macos_keychain":
+                    raise ValueError(
+                        "IBKR unattended authority key source must be macos_keychain"
+                    )
+                for field in (
+                    "ibkr_autonomous_authority_key_service",
+                    "ibkr_autonomous_authority_key_account",
+                ):
+                    value = execution.get(field)
+                    if type(value) is not str or _NONSECRET_LOCATOR.fullmatch(value) is None:
+                        raise ValueError(
+                            f"IBKR unattended {field} must be a nonsecret keychain locator"
+                        )
+                if (
+                    execution.get("ibkr_autonomous_policy_receipt_schema")
+                    != _IBKR_AUTONOMOUS_POLICY_RECEIPT_SCHEMA
+                ):
+                    raise ValueError(
+                        "IBKR unattended owner-policy/pricing receipt schema is missing or invalid"
+                    )
+                policy_receipt_relative_raw = execution.get(
+                    "ibkr_autonomous_policy_receipt_relative_path"
+                )
+                if type(policy_receipt_relative_raw) is not str:
+                    raise ValueError(
+                        "IBKR unattended owner-policy/pricing receipt path must be a relative JSON file"
+                    )
+                policy_receipt_relative = Path(policy_receipt_relative_raw)
+                if (
+                    not policy_receipt_relative_raw
+                    or policy_receipt_relative.is_absolute()
+                    or policy_receipt_relative_raw
+                    != policy_receipt_relative.as_posix()
+                    or "\\" in policy_receipt_relative_raw
+                    or not policy_receipt_relative.parts
+                    or any(
+                        part in {".", ".."}
+                        for part in policy_receipt_relative.parts
+                    )
+                    or policy_receipt_relative.parent != Path("control/ibkr")
+                    or policy_receipt_relative.suffix != ".json"
+                    or policy_receipt_relative == authority_relative
+                ):
+                    raise ValueError(
+                        "IBKR unattended owner-policy/pricing receipt path must be a distinct private JSON file under control/ibkr"
+                    )
+                if (
+                    execution.get("ibkr_autonomous_policy_receipt_key_source")
+                    != "macos_keychain"
+                ):
+                    raise ValueError(
+                        "IBKR unattended owner-policy/pricing receipt key source must be macos_keychain"
+                    )
+                for field in (
+                    "ibkr_autonomous_policy_receipt_key_service",
+                    "ibkr_autonomous_policy_receipt_key_account",
+                ):
+                    value = execution.get(field)
+                    if (
+                        type(value) is not str
+                        or _NONSECRET_LOCATOR.fullmatch(value) is None
+                    ):
+                        raise ValueError(
+                            f"IBKR unattended {field} must be a nonsecret keychain locator"
+                        )
+                if (
+                    execution["ibkr_autonomous_policy_receipt_key_service"],
+                    execution["ibkr_autonomous_policy_receipt_key_account"],
+                ) == (
+                    execution["ibkr_autonomous_authority_key_service"],
+                    execution["ibkr_autonomous_authority_key_account"],
+                ):
+                    raise ValueError(
+                        "IBKR unattended owner-policy/pricing receipt key must be distinct"
+                    )
+                if (
+                    execution.get("ibkr_daily_risk_baseline_schema")
+                    != _IBKR_DAILY_RISK_BASELINE_SCHEMA
+                ):
+                    raise ValueError(
+                        "IBKR unattended daily risk baseline schema is missing or invalid"
+                    )
+                baseline_relative_raw = execution.get(
+                    "ibkr_daily_risk_baseline_relative_path"
+                )
+                if type(baseline_relative_raw) is not str:
+                    raise ValueError(
+                        "IBKR unattended daily risk baseline path must be a relative JSON file"
+                    )
+                baseline_relative = Path(baseline_relative_raw)
+                if (
+                    not baseline_relative_raw
+                    or baseline_relative.is_absolute()
+                    or baseline_relative_raw != baseline_relative.as_posix()
+                    or "\\" in baseline_relative_raw
+                    or not baseline_relative.parts
+                    or any(part in {".", ".."} for part in baseline_relative.parts)
+                    or baseline_relative.parent != Path("control/ibkr")
+                    or baseline_relative.suffix != ".json"
+                    or baseline_relative in {
+                        authority_relative,
+                        policy_receipt_relative,
+                    }
+                ):
+                    raise ValueError(
+                        "IBKR unattended daily risk baseline path must be a distinct private JSON file under control/ibkr"
+                    )
+                if (
+                    execution.get("ibkr_daily_risk_baseline_key_source")
+                    != "macos_keychain"
+                ):
+                    raise ValueError(
+                        "IBKR unattended daily risk baseline key source must be macos_keychain"
+                    )
+                for field in (
+                    "ibkr_daily_risk_baseline_key_service",
+                    "ibkr_daily_risk_baseline_key_account",
+                ):
+                    value = execution.get(field)
+                    if (
+                        type(value) is not str
+                        or _NONSECRET_LOCATOR.fullmatch(value) is None
+                    ):
+                        raise ValueError(
+                            f"IBKR unattended {field} must be a nonsecret keychain locator"
+                        )
+                baseline_key = (
+                    execution["ibkr_daily_risk_baseline_key_service"],
+                    execution["ibkr_daily_risk_baseline_key_account"],
+                )
+                if (
+                    baseline_key
+                    in {
+                        (
+                            execution["ibkr_autonomous_authority_key_service"],
+                            execution["ibkr_autonomous_authority_key_account"],
+                        ),
+                        (
+                            execution[
+                                "ibkr_autonomous_policy_receipt_key_service"
+                            ],
+                            execution[
+                                "ibkr_autonomous_policy_receipt_key_account"
+                            ],
+                        ),
+                    }
+                    or baseline_key[1] != self.account_key
+                ):
+                    raise ValueError(
+                        "IBKR unattended daily risk baseline key must be distinct and account-bound"
+                    )
+                high_water_relative_raw = execution.get(
+                    "ibkr_risk_high_water_ledger_relative_path"
+                )
+                if type(high_water_relative_raw) is not str:
+                    raise ValueError(
+                        "IBKR unattended risk high-water ledger path must be relative"
+                    )
+                high_water_relative = Path(high_water_relative_raw)
+                if (
+                    not high_water_relative_raw
+                    or high_water_relative.is_absolute()
+                    or high_water_relative_raw != high_water_relative.as_posix()
+                    or "\\" in high_water_relative_raw
+                    or not high_water_relative.parts
+                    or any(part in {".", ".."} for part in high_water_relative.parts)
+                    or high_water_relative.parent != Path("state")
+                    or high_water_relative.suffix != ".sqlite3"
+                    or high_water_relative == ledger_path
+                    or high_water_relative
+                    != IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH
+                ):
+                    raise ValueError(
+                        "IBKR unattended risk high-water ledger must use the canonical "
+                        "state/ibkr-risk-high-water.sqlite3 path"
+                    )
+                if execution.get("ibkr_autonomous_api_name") != "official_tws_python_api":
+                    raise ValueError("IBKR unattended API name is invalid")
+                if execution.get("ibkr_autonomous_api_version") != ibkr_profile.sdk_version:
+                    raise ValueError("IBKR unattended API version differs from the signed SDK")
+                if execution.get("ibkr_autonomous_environment") != ibkr_profile.environment:
+                    raise ValueError("IBKR unattended environment differs from the signed profile")
+                autonomous_client_id = execution.get("ibkr_autonomous_client_id")
+                if (
+                    type(autonomous_client_id) is not int
+                    or autonomous_client_id != ibkr_profile.command_client_id
+                ):
+                    raise ValueError(
+                        "IBKR unattended client id differs from the signed command lane"
+                    )
+        if execution.get("broker_adapter") == "ibkr_local_gateway_staged":
+            if ibkr_profile is None:
+                raise ValueError("staged IBKR transport requires a signed local profile")
+            deployment = self.config.get("deployment")
+            assert isinstance(deployment, Mapping)
+            if deployment.get("profile_id") != ibkr_profile.profile_id:
+                raise ValueError("IBKR deployment/profile identity mismatch")
+            evidence = self.config["evidence"]
+            if evidence.get("require_robinhood_tradability") is not False:
+                raise ValueError("IBKR profile cannot require Robinhood tradability")
+            if evidence.get("require_broker_contract_tradability") is not True:
+                raise ValueError("IBKR profile requires broker contract tradability")
         discovery = self.config["discovery"]
         if (
             self.live_entries_configured
             and discovery.get("provider_composition_id")
-            != "titan.massive_rest_stream.robinhood_instrument.quality.v1"
+            not in {
+                "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+                "titan.massive_rest_stream.ibkr_contract.quality.v1",
+            }
         ):
             raise ValueError(
                 "live entries require the release-shipped discovery composition"
@@ -319,9 +862,10 @@ class PolicyBundle:
             raise ValueError(
                 "configured discovery pipeline requires a signed provider composition identity"
             )
-        if discovery.get("provider_composition_id") == (
-            "titan.massive_rest_stream.robinhood_instrument.quality.v1"
-        ):
+        if discovery.get("provider_composition_id") in {
+            "titan.massive_rest_stream.robinhood_instrument.quality.v1",
+            "titan.massive_rest_stream.ibkr_contract.quality.v1",
+        }:
             binding = str(discovery.get("provider_binding_id", ""))
             if len(binding) != 64 or any(
                 value not in "0123456789abcdef" for value in binding
@@ -361,12 +905,13 @@ class PolicyBundle:
             raise ValueError("unreviewed live discovery adapter configured")
         if not isinstance(discovery.get("pipeline_configured"), bool):
             raise ValueError("live discovery configuration gate must be boolean")
-        for field in (
+        score_fields = (
             "minimum_setup_score",
             "minimum_execution_score",
             "a_plus_setup_score",
             "a_plus_execution_score",
-        ):
+        )
+        for field in score_fields:
             value = discovery.get(field)
             if value is not None:
                 number = float(value)
@@ -374,22 +919,63 @@ class PolicyBundle:
                     raise ValueError(f"{field} must be in [0, 100]")
         values = {
             field: discovery.get(field)
-            for field in (
-                "minimum_setup_score",
-                "minimum_execution_score",
-                "a_plus_setup_score",
-                "a_plus_execution_score",
-            )
+            for field in score_fields
         }
-        if all(value is not None for value in values.values()):
+        score_policy = discovery.get("score_policy", "threshold_gated")
+        a_plus_enabled = discovery.get("a_plus_enabled", True)
+        if type(a_plus_enabled) is not bool:
+            raise ValueError("a_plus_enabled must be boolean")
+        if score_policy == "ranking_only":
+            if any(value is not None for value in values.values()):
+                raise ValueError(
+                    "ranking-only score policy cannot contain numeric score floors"
+                )
+            if a_plus_enabled is not False:
+                raise ValueError(
+                    "ranking-only score policy requires a_plus_enabled=false"
+                )
+        elif score_policy == "threshold_gated":
+            populated = tuple(value is not None for value in values.values())
+            if any(populated) and not all(populated):
+                raise ValueError(
+                    "threshold-gated score policy cannot contain partial thresholds"
+                )
+            if a_plus_enabled is not True:
+                raise ValueError(
+                    "threshold-gated score policy requires a_plus_enabled=true"
+                )
+        else:
+            raise ValueError("unsupported signed score policy")
+        if score_policy == "threshold_gated" and all(
+            value is not None for value in values.values()
+        ):
             if float(values["a_plus_setup_score"]) < float(
                 values["minimum_setup_score"]
             ) or float(values["a_plus_execution_score"]) < float(
                 values["minimum_execution_score"]
             ):
                 raise ValueError("A+ score thresholds cannot be below live floors")
-        # Fully parse the risk policy now so malformed/non-finite limits fail at load.
-        self.risk_limits
+        # Separate schemas prevent staged percentages from becoming hidden
+        # dollar-mode limits, or a config boolean from approving altered risk.
+        risk_model = risk.get("model", "percentage_overlay")
+        if risk_model == DOLLAR_HEADROOM_MODEL:
+            if not self.risk_provenance_verified:
+                raise ValueError("dollar-headroom risk must match the exact approved contract")
+            if (
+                risk.get("positive_execution_reserve_required") is not True
+                or risk.get("loss_lock_is_irreversible_for_session") is not True
+            ):
+                raise ValueError("dollar-headroom reserve and irreversible loss lock are mandatory")
+            for field, minimum in (
+                ("minimum_commission_reserve_per_order_dollars", Decimal("1")),
+                ("minimum_entry_lifecycle_fee_reserve_dollars", Decimal("2")),
+            ):
+                if decimal_value(execution.get(field), field) < minimum:
+                    raise ValueError("dollar-headroom commission reserve is below the approved minimum")
+        elif risk_model == "percentage_overlay":
+            self.risk_limits
+        else:
+            raise ValueError("unsupported risk policy model")
 
     def require_account(self, account_number: str, account_type: str) -> None:
         value = str(account_number).strip()

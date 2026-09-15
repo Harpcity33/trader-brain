@@ -6,11 +6,17 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
 
 from titan_brain.live.composition import RuntimeComposition
+from titan_brain.live.broker.ibkr_instrument import IbkrInstrumentProvider
+from titan_brain.live.broker.ibkr_read import IbkrWholeAccountReadBridge
+from titan_brain.live.discovery_composition import (
+    SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID,
+)
 from titan_brain.live.local_assembly import (
     DeterministicLocalQualityReader,
     LocalAssemblyError,
@@ -134,6 +140,57 @@ class FakeSource:
 
     def evidence_snapshot(self, symbol, *, now):
         return self.snapshot
+
+
+class FakeIbkrRuntime:
+    def __init__(self):
+        self.connected = False
+        self.stopped = False
+        self.instrument = object.__new__(IbkrInstrumentProvider)
+
+    @property
+    def account_binding_fingerprint(self):
+        if not self.connected:
+            raise RuntimeError("account not discovered")
+        return "a" * 64
+
+    @property
+    def components(self):
+        if not self.connected:
+            raise RuntimeError("not connected")
+        return SimpleNamespace(
+            read_bridge=object.__new__(IbkrWholeAccountReadBridge),
+            instrument_provider=self.instrument,
+        )
+
+    def connect_reads(self):
+        self.connected = True
+        return self.components
+
+    def probe_reads(self, symbol="SPY"):
+        self.connected = True
+        return SimpleNamespace(
+            phase="CONNECTED",
+            connected=True,
+            authenticated=True,
+            observed_at=NOW,
+            error_code=None,
+            account_collection_id="account-receipt",
+            instrument_evidence_id="instrument-receipt",
+            symbol=symbol,
+        )
+
+    def status(self):
+        return SimpleNamespace(
+            state="READS_READY" if self.connected else "NEW",
+            read_connected=self.connected,
+            account_authenticated=self.connected,
+            last_observed_at=NOW if self.connected else None,
+            error_codes=(),
+        )
+
+    def stop(self):
+        self.stopped = True
 
 
 class LocalProviderClientTests(unittest.TestCase):
@@ -346,6 +403,201 @@ class LocalAssemblyTests(unittest.TestCase):
         self.assertIsInstance(assembly.runtime_composition(), RuntimeComposition)
         assembly.close()
 
+    def test_notification_composition_never_constructs_broker_or_market_data(self):
+        root = Path(__file__).resolve().parents[1]
+        client = {
+            "installed": {
+                "client_id": "client-id.apps.googleusercontent.com",
+                "client_secret": "client-secret",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": ["http://localhost"],
+            }
+        }
+        keychain = FakeKeychain(
+            {
+                "titan-full-live-ibkr-ending-3103-gmail-desktop-client": json.dumps(client),
+                "titan-full-live-ibkr-ending-3103-gmail-refresh-token": "refresh-secret",
+                "titan-full-live-ibkr-ending-3103-gmail-consent-status": "production",
+                "titan-full-live-ibkr-ending-3103-gmail-destination": "owner@example.com",
+                "titan-full-live-ibkr-ending-3103-gmail-sender": "sender@example.com",
+            }
+        )
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=keychain,
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+        )
+        assembly.full_live["notifications"]["delivery_sink"] = "gmail_api"
+        assembly.profile["ibkr_gmail"]["enabled"] = True
+        with patch.object(
+            assembly,
+            "ibkr_read_components",
+            side_effect=AssertionError("notification graph reached IBKR"),
+        ) as ibkr, patch.object(
+            assembly,
+            "massive_source",
+            side_effect=AssertionError("notification graph reached Massive"),
+        ) as massive:
+            composition = assembly.notification_runtime_composition()
+        self.assertIsInstance(composition, RuntimeComposition)
+        self.assertIsNotNone(composition.notification_provider)
+        self.assertIsNone(composition.production_transport)
+        self.assertIsNone(composition.discovery_provider)
+        ibkr.assert_not_called()
+        massive.assert_not_called()
+        self.assertIsNone(assembly._ibkr_runtime)
+        self.assertIsNone(assembly._massive_source)
+        assembly.close()
+
+    def test_coordinator_composition_survives_missing_gmail_and_massive_credentials(self):
+        root = Path(__file__).resolve().parents[1]
+        control_service = (
+            "titan-full-live-ibkr-ending-3103-control-authentication-key"
+        )
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain(
+                {control_service: b"private-emergency-control-key-material-32-bytes"}
+            ),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+        )
+        execution = assembly.full_live["execution"]
+        execution.update(
+            {
+                "broker_adapter": "supported_production_transport",
+                "production_transport_id": "ibkr-tws-api-10.50.2-v1",
+                "production_authorization_binding_id": "f" * 64,
+            }
+        )
+        transport = object()
+        credential_error = CredentialUnavailable(
+            "CREDENTIAL_KEYCHAIN_ITEM_UNAVAILABLE"
+        )
+        with patch.object(
+            assembly, "ibkr_reconciliation_transport", return_value=transport
+        ), patch.object(
+            assembly, "gmail_binding", side_effect=credential_error
+        ) as gmail, patch.object(
+            assembly, "massive_source", side_effect=credential_error
+        ) as massive, patch.object(
+            assembly,
+            "ibkr_read_components",
+            side_effect=AssertionError("coordinator graph connected discovery reads"),
+        ) as discovery_reads:
+            composition = assembly.coordinator_runtime_composition()
+
+        self.assertIs(composition.production_transport, transport)
+        self.assertIsNone(composition.notification_provider)
+        self.assertIsNone(composition.discovery_provider)
+        self.assertTrue(composition.managed_control_ready(execution))
+        gmail.assert_not_called()
+        massive.assert_not_called()
+        discovery_reads.assert_not_called()
+        self.assertIsNone(assembly._gmail)
+        self.assertIsNone(assembly._massive_source)
+        assembly.close()
+
+    def test_discovery_composition_surfaces_massive_failure_without_reading_gmail(self):
+        root = Path(__file__).resolve().parents[1]
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+        )
+        assembly.full_live["execution"]["broker_adapter"] = (
+            "supported_production_transport"
+        )
+        credential_error = CredentialUnavailable(
+            "CREDENTIAL_KEYCHAIN_ITEM_UNAVAILABLE"
+        )
+        with patch.object(
+            assembly, "ibkr_reconciliation_transport", return_value=object()
+        ), patch.object(
+            assembly,
+            "ibkr_read_components",
+            return_value=SimpleNamespace(
+                instrument_provider=object(), read_bridge=object()
+            ),
+        ), patch(
+            "titan_brain.live.local_assembly.IbkrPipelineInstrumentEvidenceProvider",
+            return_value=object(),
+        ), patch.object(
+            assembly, "massive_source", side_effect=credential_error
+        ) as massive, patch.object(
+            assembly,
+            "gmail_binding",
+            side_effect=AssertionError("discovery graph read Gmail"),
+        ) as gmail:
+            with self.assertRaises(CredentialUnavailable):
+                assembly.discovery_runtime_composition()
+
+        massive.assert_called_once_with()
+        gmail.assert_not_called()
+        assembly.close()
+
+    def test_control_composition_loads_only_exact_ibkr_hmac_authority(self):
+        root = Path(__file__).resolve().parents[1]
+        service = "titan-full-live-ibkr-ending-3103-control-authentication-key"
+        keychain = FakeKeychain(
+            {service: b"private-emergency-control-key-material-32-bytes"}
+        )
+        provider_factory = Mock(
+            side_effect=AssertionError("control graph constructed IBKR runtime")
+        )
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=keychain,
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=provider_factory,
+        )
+        execution = assembly.full_live["execution"]
+        execution.update(
+            {
+                "broker_adapter": "supported_production_transport",
+                "production_transport_id": "ibkr-tws-api-10.50.2-v1",
+                "production_authorization_binding_id": "f" * 64,
+            }
+        )
+        with patch.object(
+            keychain, "read", wraps=keychain.read
+        ) as key_reads, patch.object(
+            assembly,
+            "gmail_binding",
+            side_effect=AssertionError("control graph constructed Gmail"),
+        ) as gmail, patch.object(
+            assembly,
+            "massive_source",
+            side_effect=AssertionError("control graph constructed Massive"),
+        ) as massive, patch.object(
+            assembly,
+            "ibkr_read_components",
+            side_effect=AssertionError("control graph connected IBKR reads"),
+        ) as ibkr_reads:
+            composition = assembly.control_runtime_composition()
+        self.assertTrue(composition.managed_control_ready(execution))
+        self.assertIsNone(composition.production_transport)
+        self.assertIsNone(composition.discovery_provider)
+        self.assertIsNone(composition.notification_provider)
+        provider_factory.assert_not_called()
+        gmail.assert_not_called()
+        massive.assert_not_called()
+        ibkr_reads.assert_not_called()
+        key_reads.assert_called_once()
+        item = key_reads.call_args.args[0]
+        self.assertEqual(item.service, service)
+        self.assertEqual(item.account, "ibkr-live-ending-3103")
+        self.assertIsNone(assembly._ibkr_runtime)
+        self.assertIsNone(assembly._massive_source)
+        assembly.close()
+
     def test_nonnetwork_report_is_redacted_and_records_exact_attended_blocker(self):
         root = Path(__file__).resolve().parents[1]
         assembly = LocalProviderAssembly(
@@ -385,6 +637,231 @@ class LocalAssemblyTests(unittest.TestCase):
                 action_required=None,
             )
 
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_staged_ibkr_config_neither_connects_nor_exposes_command_runtime(
+        self, _validate_sdk
+    ):
+        root = Path(__file__).resolve().parents[1]
+        runtime = FakeIbkrRuntime()
+        calls = []
+
+        def factory(**kwargs):
+            calls.append(kwargs)
+            return runtime
+
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=factory,
+        )
+        self.assertEqual(assembly.ibkr_profile().account_last4, "3103")
+        composition = assembly.runtime_composition()
+        self.assertIsInstance(composition, RuntimeComposition)
+        self.assertIsNone(composition.production_transport)
+        self.assertIsNone(composition.discovery_provider)
+        self.assertFalse(runtime.connected)
+        self.assertEqual(calls, [])
+        with self.assertRaisesRegex(LocalAssemblyError, "TRANSPORT_STAGED_ONLY"):
+            assembly.attended_runtime()
+        assembly.close()
+        self.assertFalse(runtime.stopped)
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_provider_status_distinguishes_installed_and_authenticated(
+        self, _validate_sdk
+    ):
+        root = Path(__file__).resolve().parents[1]
+        runtime = FakeIbkrRuntime()
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: runtime,
+        )
+        staged = assembly._ibkr_connections(probe_network=False, checked_at=NOW)
+        self.assertEqual({item.status for item in staged}, {"STAGED"})
+        self.assertFalse(any(item.authenticated for item in staged))
+        self.assertTrue(all(item.provider_binding_id is None for item in staged))
+        connected = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+        self.assertEqual({item.status for item in connected}, {"CONNECTED"})
+        self.assertTrue(all(item.authenticated for item in connected))
+        self.assertEqual(
+            {item.component for item in connected},
+            {
+                "ibkr_gateway_runtime",
+                "ibkr_whole_account_read",
+                "ibkr_contract_details",
+            },
+        )
+        self.assertFalse(any("DU" in json.dumps(item.public_dict()) for item in connected))
+        original_probe = runtime.probe_reads
+
+        def after_hours_probe(symbol="SPY"):
+            probe = original_probe(symbol)
+            probe.instrument_evidence_id = None
+            probe.contract_read_receipt_id = "metadata-receipt"
+            probe.contract_regular_session_open = False
+            return probe
+
+        runtime.probe_reads = after_hours_probe
+        after_hours = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+        self.assertEqual({item.status for item in after_hours}, {"CONNECTED"})
+        by_component = {item.component: item for item in after_hours}
+        self.assertEqual(
+            by_component["ibkr_contract_details"].check_kind,
+            "authenticated_contract_metadata_read",
+        )
+        self.assertIn("eligibility is false", by_component["ibkr_contract_details"].action_required)
+        self.assertIn("coverage", by_component["ibkr_whole_account_read"].action_required)
+        assembly.close()
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_connection_report_uses_ibkr_notification_binding_only(
+        self, _validate_sdk
+    ):
+        root = Path(__file__).resolve().parents[1]
+        runtime = FakeIbkrRuntime()
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: runtime,
+        )
+        report = assembly.connection_report(probe_network=False)
+        components = {item["component"] for item in report["connections"]}
+        self.assertIn("gmail_notification", components)
+        self.assertNotIn("codex_heartbeat_notification", components)
+        self.assertNotIn("robinhood_broker_and_tradability", components)
+        notification = next(
+            item
+            for item in report["connections"]
+            if item["component"] == "gmail_notification"
+        )
+        self.assertEqual(notification["status"], "NOT_CONFIGURED")
+        self.assertEqual(
+            notification["account_or_destination_binding"], "ending-3103"
+        )
+        self.assertNotIn("7153", json.dumps(report, sort_keys=True))
+        self.assertEqual(notification["error_code"], "GMAIL_DELIVERY_SINK_NOT_CONFIGURED")
+        # Selecting an intended sink is not authority to read credentials or
+        # refresh OAuth, even if the underlying profile was enabled separately.
+        assembly.profile["ibkr_gmail"]["enabled"] = True
+        with patch.object(assembly, "gmail_binding", side_effect=AssertionError("must not compose")):
+            still_staged = assembly.connection_report(probe_network=False)
+        self.assertEqual(next(
+            item["status"] for item in still_staged["connections"]
+            if item["component"] == "gmail_notification"
+        ), "NOT_CONFIGURED")
+        assembly.close()
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_provider_status_preserves_sanitized_probe_error_code(
+        self, _validate_sdk
+    ):
+        root = Path(__file__).resolve().parents[1]
+        runtime = FakeIbkrRuntime()
+        runtime.probe_reads = lambda symbol="SPY": SimpleNamespace(
+            phase="BLOCKED",
+            connected=True,
+            authenticated=False,
+            observed_at=None,
+            error_code="IBKR_RUNTIME_READ_SDK_CALLBACK_321",
+            account_collection_id=None,
+            instrument_evidence_id=None,
+            symbol=symbol,
+        )
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: runtime,
+        )
+        blocked = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+        self.assertEqual(len(blocked), 3)
+        by_component = {item.component: item for item in blocked}
+        gateway = by_component["ibkr_gateway_runtime"]
+        self.assertEqual(gateway.status, "CONNECTED")
+        self.assertTrue(gateway.authenticated)
+        whole_account = by_component["ibkr_whole_account_read"]
+        self.assertEqual(whole_account.status, "BLOCKED")
+        self.assertFalse(whole_account.authenticated)
+        self.assertEqual(
+            whole_account.error_code,
+            "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_SDK_CALLBACK_321",
+        )
+        contracts = by_component["ibkr_contract_details"]
+        self.assertEqual(contracts.status, "BLOCKED")
+        self.assertEqual(
+            contracts.error_code,
+            "LOCAL_ASSEMBLY_IBKR_CONTRACT_READ_NOT_REACHED",
+        )
+
+        original_probe = runtime.probe_reads
+
+        def classified_probe(symbol="SPY"):
+            result = original_probe(symbol)
+            result.error_code += "_API_READ_ONLY"
+            return result
+
+        runtime.probe_reads = classified_probe
+        classified = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+        classified_account = next(
+            item for item in classified if item.component == "ibkr_whole_account_read"
+        )
+        self.assertEqual(classified_account.status, "BLOCKED")
+        self.assertEqual(
+            classified_account.error_code,
+            "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_SDK_CALLBACK_321_API_READ_ONLY",
+        )
+        assembly.close()
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_provider_status_preserves_successful_account_component(
+        self, _validate_sdk
+    ):
+        root = Path(__file__).resolve().parents[1]
+        runtime = FakeIbkrRuntime()
+        runtime.probe_reads = lambda symbol="SPY": SimpleNamespace(
+            phase="BLOCKED",
+            connected=True,
+            authenticated=True,
+            observed_at=NOW,
+            error_code="IBKR_RUNTIME_CONTRACT_SDK_CALLBACK_200",
+            account_collection_id="account-receipt",
+            instrument_evidence_id=None,
+            symbol=symbol,
+        )
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: runtime,
+        )
+        blocked = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+        by_component = {item.component: item for item in blocked}
+        whole_account = by_component["ibkr_whole_account_read"]
+        self.assertEqual(whole_account.status, "CONNECTED")
+        self.assertTrue(whole_account.authenticated)
+        contracts = by_component["ibkr_contract_details"]
+        self.assertEqual(contracts.status, "BLOCKED")
+        self.assertFalse(contracts.authenticated)
+        self.assertEqual(
+            contracts.error_code,
+            "LOCAL_ASSEMBLY_IBKR_RUNTIME_CONTRACT_SDK_CALLBACK_200",
+        )
+        assembly.close()
+
     def test_deterministic_quality_does_not_invent_capacity_or_full_depth(self):
         structure = PreparedStructure(
             source_plan_id="plan-1",
@@ -407,7 +884,7 @@ class LocalAssemblyTests(unittest.TestCase):
             venue_bid_at=NOW - timedelta(seconds=1),
             venue_ask_at=NOW - timedelta(seconds=1),
             observed_at=NOW - timedelta(milliseconds=500),
-            source="massive_stream_nbbo_top_of_book+robinhood_instrument",
+            source="massive_stream_nbbo_top_of_book+broker_instrument",
             tradable=True,
             size_source_version="massive-shares-effective-2025-11-03",
         )
@@ -450,6 +927,10 @@ class LocalAssemblyTests(unittest.TestCase):
         )
         self.assertFalse(result["hard_gate_facts"]["remaining_capacity"])
         self.assertFalse(result["hard_gate_facts"]["adequate_displayed_depth"])
+        self.assertEqual(
+            result["deferred_hard_gate_facts"],
+            ["adequate_displayed_depth", "remaining_capacity"],
+        )
         self.assertEqual(result["shadow_proposal_grants_authority"], False)
 
     def test_deterministic_quality_ages_quote_by_venue_not_local_receipt(self):

@@ -10,16 +10,19 @@ import io
 import copy
 import hashlib
 import os
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
 
 from titan_brain.live.broker import (
+    BrokerMutationBlocked,
     BrokerSide,
     EquityOrderType,
     FakeBrokerClient,
     FillSnapshot,
     MarketHours,
+    OrderRequest,
     OrderSnapshot,
     PositionSnapshot,
     TimeInForce,
@@ -28,17 +31,24 @@ from titan_brain.live.broker.robinhood import RobinhoodBrokerAdapter
 from titan_brain.live.cli import (
     ACCOUNT_KEY,
     InstallLayout,
-    LegacySchedulerRuntimeEvidence,
+    _broker_command_lane_blockers,
+    _broker_command_lane_report,
+    _ActivationRiskBoundBroker,
     _legacy_retirement_payload,
     _machine_readiness,
+    _risk_observation_entry_blockers,
     _probe_legacy_heartbeat,
     _probe_legacy_writer_processes,
     _verified_notification_receipt,
     build_parser,
+    command_activate,
+    command_doctor,
+    command_provider_status,
+    command_serve,
 )
 from titan_brain.live.composition import RuntimeComposition
 from titan_brain.live.notification_worker import notification_worker_health
-from titan_brain.live.models import BrokerOrderState
+from titan_brain.live.models import BrokerOrderState, Incident, IncidentSeverity
 from titan_brain.live.notifications import (
     DeliveryAssurance,
     GmailAuthorizationEvidence,
@@ -51,9 +61,25 @@ from titan_brain.live.notifications import (
     destination_fingerprint,
 )
 from titan_brain.live.policy import PolicyBundle, sha256_json
-from titan_brain.live.state import LiveStateStore, object_hash
-from titan_brain.live.writer_lock import AccountWriterLock
-from tests.live_activation_support import record_flat_reconciliation
+from titan_brain.live.risk_evidence_binding import risk_high_water_receipt_hash
+from titan_brain.live.scheduler_control import (
+    CODEX_SCHEDULER_CONTROL_PLANE_SOURCE,
+    CODEX_SCHEDULER_EVIDENCE_SCHEMA,
+    REQUIRED_CODEX_AUTOMATION_IDS,
+    SchedulerAutomationEvidence,
+    SchedulerEvidenceBindings,
+    SchedulerRetirementEvidence,
+)
+from titan_brain.live.state import LiveStateStore, StateConflict, object_hash
+from titan_brain.live.writer_lock import (
+    AccountWriterLock,
+    WriterLockBusy,
+    attended_coordinator_lock_key,
+)
+from tests.live_activation_support import (
+    record_flat_reconciliation,
+    stage_canonical_activation,
+)
 from tests.test_live_service import account_snapshot
 
 
@@ -67,6 +93,16 @@ def readiness_snapshot():
         observed_at=NOW,
         received_at=NOW,
         risk_evidence_as_of=NOW,
+        risk_baseline_identity_hash="4" * 64,
+        risk_baseline_receipt_hash="5" * 64,
+        risk_high_water_identity_hash="6" * 64,
+        risk_high_water_lineage_hash="7" * 64,
+        risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+            identity_hash="6" * 64,
+            baseline_receipt_hash="5" * 64,
+            lineage_hash="7" * 64,
+            peak_equity=1000,
+        ),
     )
 
 
@@ -170,12 +206,544 @@ class CliReadinessTests(unittest.TestCase):
         self.lock_directory_patch.stop()
         self.temporary.cleanup()
 
+    def risk_observation_incident(
+        self, incident_id: str, *, account_key: str = ACCOUNT_KEY,
+        category: str = "IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED",
+    ) -> None:
+        self.store.record_incident(
+            Incident(
+                incident_id=incident_id,
+                account_key=account_key,
+                category=category,
+                severity=IncidentSeverity.CRITICAL,
+                opened_at=NOW - timedelta(days=1),
+                detail={
+                    "release_manifest_hash": "f" * 64,
+                    "config_hash": "e" * 64,
+                    "policy_hash": "d" * 64,
+                    "trading_date": "2026-09-04",
+                },
+            )
+        )
+
+    def test_unresolved_risk_observation_is_account_global_across_restart(self) -> None:
+        self.risk_observation_incident("other-account", account_key="other-account")
+        self.risk_observation_incident("other-category", category="OTHER")
+        self.risk_observation_incident("resolved")
+        self.store.resolve_incident("resolved", resolved_at=NOW)
+        self.assertEqual(
+            _risk_observation_entry_blockers(self.store, account_key=ACCOUNT_KEY), ()
+        )
+
+        self.risk_observation_incident("older-release-and-trading-day")
+        expected = ("IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED",)
+        self.assertEqual(
+            _risk_observation_entry_blockers(self.store, account_key=ACCOUNT_KEY),
+            expected,
+        )
+        self.store.close()
+        self.store = LiveStateStore(self.layout.state_path)
+        before = tuple(dict(row) for row in self.store.rows("SELECT * FROM incidents"))
+        self.assertEqual(
+            _risk_observation_entry_blockers(self.store, account_key=ACCOUNT_KEY),
+            expected,
+        )
+        self.assertEqual(
+            tuple(dict(row) for row in self.store.rows("SELECT * FROM incidents")), before
+        )
+
+    def test_recovered_readiness_snapshot_never_clears_pending_risk_observation(self) -> None:
+        self.risk_observation_incident("missing-final-read")
+        evidence = self.collect(
+            FakeBrokerClient(initial_snapshot=readiness_snapshot(), clock=lambda: NOW)
+        )
+        self.assertIn("IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED", evidence.probe_errors)
+        self.assertIn("READINESS_PROBE_ERROR", evidence.blockers(self.policy, now=NOW))
+        self.assertIsNone(
+            self.store.rows(
+                "SELECT resolved_at FROM incidents WHERE incident_id=?",
+                ("missing-final-read",),
+            )[0]["resolved_at"]
+        )
+
+    def test_unreadable_risk_observation_state_fails_closed_without_error_details(self) -> None:
+        expected = ("IBKR_FINAL_RISK_OBSERVATION_STATE_UNAVAILABLE",)
+        with mock.patch.object(
+            self.store, "rows", side_effect=sqlite3.DatabaseError("private storage detail")
+        ):
+            self.assertEqual(
+                _risk_observation_entry_blockers(self.store, account_key=ACCOUNT_KEY),
+                expected,
+            )
+        real_rows = self.store.rows
+
+        def unavailable_incidents(statement, parameters=()):
+            if "IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED" in statement:
+                raise sqlite3.DatabaseError("private storage detail")
+            return real_rows(statement, parameters)
+
+        with mock.patch.object(self.store, "rows", side_effect=unavailable_incidents):
+            evidence = self.collect(
+                FakeBrokerClient(initial_snapshot=readiness_snapshot(), clock=lambda: NOW)
+            )
+        self.assertIn(expected[0], evidence.probe_errors)
+        self.assertNotIn("private storage detail", repr(evidence.to_payload()))
+        self.assertIn("READINESS_PROBE_ERROR", evidence.blockers(self.policy, now=NOW))
+
+    def test_serve_keeps_safety_runner_available_with_pending_risk_entry_blocker(self) -> None:
+        self.risk_observation_incident("interrupted-before-restart")
+        serve_store = LiveStateStore(self.layout.state_path)
+        before = dict(self.store.runtime_status())
+        composition = RuntimeComposition()
+        broker = FakeBrokerClient(initial_snapshot=readiness_snapshot(), clock=lambda: NOW)
+        args = SimpleNamespace(
+            install_root=str(self.install), once=True, provider_assembly=None,
+            runtime_composition=composition,
+        )
+        with (
+            mock.patch.object(InstallLayout, "load_release", return_value=(self.manifest, self.policy)),
+            mock.patch("titan_brain.live.cli._open_state", return_value=serve_store),
+            mock.patch.object(composition, "bind_release", return_value=()),
+            mock.patch.object(composition, "broker_client", return_value=broker),
+            mock.patch.object(composition, "build_discovery_executor", return_value=object()),
+            mock.patch.object(composition, "control_inbox", return_value=object()),
+            mock.patch("titan_brain.live.cli.ProductionLifecycleActions") as lifecycle,
+            mock.patch("titan_brain.live.cli.FullLiveService") as service,
+            mock.patch("titan_brain.live.cli.ServiceRunner") as runner,
+        ):
+            runner.return_value.run.return_value = None
+            self.assertEqual(command_serve(args), 0)
+        self.assertEqual(
+            service.call_args.kwargs["entry_path_blockers"],
+            ["IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED"],
+        )
+        self.assertIs(service.call_args.kwargs["actions"], lifecycle.return_value)
+        runner.return_value.run.assert_called_once_with(once=True)
+        self.assertEqual(dict(self.store.runtime_status()), before)
+        self.assertEqual(
+            _risk_observation_entry_blockers(self.store, account_key=ACCOUNT_KEY),
+            ("IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED",),
+        )
+
     def test_install_layout_uses_one_user_lock_root_across_install_roots(self) -> None:
         other = InstallLayout(Path(self.temporary.name) / "other/full-live")
         self.assertEqual(self.layout.lock_path, self.fixed_lock_directory)
         self.assertEqual(other.lock_path, self.fixed_lock_directory)
         self.assertNotEqual(self.layout.lock_path, self.layout.root.parent)
         self.assertNotEqual(other.lock_path, other.root.parent)
+
+    def test_capabilities_cannot_substitute_for_command_handshake_proof(self) -> None:
+        execution = {"broker_adapter": "supported_production_transport"}
+        capability_only = RuntimeComposition(
+            production_transport=SimpleNamespace(
+                session=SimpleNamespace(),
+                descriptor=SimpleNamespace(),
+            )
+        )
+
+        report, error = _broker_command_lane_report(
+            capability_only,
+            execution,
+        )
+
+        self.assertEqual(
+            error,
+            "broker_command:COMMAND_LANE_PROOF_UNAVAILABLE",
+        )
+        self.assertEqual(
+            _broker_command_lane_blockers(report, required=True),
+            (
+                "BROKER_COMMAND_LANE_DISCONNECTED",
+                "BROKER_COMMAND_NEXT_VALID_ID_MISSING",
+                "BROKER_COMMAND_ACCOUNT_UNAUTHENTICATED",
+            ),
+        )
+
+    def test_authenticated_unarmed_command_handshake_is_ready(self) -> None:
+        status = SimpleNamespace(
+            command_connected=True,
+            next_valid_id_received=True,
+            account_authenticated=True,
+            write_authority_granted=False,
+        )
+        composition = RuntimeComposition(
+            production_transport=SimpleNamespace(
+                session=SimpleNamespace(command_lane_status=lambda: status),
+                descriptor=SimpleNamespace(),
+            )
+        )
+
+        report, error = _broker_command_lane_report(
+            composition,
+            {"broker_adapter": "supported_production_transport"},
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(
+            _broker_command_lane_blockers(report, required=True),
+            (),
+        )
+
+    def test_serve_lock_contention_stops_before_lazy_provider_composition(self) -> None:
+        serve_store = LiveStateStore(self.layout.state_path)
+        lock_key = attended_coordinator_lock_key(ACCOUNT_KEY)
+        holder = AccountWriterLock(
+            self.fixed_lock_directory,
+            lock_key,
+            owner_id="existing-service",
+        )
+        contender = AccountWriterLock(
+            self.fixed_lock_directory,
+            lock_key,
+            owner_id="contending-service",
+        )
+        composition_calls: list[None] = []
+
+        def compose():
+            composition_calls.append(None)
+            return RuntimeComposition()
+
+        args = SimpleNamespace(
+            install_root=str(self.install),
+            once=True,
+            provider_assembly=None,
+            runtime_composition=compose,
+        )
+        holder.acquire(acquired_at=NOW)
+        try:
+            with (
+                mock.patch.object(
+                    InstallLayout,
+                    "load_release",
+                    return_value=(self.manifest, self.policy),
+                ),
+                mock.patch(
+                    "titan_brain.live.cli._open_state",
+                    return_value=serve_store,
+                ),
+                mock.patch(
+                    "titan_brain.live.cli._service_process_lock",
+                    return_value=contender,
+                ),
+            ):
+                with self.assertRaises(WriterLockBusy):
+                    command_serve(args)
+        finally:
+            holder.release()
+
+        self.assertEqual(composition_calls, [])
+        self.assertFalse(contender.held)
+
+    def test_doctor_lock_contention_stops_before_command_graph_composition(self) -> None:
+        holder = AccountWriterLock(
+            self.fixed_lock_directory,
+            ACCOUNT_KEY,
+            owner_id="running-coordinator",
+        )
+        composition_calls: list[None] = []
+
+        def compose():
+            composition_calls.append(None)
+            return RuntimeComposition()
+
+        args = SimpleNamespace(
+            install_root=str(self.install),
+            runtime_composition=compose,
+        )
+        holder.acquire(acquired_at=NOW)
+        try:
+            with mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, self.policy),
+            ):
+                with self.assertRaises(WriterLockBusy):
+                    command_doctor(args)
+        finally:
+            holder.release()
+        self.assertEqual(composition_calls, [])
+
+    def test_network_provider_probe_cannot_collide_with_coordinator(self) -> None:
+        holder = AccountWriterLock(
+            self.fixed_lock_directory,
+            ACCOUNT_KEY,
+            owner_id="running-coordinator",
+        )
+        reports: list[bool] = []
+        args = SimpleNamespace(
+            install_root=str(self.install),
+            probe_network=True,
+            provider_assembly=SimpleNamespace(
+                connection_report=lambda *, probe_network: reports.append(
+                    probe_network
+                )
+            ),
+        )
+        holder.acquire(acquired_at=NOW)
+        try:
+            with mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, self.policy),
+            ):
+                with self.assertRaises(WriterLockBusy):
+                    command_provider_status(args)
+        finally:
+            holder.release()
+        self.assertEqual(reports, [])
+
+    def test_activated_risk_binding_strips_only_entry_authority(self) -> None:
+        record, _owner = stage_canonical_activation(
+            self.store,
+            created_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+        )
+        prepared = replace(
+            record.readiness_evidence,
+            risk_high_water_peak_equity="1200",
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash=str(
+                    record.readiness_evidence.risk_high_water_identity_hash
+                ),
+                baseline_receipt_hash=str(
+                    record.readiness_evidence.risk_baseline_receipt_hash
+                ),
+                lineage_hash=str(
+                    record.readiness_evidence.risk_high_water_lineage_hash
+                ),
+                peak_equity=1200,
+            ),
+        )
+        replacement = readiness_snapshot()
+        cancel_receipt = object()
+        inner = SimpleNamespace(
+            capabilities=object(),
+            bind_entry_risk_activation=lambda **_kwargs: None,
+            get_account_snapshot=lambda _masked: replacement,
+            cancel_equity_order=lambda *_args, **_kwargs: cancel_receipt,
+        )
+        guarded = _ActivationRiskBoundBroker(inner, prepared)
+
+        degraded = guarded.get_account_snapshot("••••7153")
+
+        self.assertTrue(degraded.whole_broker_reconciled)
+        self.assertEqual(degraded.funds.total_value, Decimal("1000.00"))
+        self.assertFalse(degraded.entry_risk_evidence_ready)
+        self.assertIsNone(degraded.peak_equity)
+        self.assertIs(
+            guarded.cancel_equity_order("••••7153", "order-1"),
+            cancel_receipt,
+        )
+
+    def test_activated_risk_binding_guards_entry_review_and_place_only(self) -> None:
+        record, _owner = stage_canonical_activation(
+            self.store,
+            created_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+        )
+        prepared = replace(
+            record.readiness_evidence,
+            risk_high_water_peak_equity="1200",
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash=str(
+                    record.readiness_evidence.risk_high_water_identity_hash
+                ),
+                baseline_receipt_hash=str(
+                    record.readiness_evidence.risk_baseline_receipt_hash
+                ),
+                lineage_hash=str(
+                    record.readiness_evidence.risk_high_water_lineage_hash
+                ),
+                peak_equity=1200,
+            ),
+        )
+        valid = replace(
+            readiness_snapshot(),
+            peak_equity=Decimal("1200"),
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash="6" * 64,
+                baseline_receipt_hash="5" * 64,
+                lineage_hash="7" * 64,
+                peak_equity=1200,
+            ),
+        )
+        # A recreated ledger can be internally self-consistent while still
+        # being unrelated to the lineage consumed at activation.
+        replacement = replace(
+            readiness_snapshot(),
+            risk_high_water_identity_hash="8" * 64,
+            risk_high_water_lineage_hash="9" * 64,
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash="8" * 64,
+                baseline_receipt_hash="5" * 64,
+                lineage_hash="9" * 64,
+                peak_equity=1000,
+            ),
+        )
+        advanced = replace(
+            valid,
+            peak_equity=Decimal("1300"),
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash="6" * 64,
+                baseline_receipt_hash="5" * 64,
+                lineage_hash="7" * 64,
+                peak_equity=1300,
+            ),
+        )
+        rolled_back = replace(
+            valid,
+            peak_equity=Decimal("1250"),
+            risk_high_water_receipt_hash=risk_high_water_receipt_hash(
+                identity_hash="6" * 64,
+                baseline_receipt_hash="5" * 64,
+                lineage_hash="7" * 64,
+                peak_equity=1250,
+            ),
+        )
+        current = [valid]
+        calls: list[tuple[str, object]] = []
+        activation_bindings: list[dict[str, object]] = []
+        entry_review = object()
+        exit_review = object()
+        exit_result = object()
+        cancel_result = object()
+
+        def review(request):
+            calls.append(("review", request.side))
+            return entry_review if request.side is BrokerSide.BUY else exit_review
+
+        def place(request, *, review, explicit_confirmation=None):
+            calls.append(("place", request.side))
+            return exit_result
+
+        inner = SimpleNamespace(
+            capabilities=object(),
+            bind_entry_risk_activation=lambda **kwargs: activation_bindings.append(
+                kwargs
+            ),
+            get_account_snapshot=lambda _masked: current[0],
+            lookup_equity_orders_by_client_ref=lambda *_args: (),
+            review_equity_order=review,
+            place_equity_order=place,
+            cancel_equity_order=lambda *_args, **_kwargs: cancel_result,
+        )
+        guarded = _ActivationRiskBoundBroker(inner, prepared)
+        self.assertEqual(
+            activation_bindings,
+            [
+                {
+                    "lineage_hash": "7" * 64,
+                    "minimum_peak": Decimal("1200"),
+                }
+            ],
+        )
+        entry = OrderRequest(
+            account_masked="••••7153",
+            symbol="XYZ",
+            side=BrokerSide.BUY,
+            order_type=EquityOrderType.LIMIT,
+            quantity=1,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce.GFD,
+            client_ref_id="00000000-0000-4000-8000-000000000001",
+            limit_price=Decimal("10"),
+        )
+        exit_request = replace(
+            entry,
+            side=BrokerSide.SELL,
+            client_ref_id="00000000-0000-4000-8000-000000000002",
+        )
+
+        self.assertIs(guarded.review_equity_order(entry), entry_review)
+        current[0] = replacement
+        with self.assertRaisesRegex(
+            BrokerMutationBlocked,
+            "ACTIVATED_IBKR_ENTRY_RISK_EVIDENCE_CHANGED",
+        ):
+            guarded.place_equity_order(entry, review=entry_review)
+        with self.assertRaisesRegex(
+            BrokerMutationBlocked,
+            "ACTIVATED_IBKR_ENTRY_RISK_EVIDENCE_CHANGED",
+        ):
+            guarded.review_equity_order(entry)
+
+        current[0] = advanced
+        self.assertEqual(
+            guarded.get_account_snapshot("••••7153").peak_equity,
+            Decimal("1300"),
+        )
+        current[0] = rolled_back
+        with self.assertRaisesRegex(
+            BrokerMutationBlocked,
+            "ACTIVATED_IBKR_ENTRY_RISK_EVIDENCE_CHANGED",
+        ):
+            guarded.review_equity_order(entry)
+
+        # Sell-side protection/exit and cancellation stay available despite
+        # the entry-only ledger fault.
+        current[0] = replacement
+        self.assertIs(guarded.review_equity_order(exit_request), exit_review)
+        self.assertIs(
+            guarded.place_equity_order(exit_request, review=exit_review),
+            exit_result,
+        )
+        self.assertIs(
+            guarded.cancel_equity_order("••••7153", "order-1"),
+            cancel_result,
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("review", BrokerSide.BUY),
+                ("review", BrokerSide.SELL),
+                ("place", BrokerSide.SELL),
+            ],
+        )
+
+    def test_serve_lease_failure_releases_kernel_before_provider_composition(self) -> None:
+        serve_store = LiveStateStore(self.layout.state_path)
+        lock = AccountWriterLock(
+            self.fixed_lock_directory,
+            attended_coordinator_lock_key(ACCOUNT_KEY),
+            owner_id="lease-failure-service",
+        )
+        composition_calls: list[None] = []
+
+        def compose():
+            composition_calls.append(None)
+            return RuntimeComposition()
+
+        args = SimpleNamespace(
+            install_root=str(self.install),
+            once=True,
+            provider_assembly=None,
+            runtime_composition=compose,
+        )
+        with (
+            mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, self.policy),
+            ),
+            mock.patch(
+                "titan_brain.live.cli._open_state",
+                return_value=serve_store,
+            ),
+            mock.patch(
+                "titan_brain.live.cli._service_process_lock",
+                return_value=lock,
+            ),
+            mock.patch.object(
+                serve_store,
+                "acquire_writer_lease",
+                side_effect=StateConflict("synthetic active writer lease"),
+            ),
+        ):
+            with self.assertRaises(StateConflict):
+                command_serve(args)
+
+        self.assertEqual(composition_calls, [])
+        self.assertFalse(lock.held)
 
     def paused_legacy_path(self) -> Path:
         target = Path(self.temporary.name) / "automation.toml"
@@ -193,21 +761,46 @@ class CliReadinessTests(unittest.TestCase):
         *,
         runtime_id: str = "synthetic-codex-scheduler-runtime-1",
         query_receipt_hash: str = "9" * 64,
-    ) -> LegacySchedulerRuntimeEvidence:
-        heartbeat_id, status, config_hash, disabled, error = (
+        statuses: tuple[str, str] = ("PAUSED", "DISABLED"),
+        active_counts: tuple[int, int] = (0, 0),
+    ) -> SchedulerRetirementEvidence:
+        _, _, config_hash, disabled, error = (
             _probe_legacy_heartbeat(legacy_path)
         )
         self.assertTrue(disabled)
         self.assertIsNone(error)
         self.assertIsNotNone(config_hash)
-        return LegacySchedulerRuntimeEvidence(
-            automation_id=heartbeat_id,
-            scheduler_runtime_id=runtime_id,
-            status=status,
-            config_hash=str(config_hash),
-            active_execution_count=0,
-            observed_at=NOW,
-            query_receipt_hash=query_receipt_hash,
+        return SchedulerRetirementEvidence(
+            schema_version=CODEX_SCHEDULER_EVIDENCE_SCHEMA,
+            bindings=SchedulerEvidenceBindings(
+                release_manifest_hash=str(self.manifest["release_manifest_hash"]),
+                config_hash=self.policy.config_hash,
+                policy_hash=self.policy.policy_hash,
+                runtime_id=self.policy.runtime_id,
+                account_key=ACCOUNT_KEY,
+            ),
+            issued_at=NOW,
+            expires_at=NOW + timedelta(seconds=10),
+            automations=tuple(
+                SchedulerAutomationEvidence(
+                    automation_id=automation_id,
+                    scheduler_runtime_id=f"{runtime_id}-{index + 1}",
+                    status=statuses[index],
+                    config_hash=(
+                        str(config_hash) if index == 0 else "8" * 64
+                    ),
+                    active_execution_count=active_counts[index],
+                    observed_at=NOW,
+                    query_receipt_hash=(
+                        query_receipt_hash if index == 0 else "7" * 64
+                    ),
+                    source=CODEX_SCHEDULER_CONTROL_PLANE_SOURCE,
+                )
+                for index, automation_id in enumerate(
+                    REQUIRED_CODEX_AUTOMATION_IDS
+                )
+            ),
+            signed_evidence_hash="6" * 64,
         )
 
     def collect(
@@ -217,11 +810,12 @@ class CliReadinessTests(unittest.TestCase):
         clock: MutableProbeClock | None = None,
         legacy_path: Path | None = None,
         legacy_process_listing: str = "",
-        legacy_scheduler_runtime_evidence: LegacySchedulerRuntimeEvidence | None = None,
+        legacy_scheduler_runtime_evidence: SchedulerRetirementEvidence | None = None,
         persist_fresh_broker_read: bool = True,
         policy: PolicyBundle | None = None,
         manifest: dict | None = None,
         runtime_composition: RuntimeComposition | None = None,
+        coordinator_runtime_composition: RuntimeComposition | None = None,
     ):
         selected_policy = policy or self.policy
         lock = AccountWriterLock(
@@ -254,6 +848,9 @@ class CliReadinessTests(unittest.TestCase):
                         legacy_scheduler_runtime_evidence
                     ),
                     runtime_composition=runtime_composition,
+                    coordinator_runtime_composition=(
+                        coordinator_runtime_composition
+                    ),
                 )
             finally:
                 self.store.release_writer_lease(
@@ -267,7 +864,7 @@ class CliReadinessTests(unittest.TestCase):
         self,
         evidence,
         legacy_path: Path,
-        scheduler_runtime: LegacySchedulerRuntimeEvidence,
+        scheduler_runtime: SchedulerRetirementEvidence,
     ) -> str:
         lock = AccountWriterLock(
             self.layout.lock_path, ACCOUNT_KEY, owner_id="retirement-receipt-test"
@@ -280,18 +877,9 @@ class CliReadinessTests(unittest.TestCase):
                 recover_stale=True,
             )
             try:
-                _, status, config_hash, scheduler_disabled, error = (
-                    _probe_legacy_heartbeat(legacy_path)
-                )
-                self.assertTrue(scheduler_disabled)
-                self.assertIsNone(error)
-                self.assertIsNotNone(config_hash)
                 payload = _legacy_retirement_payload(
                     manifest=self.manifest,
                     policy=self.policy,
-                    legacy_heartbeat_id="robinhood-momentum-engine",
-                    legacy_heartbeat_status=status,
-                    legacy_heartbeat_config_hash=str(config_hash),
                     scheduler_runtime=scheduler_runtime,
                     durable_snapshot_id=str(evidence.durable_snapshot_id),
                     reconciliation_audit_event_id=str(
@@ -399,6 +987,131 @@ class CliReadinessTests(unittest.TestCase):
             "DURABLE_RECONCILIATION_EVIDENCE_MISSING",
             evidence.blockers(self.policy, now=NOW),
         )
+
+    def test_current_risk_failure_cannot_reuse_prepared_durable_reconciliation(self) -> None:
+        prepared_snapshot = readiness_snapshot()
+        self.collect(
+            FakeBrokerClient(initial_snapshot=prepared_snapshot, clock=lambda: NOW)
+        )
+        raw_after_high_water_failure = replace(
+            prepared_snapshot,
+            weekly_realized_pnl=None,
+            peak_equity=None,
+            weekly_realized_pnl_complete=False,
+            peak_equity_complete=False,
+            risk_baseline_identity_hash=None,
+            risk_baseline_receipt_hash=None,
+            risk_high_water_identity_hash=None,
+            risk_high_water_lineage_hash=None,
+            risk_high_water_receipt_hash=None,
+        )
+
+        current = self.collect(
+            FakeBrokerClient(
+                initial_snapshot=raw_after_high_water_failure,
+                clock=lambda: NOW,
+            ),
+            persist_fresh_broker_read=False,
+        )
+
+        self.assertTrue(current.realized_pnl_reconciled)
+        self.assertEqual(current.reconciliation_blocker_count, 0)
+        self.assertFalse(current.entry_risk_evidence_ready)
+        self.assertFalse(current.weekly_realized_pnl_complete)
+        self.assertFalse(current.peak_equity_complete)
+        self.assertIsNone(current.risk_high_water_receipt_hash)
+        blockers = current.blockers(self.policy, now=NOW)
+        self.assertIn("ENTRY_RISK_EVIDENCE_UNAVAILABLE", blockers)
+        self.assertIn("RISK_HIGH_WATER_RECEIPT_MISSING", blockers)
+
+    def test_activate_high_water_failure_keeps_authority_disabled(self) -> None:
+        record, owner = stage_canonical_activation(
+            self.store,
+            created_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+        )
+        self.store.release_writer_lease(
+            account_key=ACCOUNT_KEY,
+            owner_id=owner,
+            released_at=NOW + timedelta(milliseconds=100),
+        )
+        activated_at = NOW + timedelta(seconds=1)
+        current_after_high_water_failure = replace(
+            record.readiness_evidence,
+            collected_at=activated_at,
+            broker_snapshot_received_at=activated_at,
+            probe_started_at=activated_at - timedelta(milliseconds=100),
+            probe_completed_at=activated_at,
+            probe_elapsed_monotonic_seconds=0.1,
+            risk_evidence_as_of=activated_at,
+            risk_evidence_age_seconds=0,
+            entry_risk_evidence_ready=False,
+            weekly_realized_pnl_complete=False,
+            peak_equity_complete=False,
+            risk_baseline_identity_hash=None,
+            risk_baseline_receipt_hash=None,
+            risk_high_water_identity_hash=None,
+            risk_high_water_lineage_hash=None,
+            risk_high_water_peak_equity=None,
+            risk_high_water_receipt_hash=None,
+        )
+        config = copy.deepcopy(self.policy.config)
+        config["execution"].update(
+            {
+                "broker_adapter": "supported_production_transport",
+                "execution_authority_mode": "unattended",
+                "production_account_binding_fingerprint": "a" * 64,
+                "production_authorization_binding_id": "b" * 64,
+            }
+        )
+        activation_ready_policy = SimpleNamespace(
+            config=config,
+            config_hash=self.policy.config_hash,
+            policy_hash=self.policy.policy_hash,
+            runtime_id=self.policy.runtime_id,
+            account_key=ACCOUNT_KEY,
+            account_last4=self.policy.account_last4,
+            execution_authority_mode="unattended",
+            activation_blockers=(),
+            require_activation_ready=lambda: None,
+        )
+        args = SimpleNamespace(
+            install_root=str(self.install),
+            activation_id=record.activation_id,
+            confirm=f"ACTIVATE FULL LIVE {ACCOUNT_KEY} {record.activation_id}",
+            runtime_composition=RuntimeComposition(),
+            scheduler_control_plane=object(),
+        )
+
+        with (
+            mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, activation_ready_policy),
+            ),
+            mock.patch(
+                "titan_brain.live.cli._machine_readiness",
+                return_value=current_after_high_water_failure,
+            ) as probe,
+            mock.patch(
+                "titan_brain.live.cli._now", return_value=activated_at
+            ),
+            self.assertRaisesRegex(
+                ValueError,
+                "ACTIVATION_CURRENT_READINESS_BLOCKED:.*RISK_HIGH_WATER_RECEIPT_MISSING",
+            ),
+        ):
+            command_activate(args)
+
+        self.assertFalse(probe.call_args.kwargs["persist_fresh_broker_read"])
+        status = self.store.runtime_status()
+        self.assertEqual(status["mode"], "PAUSED")
+        self.assertEqual(status["authority_enabled"], 0)
+        activation = self.store.rows(
+            "SELECT consumed_at FROM activation_records WHERE activation_id=?",
+            (record.activation_id,),
+        )[0]
+        self.assertIsNone(activation["consumed_at"])
 
     def test_active_legacy_heartbeat_is_machine_detected(self) -> None:
         target = Path(self.temporary.name) / "automation.toml"
@@ -529,6 +1242,47 @@ class CliReadinessTests(unittest.TestCase):
         self.assertIn(
             "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_UNAVAILABLE",
             evidence.probe_errors,
+        )
+
+    def test_readiness_requires_both_automations_retired_and_zero_executions(self) -> None:
+        legacy = self.paused_legacy_path()
+        broker = FakeBrokerClient(
+            initial_snapshot=readiness_snapshot(), clock=lambda: NOW
+        )
+        active = self.collect(
+            broker,
+            legacy_scheduler_runtime_evidence=self.scheduler_runtime(
+                legacy,
+                statuses=("PAUSED", "ACTIVE"),
+            ),
+        )
+        self.assertFalse(active.old_writer_disabled)
+        self.assertIn(
+            "legacy_retirement:SCHEDULER_NOT_DISABLED:"
+            "robinhood-titan-premarket-deep-dive",
+            active.probe_errors,
+        )
+        self.assertIn(
+            "OLD_ACCOUNT_WRITER_STILL_ENABLED",
+            active.blockers(self.policy, now=NOW),
+        )
+
+        running = self.collect(
+            broker,
+            legacy_scheduler_runtime_evidence=self.scheduler_runtime(
+                legacy,
+                active_counts=(0, 1),
+            ),
+        )
+        self.assertFalse(running.old_writer_disabled)
+        self.assertIn(
+            "legacy_retirement:SCHEDULER_ACTIVE_EXECUTIONS:"
+            "robinhood-titan-premarket-deep-dive",
+            running.probe_errors,
+        )
+        self.assertIn(
+            "OLD_ACCOUNT_WRITER_STILL_ENABLED",
+            running.blockers(self.policy, now=NOW),
         )
 
     def test_hash_bound_retirement_receipt_is_reprobed_before_acceptance(self) -> None:
@@ -731,6 +1485,51 @@ class CliReadinessTests(unittest.TestCase):
                 account_key=ACCOUNT_KEY,
                 route=self.notification_route(),
             )
+        )
+
+    def test_machine_readiness_persists_full_and_coordinator_profiles_separately(self) -> None:
+        transport = object()
+
+        class FixedProfileComposition(RuntimeComposition):
+            def __init__(self, profile_hash, *, providers):
+                super().__init__(
+                    production_transport=transport,
+                    discovery_provider=(object() if providers else None),
+                    notification_provider=(object() if providers else None),
+                )
+                self.profile_hash = profile_hash
+
+            def bind_release(self, manifest, *, release_root):
+                return ()
+
+            @property
+            def component_provenance_hash(self):
+                return self.profile_hash
+
+            def tradability_ready(self, discovery_config, *, now):
+                return True
+
+        full_hash = "d" * 64
+        coordinator_hash = "e" * 64
+        full = FixedProfileComposition(full_hash, providers=True)
+        coordinator = FixedProfileComposition(coordinator_hash, providers=False)
+        broker = FakeBrokerClient(
+            initial_snapshot=readiness_snapshot(), clock=lambda: NOW
+        )
+        broker.descriptor = SimpleNamespace(
+            account_binding_fingerprint="a" * 64,
+            authorization_binding_id="b" * 64,
+        )
+
+        evidence = self.collect(
+            broker,
+            runtime_composition=full,
+            coordinator_runtime_composition=coordinator,
+        )
+
+        self.assertEqual(evidence.component_provenance_hash, full_hash)
+        self.assertEqual(
+            evidence.coordinator_component_provenance_hash, coordinator_hash
         )
 
     def test_machine_readiness_accepts_only_current_injected_provider_route(self) -> None:

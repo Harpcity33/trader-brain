@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from contextlib import contextmanager
+from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 import hashlib
@@ -13,12 +14,14 @@ from pathlib import Path
 import re
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
 import time
 import tomllib
 from typing import Any, Callable, Mapping, Sequence
+from uuid import uuid4
 
 from .activation import (
     MACHINE_EVIDENCE_SOURCE,
@@ -26,6 +29,21 @@ from .activation import (
     ReadinessEvidence,
 )
 from .broker.robinhood import RobinhoodBrokerAdapter
+from .broker.base import (
+    AccountSnapshot,
+    BrokerContractViolation,
+    BrokerMutationBlocked,
+    BrokerSide,
+    EquityOrderType,
+    MarketHours,
+    OrderRequest,
+    TimeInForce,
+)
+from .attended_control import (
+    AttendedControlError,
+    AttendedOrderControl,
+    AttendedReviewStore,
+)
 from .composition import RuntimeComposition, RuntimeCompositionError
 from .control import ControlInbox
 from .eod_live import build_eod_evidence, write_eod_evidence
@@ -48,13 +66,27 @@ from .notifications import (
     receipt_satisfies_route,
 )
 from .policy import PolicyBundle
+from .provider_profile import (
+    IbkrLocalProviderProfile,
+    ProviderProfileError,
+    redacted_profile_status,
+)
 from .reconcile import (
     NON_INGESTIBLE_SNAPSHOT_BLOCKERS,
     AuthoritativeReconciler,
     ReconciliationPhase,
 )
 from .release import load_release_manifest
+from .scheduler_control import (
+    REQUIRED_CODEX_AUTOMATION_IDS,
+    SchedulerControlPlane,
+    SchedulerEvidenceBindings,
+    SchedulerEvidenceError,
+    SchedulerRetirementEvidence,
+    installed_scheduler_control_plane,
+)
 from .service import (
+    AcquiredServiceWriterAuthority,
     FullLiveService,
     ServiceRunner,
     _order_payload,
@@ -65,6 +97,7 @@ from .service import (
 from .state import LiveStateStore, object_hash
 from .writer_lock import (
     AccountWriterLock,
+    attended_coordinator_lock_key,
     WriterLockBusy,
     user_account_writer_lock_directory,
 )
@@ -73,10 +106,8 @@ from .writer_lock import (
 ACCOUNT_KEY = "ending-7153"
 _PROBE_CLOCK_JUMP_TOLERANCE_SECONDS = 1.0
 _NOTIFICATION_RECEIPT_MAX_AGE_SECONDS = 300.0
-_LEGACY_RETIREMENT_SCHEMA = "titan_legacy_writer_retirement_v2"
+_LEGACY_RETIREMENT_SCHEMA = "titan_legacy_writer_retirement_v3"
 _LEGACY_GATEWAY_CONTRACT = "titan_account_writer_lock_v1"
-_LEGACY_SCHEDULER_CONTROL_PLANE = "codex_app_automation_control_plane"
-_LEGACY_SCHEDULER_MAX_EVIDENCE_AGE_SECONDS = 10.0
 _LEGACY_WRITER_PROCESS_MARKERS = (
     "titan_runtime.mcp_server",
     "titan-momentum-watcher",
@@ -120,9 +151,71 @@ def _runtime_composition(args: argparse.Namespace) -> RuntimeComposition:
     if composition is None:
         composition = RuntimeComposition()
         setattr(args, "runtime_composition", composition)
+    elif callable(composition):
+        # Local provider construction may authenticate read-only broker and
+        # market-data connections.  Resolve it only for commands that actually
+        # consume the composition; profile/status-only CLI surfaces must not
+        # open a connection as a side effect of launcher startup.
+        try:
+            composition = composition()
+        except Exception as exc:
+            raise CommandBlocked(
+                _external_failure_code("RUNTIME_COMPOSITION_UNAVAILABLE", exc)
+            ) from exc
+        setattr(args, "runtime_composition", composition)
     if not isinstance(composition, RuntimeComposition):
         raise CommandBlocked("runtime composition is not normalized")
     return composition
+
+
+def _coordinator_runtime_composition(
+    args: argparse.Namespace,
+    *,
+    fallback: RuntimeComposition,
+) -> RuntimeComposition:
+    """Resolve the release-bound safety core used by the persistent service."""
+
+    cached = getattr(args, "coordinator_runtime_composition", None)
+    if cached is not None:
+        if not isinstance(cached, RuntimeComposition):
+            raise CommandBlocked("coordinator runtime composition is not normalized")
+        return cached
+    assembly = getattr(args, "provider_assembly", None)
+    factory = getattr(assembly, "coordinator_runtime_composition", None)
+    if not callable(factory):
+        return fallback
+    try:
+        composition = factory()
+    except Exception as exc:
+        raise CommandBlocked(
+            _external_failure_code("COORDINATOR_COMPOSITION_UNAVAILABLE", exc)
+        ) from exc
+    if not isinstance(composition, RuntimeComposition):
+        raise CommandBlocked("coordinator runtime composition is not normalized")
+    setattr(args, "coordinator_runtime_composition", composition)
+    return composition
+
+
+def _policy_account_key(policy: PolicyBundle) -> str:
+    """Return the release-bound account namespace (legacy default included)."""
+
+    return policy.account_key
+
+
+def _background_mutations_enabled(policy: PolicyBundle) -> bool:
+    """Return mutation authority for the persistent coordinator only.
+
+    Attended authority belongs to the short-lived, exact-review command path;
+    the service process must remain incapable of treating a human confirmation
+    requirement as ambient authority.
+    """
+
+    return bool(
+        policy.execution_authority_mode == "unattended"
+        and policy.config["execution"].get(
+            "local_mutation_interlock_enabled", False
+        )
+    )
 
 
 def _account_writer_lock(
@@ -135,7 +228,7 @@ def _account_writer_lock(
     production = execution.get("broker_adapter") == "supported_production_transport"
     return AccountWriterLock(
         layout.lock_path,
-        ACCOUNT_KEY,
+        _policy_account_key(policy),
         owner_id=owner_id,
         broker_account_binding_fingerprint=(
             str(execution.get("production_account_binding_fingerprint", ""))
@@ -148,6 +241,64 @@ def _account_writer_lock(
             else None
         ),
     )
+
+
+def _service_process_lock(
+    layout: "InstallLayout",
+    policy: PolicyBundle,
+    *,
+    owner_id: str | None = None,
+) -> AccountWriterLock:
+    """Return the persistent coordinator's process/DB lease lock.
+
+    An unattended coordinator is itself the broker writer, so it retains the
+    account-global broker-bound lock.  An attended-only coordinator is
+    deliberately read/reconciliation-only and receives a distinct unprivileged
+    account process lock.  The short-lived confirmed command must still acquire
+    the broker-bound account-global lock at its mutation boundary.  This keeps
+    one coordinator and one broker writer without making the read service
+    permanently deadlock every attended confirmation.
+    """
+
+    if policy.execution_authority_mode != "attended_only":
+        return _account_writer_lock(layout, policy, owner_id=owner_id)
+    return AccountWriterLock(
+        layout.lock_path,
+        attended_coordinator_lock_key(_policy_account_key(policy)),
+        owner_id=owner_id or "attended-read-coordinator",
+    )
+
+
+@contextmanager
+def _maintenance_interlock(
+    layout: "InstallLayout",
+    policy: PolicyBundle,
+    *,
+    owner_id: str,
+):
+    """Exclude both the attended coordinator and every broker mutation.
+
+    Attended mode deliberately splits those roles across two kernel locks.  A
+    command that can mutate durable runtime state must therefore own both.  All
+    maintenance callers acquire the coordinator namespace first and the broker
+    writer namespace second; release is the reverse order.  Unattended mode has
+    only the broker-writer role and continues to take its one existing lock.
+    """
+
+    broker_writer = _account_writer_lock(layout, policy, owner_id=owner_id)
+    if policy.execution_authority_mode != "attended_only":
+        with broker_writer:
+            yield broker_writer
+        return
+
+    coordinator = _service_process_lock(
+        layout,
+        policy,
+        owner_id=f"{owner_id}-coordinator",
+    )
+    with coordinator:
+        with broker_writer:
+            yield broker_writer
 
 
 def _iso(value: str, field: str) -> datetime:
@@ -179,7 +330,10 @@ class InstallLayout:
             self.manifest_path,
             verify_files_root=self.release_root if verify_files else None,
         )
-        policy = PolicyBundle.load(self.release_root)
+        policy = PolicyBundle.load(
+            self.release_root,
+            config_relative=str(manifest["config_path"]),
+        )
         if manifest["config_hash"] != policy.config_hash:
             raise ValueError("installed config does not match the release manifest")
         if manifest["policy_hash"] != policy.policy_hash:
@@ -204,6 +358,22 @@ def _activated_runtime_profile_hash(
 ) -> str | None:
     """Recover the sole consumed activation's exact runtime profile."""
 
+    record = _activated_runtime_record(store, runtime)
+    if record is None:
+        return None
+    profile_hash = record.readiness_evidence.coordinator_component_provenance_hash
+    if profile_hash is None:
+        raise CommandBlocked(
+            "armed runtime activation has no coordinator composition profile"
+        )
+    return profile_hash
+
+
+def _activated_runtime_record(
+    store: LiveStateStore, runtime: Mapping[str, Any]
+) -> ActivationRecord | None:
+    """Recover the sole consumed activation that grants runtime authority."""
+
     if not bool(runtime.get("authority_enabled")):
         return None
     activated_at = runtime.get("activated_at")
@@ -211,7 +381,7 @@ def _activated_runtime_profile_hash(
         raise CommandBlocked("armed runtime has no activation timestamp")
     rows = store.rows(
         "SELECT * FROM activation_records WHERE account_key=? AND consumed_at=?",
-        (ACCOUNT_KEY, str(activated_at)),
+        (str(runtime.get("account_key", "")), str(activated_at)),
     )
     if len(rows) != 1:
         raise CommandBlocked("armed runtime has no unique consumed activation")
@@ -219,10 +389,130 @@ def _activated_runtime_profile_hash(
         record = _activation_from_row(rows[0])
     except (TypeError, ValueError) as exc:
         raise CommandBlocked("armed runtime activation record is invalid") from exc
-    profile_hash = record.readiness_evidence.component_provenance_hash
-    if profile_hash is None:
-        raise CommandBlocked("armed runtime activation has no composition profile")
-    return profile_hash
+    return record
+
+
+class _ActivationRiskBoundBroker:
+    """Strip entry authority after a lineage/peak regression, preserving facts."""
+
+    def __init__(self, broker: object, readiness: ReadinessEvidence) -> None:
+        lineage = readiness.risk_high_water_lineage_hash
+        peak = readiness.risk_high_water_peak_equity
+        if lineage is None or peak is None:
+            raise CommandBlocked("armed runtime activation has no risk-ledger binding")
+        self._broker = broker
+        self._lineage_hash = lineage
+        self._minimum_peak = Decimal(peak)
+        self._risk_lock = threading.Lock()
+        binder = getattr(broker, "bind_entry_risk_activation", None)
+        if not callable(binder):
+            raise CommandBlocked(
+                "armed runtime entry preflight has no activation-risk binding"
+            )
+        try:
+            result = binder(
+                lineage_hash=self._lineage_hash,
+                minimum_peak=self._minimum_peak,
+            )
+        except Exception as exc:
+            raise CommandBlocked(
+                "armed runtime entry preflight rejected activation-risk binding"
+            ) from exc
+        if result is not None:
+            raise CommandBlocked(
+                "armed runtime entry preflight returned an invalid activation-risk binding"
+            )
+
+    @property
+    def capabilities(self):
+        return self._broker.capabilities
+
+    def _current_snapshot(
+        self,
+        account_masked: str,
+        *,
+        require_entry_authority: bool,
+    ) -> AccountSnapshot:
+        snapshot = self._broker.get_account_snapshot(account_masked)
+        if not isinstance(snapshot, AccountSnapshot):
+            raise BrokerContractViolation("broker snapshot is not normalized")
+        with self._risk_lock:
+            entry_risk_invalid = (
+                not snapshot.authenticated_entry_risk_evidence_ready
+                or snapshot.risk_high_water_lineage_hash != self._lineage_hash
+                or snapshot.peak_equity is None
+                or (
+                    snapshot.peak_equity is not None
+                    and snapshot.peak_equity < self._minimum_peak
+                )
+            )
+            if entry_risk_invalid:
+                if require_entry_authority:
+                    raise BrokerMutationBlocked(
+                        "ACTIVATED_IBKR_ENTRY_RISK_EVIDENCE_CHANGED"
+                    )
+                return replace(
+                    snapshot,
+                    weekly_realized_pnl=None,
+                    peak_equity=None,
+                    weekly_realized_pnl_complete=False,
+                    peak_equity_complete=False,
+                    risk_baseline_identity_hash=None,
+                    risk_baseline_receipt_hash=None,
+                    risk_high_water_identity_hash=None,
+                    risk_high_water_lineage_hash=None,
+                    risk_high_water_receipt_hash=None,
+                )
+            assert snapshot.peak_equity is not None
+            self._minimum_peak = snapshot.peak_equity
+        return snapshot
+
+    def get_account_snapshot(self, account_masked: str) -> AccountSnapshot:
+        return self._current_snapshot(
+            account_masked,
+            require_entry_authority=False,
+        )
+
+    def _assert_entry_mutation_bound(self, request: object) -> None:
+        # The accepted IBKR equity policy permits only BUY entries and only
+        # SELL protection/exits.  Re-read through the production broker at
+        # both review and place so a durable, previously prepared BUY cannot
+        # bypass the activation ledger binding after a service restart.
+        if isinstance(request, OrderRequest) and request.side is BrokerSide.BUY:
+            self._current_snapshot(
+                request.account_masked,
+                require_entry_authority=True,
+            )
+
+    def lookup_equity_orders_by_client_ref(self, *args, **kwargs):
+        return self._broker.lookup_equity_orders_by_client_ref(*args, **kwargs)
+
+    def review_equity_order(self, request: OrderRequest):
+        self._assert_entry_mutation_bound(request)
+        review = self._broker.review_equity_order(request)
+        # Close a replacement window during provider/local preflight.  This
+        # second read remains pre-wire: review itself is never a broker send.
+        self._assert_entry_mutation_bound(request)
+        return review
+
+    def place_equity_order(
+        self,
+        request: OrderRequest,
+        *,
+        review,
+        explicit_confirmation: str | None = None,
+    ):
+        # This is the last outer boundary before the transport performs its
+        # own fresh preflight/revalidation and crosses the socket write edge.
+        self._assert_entry_mutation_bound(request)
+        return self._broker.place_equity_order(
+            request,
+            review=review,
+            explicit_confirmation=explicit_confirmation,
+        )
+
+    def cancel_equity_order(self, *args, **kwargs):
+        return self._broker.cancel_equity_order(*args, **kwargs)
 
 
 def _record_payload(record: ActivationRecord) -> dict[str, Any]:
@@ -239,6 +529,15 @@ def _age_seconds(now: datetime, observed_at: datetime | None) -> float | None:
     if observed_at is None:
         return None
     return (now - observed_at.astimezone(timezone.utc)).total_seconds()
+
+
+def _canonical_decimal_text(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if value == 0 else text
 
 
 class _ReadinessProbeTimer:
@@ -330,79 +629,86 @@ def _probe_legacy_heartbeat(
     return heartbeat_id, status, digest, status in {"PAUSED", "DISABLED"}, None
 
 
-@dataclass(frozen=True)
-class LegacySchedulerRuntimeEvidence:
-    """Authoritative scheduler control-plane observation for one automation.
-
-    A TOML file is configuration evidence, not proof of the scheduler's loaded
-    runtime state.  This record is intentionally not constructible from that
-    file.  A future supported Codex scheduler status adapter must supply the
-    control-plane runtime and query receipt identifiers; until then production
-    probing returns unavailable and retirement fails closed.
-    """
-
-    automation_id: str
-    scheduler_runtime_id: str
-    status: str
-    config_hash: str
-    active_execution_count: int
-    observed_at: datetime
-    query_receipt_hash: str
-    source: str = _LEGACY_SCHEDULER_CONTROL_PLANE
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "automation_id": self.automation_id,
-            "scheduler_runtime_id": self.scheduler_runtime_id,
-            "status": self.status,
-            "config_hash": self.config_hash,
-            "active_execution_count": self.active_execution_count,
-            "observed_at": self.observed_at.astimezone(timezone.utc).isoformat(),
-            "query_receipt_hash": self.query_receipt_hash,
-            "source": self.source,
-        }
-
-
 def _probe_legacy_scheduler_runtime(
     *,
     now: datetime,
-    observed: LegacySchedulerRuntimeEvidence | None = None,
-) -> tuple[LegacySchedulerRuntimeEvidence | None, str | None]:
-    """Validate exact scheduler runtime evidence or report it unavailable.
+    expected: SchedulerEvidenceBindings,
+    control_plane: SchedulerControlPlane | None = None,
+    observed: SchedulerRetirementEvidence | None = None,
+) -> tuple[SchedulerRetirementEvidence | None, str | None]:
+    """Query and validate the complete signed same-account scheduler snapshot."""
 
-    Production has no local, read-only Codex scheduler control-plane client in
-    this release.  Therefore its default is an explicit blocker.  ``observed``
-    is an in-process dependency seam used by deterministic tests and by a
-    future release-contained control-plane adapter; it is not exposed through
-    CLI flags, environment variables, config, or persisted files.
-    """
-
-    if observed is None:
-        return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_UNAVAILABLE"
-    if not isinstance(observed, LegacySchedulerRuntimeEvidence):
-        return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_INVALID"
-    normalized_now = now.astimezone(timezone.utc)
-    if observed.observed_at.tzinfo is None:
-        return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_INVALID"
-    if (
-        observed.source != _LEGACY_SCHEDULER_CONTROL_PLANE
-        or observed.automation_id != "robinhood-momentum-engine"
-        or not observed.scheduler_runtime_id.strip()
-        or observed.status.upper() not in {"PAUSED", "DISABLED"}
-        or isinstance(observed.active_execution_count, bool)
-        or observed.active_execution_count != 0
-    ):
-        return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_INVALID"
-    for value in (
-        observed.config_hash,
-        observed.query_receipt_hash,
-    ):
-        if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+    try:
+        if observed is None:
+            if control_plane is None or not callable(
+                getattr(control_plane, "observe", None)
+            ):
+                return (
+                    None,
+                    "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_UNAVAILABLE",
+                )
+            observed = control_plane.observe(now=now, expected=expected)
+        if not isinstance(observed, SchedulerRetirementEvidence):
             return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_INVALID"
-    age = (normalized_now - observed.observed_at.astimezone(timezone.utc)).total_seconds()
-    if age < 0 or age > _LEGACY_SCHEDULER_MAX_EVIDENCE_AGE_SECONDS:
-        return None, "legacy_retirement:SCHEDULER_RUNTIME_IDENTITY_STALE"
+        observed.assert_current(now=now, expected=expected)
+    except SchedulerEvidenceError as exc:
+        return None, f"legacy_retirement:{exc.code}"
+    except Exception:
+        return None, "legacy_retirement:SCHEDULER_CONTROL_PLANE_QUERY_FAILED"
+
+    for automation in observed.automations:
+        if not automation.retired:
+            return (
+                observed,
+                "legacy_retirement:SCHEDULER_NOT_DISABLED:"
+                f"{automation.automation_id}",
+            )
+        if automation.active_execution_count != 0:
+            return (
+                observed,
+                "legacy_retirement:SCHEDULER_ACTIVE_EXECUTIONS:"
+                f"{automation.automation_id}",
+            )
     return observed, None
+
+
+def _scheduler_evidence_bindings(
+    manifest: Mapping[str, Any], policy: PolicyBundle
+) -> SchedulerEvidenceBindings:
+    return SchedulerEvidenceBindings(
+        release_manifest_hash=str(manifest["release_manifest_hash"]),
+        config_hash=policy.config_hash,
+        policy_hash=policy.policy_hash,
+        runtime_id=policy.runtime_id,
+        account_key=_policy_account_key(policy),
+    )
+
+
+def _scheduler_control_plane(
+    args: argparse.Namespace,
+    *,
+    layout: InstallLayout,
+    policy: PolicyBundle,
+) -> SchedulerControlPlane:
+    injected = getattr(args, "scheduler_control_plane", None)
+    if injected is not None:
+        return injected
+    return installed_scheduler_control_plane(
+        layout.root,
+        account_key=_policy_account_key(policy),
+    )
+
+
+def _scheduler_summary(
+    evidence: SchedulerRetirementEvidence | None,
+) -> tuple[str, str, str | None]:
+    identity = ",".join(REQUIRED_CODEX_AUTOMATION_IDS)
+    if evidence is None:
+        return identity, "UNAVAILABLE", None
+    status = ",".join(
+        f"{item.automation_id}={item.status}" for item in evidence.automations
+    )
+    return identity, status, evidence.automation_config_hash
 
 
 def _probe_legacy_writer_processes(
@@ -484,10 +790,7 @@ def _legacy_retirement_payload(
     *,
     manifest: Mapping[str, Any],
     policy: PolicyBundle,
-    legacy_heartbeat_id: str,
-    legacy_heartbeat_status: str,
-    legacy_heartbeat_config_hash: str,
-    scheduler_runtime: LegacySchedulerRuntimeEvidence,
+    scheduler_runtime: SchedulerRetirementEvidence,
     durable_snapshot_id: str,
     reconciliation_audit_event_id: str,
     writer_lock: AccountWriterLock,
@@ -497,14 +800,15 @@ def _legacy_retirement_payload(
 ) -> dict[str, Any]:
     return {
         "schema_version": _LEGACY_RETIREMENT_SCHEMA,
-        "account_key": ACCOUNT_KEY,
+        "account_key": _policy_account_key(policy),
         "runtime_id": policy.runtime_id,
         "release_manifest_hash": str(manifest["release_manifest_hash"]),
         "config_hash": policy.config_hash,
         "policy_hash": policy.policy_hash,
-        "legacy_heartbeat_id": legacy_heartbeat_id,
-        "legacy_heartbeat_status": legacy_heartbeat_status,
-        "legacy_heartbeat_config_hash": legacy_heartbeat_config_hash,
+        "retired_automation_ids": list(REQUIRED_CODEX_AUTOMATION_IDS),
+        "scheduler_automation_config_hash": (
+            scheduler_runtime.automation_config_hash
+        ),
         "scheduler_disabled": True,
         "scheduler_runtime": scheduler_runtime.to_payload(),
         "process_markers": list(_LEGACY_WRITER_PROCESS_MARKERS),
@@ -528,11 +832,7 @@ def _verify_legacy_retirement_receipt(
     manifest: Mapping[str, Any],
     policy: PolicyBundle,
     writer_lock: AccountWriterLock,
-    legacy_heartbeat_id: str,
-    legacy_heartbeat_status: str,
-    legacy_heartbeat_config_hash: str | None,
-    scheduler_disabled: bool,
-    scheduler_runtime: LegacySchedulerRuntimeEvidence | None,
+    scheduler_runtime: SchedulerRetirementEvidence | None,
     process_observations: Sequence[Mapping[str, Any]],
     process_error: str | None,
     current_drain_proven: bool,
@@ -540,25 +840,16 @@ def _verify_legacy_retirement_receipt(
 ) -> tuple[bool, str | None]:
     """Validate an append-only receipt and re-probe every mutable fact."""
 
+    expected_scheduler = _scheduler_evidence_bindings(manifest, policy)
     scheduler_runtime, scheduler_error = _probe_legacy_scheduler_runtime(
         now=now,
+        expected=expected_scheduler,
         observed=scheduler_runtime,
     )
     if scheduler_error is not None:
         return False, scheduler_error
-    if (
-        not scheduler_disabled
-        or legacy_heartbeat_config_hash is None
-        or scheduler_runtime is None
-    ):
+    if scheduler_runtime is None:
         return False, "legacy_retirement:SCHEDULER_NOT_DISABLED"
-    if (
-        scheduler_runtime.automation_id != legacy_heartbeat_id
-        or scheduler_runtime.status.upper() != legacy_heartbeat_status.upper()
-        or scheduler_runtime.config_hash != legacy_heartbeat_config_hash
-        or scheduler_runtime.active_execution_count != 0
-    ):
-        return False, "legacy_retirement:SCHEDULER_RUNTIME_BINDING_MISMATCH"
     if process_error is not None:
         return False, process_error
     if process_observations:
@@ -572,7 +863,7 @@ def _verify_legacy_retirement_receipt(
         "SELECT entity_id,payload_json FROM audit_events WHERE stream=? "
         "AND event_type='LEGACY_ACCOUNT_WRITER_RETIRED' "
         "AND entity_type='legacy_writer_retirement' ORDER BY sequence DESC LIMIT 1",
-        (ACCOUNT_KEY,),
+        (_policy_account_key(policy),),
     )
     if not rows:
         return False, "legacy_retirement:RECEIPT_MISSING"
@@ -584,14 +875,15 @@ def _verify_legacy_retirement_receipt(
         return False, "legacy_retirement:RECEIPT_HASH_MISMATCH"
     expected_bindings = {
         "schema_version": _LEGACY_RETIREMENT_SCHEMA,
-        "account_key": ACCOUNT_KEY,
+        "account_key": _policy_account_key(policy),
         "runtime_id": policy.runtime_id,
         "release_manifest_hash": str(manifest["release_manifest_hash"]),
         "config_hash": policy.config_hash,
         "policy_hash": policy.policy_hash,
-        "legacy_heartbeat_id": legacy_heartbeat_id,
-        "legacy_heartbeat_status": legacy_heartbeat_status,
-        "legacy_heartbeat_config_hash": legacy_heartbeat_config_hash,
+        "retired_automation_ids": list(REQUIRED_CODEX_AUTOMATION_IDS),
+        "scheduler_automation_config_hash": (
+            scheduler_runtime.automation_config_hash
+        ),
         "scheduler_disabled": True,
         "process_markers": list(_LEGACY_WRITER_PROCESS_MARKERS),
         "observed_legacy_processes": [],
@@ -627,32 +919,12 @@ def _verify_legacy_retirement_receipt(
     try:
         recorded_at = _iso(str(payload["recorded_at"]), "legacy_retirement.recorded_at")
         scheduler_payload = payload["scheduler_runtime"]
-        if not isinstance(scheduler_payload, dict) or set(scheduler_payload) != {
-            "automation_id",
-            "scheduler_runtime_id",
-            "status",
-            "config_hash",
-            "active_execution_count",
-            "observed_at",
-            "query_receipt_hash",
-            "source",
-        }:
-            raise ValueError("scheduler runtime evidence is invalid")
-        recorded_scheduler = LegacySchedulerRuntimeEvidence(
-            automation_id=str(scheduler_payload["automation_id"]),
-            scheduler_runtime_id=str(scheduler_payload["scheduler_runtime_id"]),
-            status=str(scheduler_payload["status"]),
-            config_hash=str(scheduler_payload["config_hash"]),
-            active_execution_count=scheduler_payload["active_execution_count"],
-            observed_at=_iso(
-                str(scheduler_payload["observed_at"]),
-                "legacy_retirement.scheduler_runtime.observed_at",
-            ),
-            query_receipt_hash=str(scheduler_payload["query_receipt_hash"]),
-            source=str(scheduler_payload["source"]),
+        recorded_scheduler = SchedulerRetirementEvidence.from_payload(
+            scheduler_payload
         )
         recorded_scheduler, recorded_scheduler_error = _probe_legacy_scheduler_runtime(
             now=recorded_at,
+            expected=expected_scheduler,
             observed=recorded_scheduler,
         )
         if recorded_scheduler_error is not None or recorded_scheduler is None:
@@ -661,39 +933,23 @@ def _verify_legacy_retirement_receipt(
         if isinstance(raw_gateway_pid, bool) or not isinstance(raw_gateway_pid, int):
             raise ValueError("gateway process id must be an integer")
         gateway_pid = raw_gateway_pid
-    except (TypeError, ValueError):
+    except (SchedulerEvidenceError, TypeError, ValueError):
         return False, "legacy_retirement:RECEIPT_INVALID"
     if gateway_pid <= 0 or recorded_at > now.astimezone(timezone.utc) + timedelta(seconds=1):
         return False, "legacy_retirement:RECEIPT_INVALID"
-    current_scheduler_binding = (
-        scheduler_runtime.automation_id,
-        scheduler_runtime.scheduler_runtime_id,
-        scheduler_runtime.status.upper(),
-        scheduler_runtime.config_hash,
-        scheduler_runtime.active_execution_count,
-        scheduler_runtime.source,
-    )
-    recorded_scheduler_binding = (
-        recorded_scheduler.automation_id,
-        recorded_scheduler.scheduler_runtime_id,
-        recorded_scheduler.status.upper(),
-        recorded_scheduler.config_hash,
-        recorded_scheduler.active_execution_count,
-        recorded_scheduler.source,
-    )
-    if current_scheduler_binding != recorded_scheduler_binding:
+    if scheduler_runtime.stable_binding != recorded_scheduler.stable_binding:
         return False, "legacy_retirement:SCHEDULER_RUNTIME_BINDING_MISMATCH"
     snapshot_id = str(payload["broker_snapshot_id"])
     audit_id = str(payload["reconciliation_audit_event_id"])
     snapshot_rows = store.rows(
         "SELECT 1 AS ok FROM broker_snapshots WHERE account_key=? AND snapshot_id=?",
-        (ACCOUNT_KEY, snapshot_id),
+        (_policy_account_key(policy), snapshot_id),
     )
     audit_rows = store.rows(
         "SELECT 1 AS ok FROM audit_events WHERE stream=? AND event_id=? "
         "AND event_type='POSITIONS_RECONCILED' AND entity_type='broker_snapshot' "
         "AND entity_id=?",
-        (ACCOUNT_KEY, audit_id, snapshot_id),
+        (_policy_account_key(policy), audit_id, snapshot_id),
     )
     if len(snapshot_rows) != 1 or len(audit_rows) != 1:
         return False, "legacy_retirement:DRAIN_EVIDENCE_MISSING"
@@ -815,6 +1071,97 @@ def _verified_notification_receipt(
     return None
 
 
+_BROKER_COMMAND_LANE_FIELDS = (
+    "broker_command_connected",
+    "broker_command_next_valid_id_received",
+    "broker_command_account_authenticated",
+    "broker_command_write_authority_granted",
+)
+
+
+def _broker_command_lane_report(
+    composition: RuntimeComposition,
+    execution: Mapping[str, Any],
+) -> tuple[dict[str, bool] | None, str | None]:
+    """Read the concrete guarded command handshake without granting writes."""
+
+    if execution.get("broker_adapter") != "supported_production_transport":
+        return None, None
+    unavailable = {field: False for field in _BROKER_COMMAND_LANE_FIELDS}
+    try:
+        transport = composition.production_transport
+        session = getattr(transport, "session", None)
+        inspect_status = getattr(session, "command_lane_status", None)
+        if not callable(inspect_status):
+            return unavailable, "broker_command:COMMAND_LANE_PROOF_UNAVAILABLE"
+        status = inspect_status()
+        report = {
+            "broker_command_connected": getattr(
+                status, "command_connected", None
+            ),
+            "broker_command_next_valid_id_received": getattr(
+                status, "next_valid_id_received", None
+            ),
+            "broker_command_account_authenticated": getattr(
+                status, "account_authenticated", None
+            ),
+            "broker_command_write_authority_granted": getattr(
+                status, "write_authority_granted", None
+            ),
+        }
+        if any(type(value) is not bool for value in report.values()):
+            return unavailable, "broker_command:COMMAND_LANE_PROOF_INVALID"
+        return report, None
+    except Exception:
+        return unavailable, "broker_command:COMMAND_LANE_PROBE_FAILED"
+
+
+def _broker_command_lane_blockers(
+    report: Mapping[str, bool] | None,
+    *,
+    required: bool,
+) -> tuple[str, ...]:
+    if not required:
+        return ()
+    values = report or {}
+    blockers: list[str] = []
+    if values.get("broker_command_connected") is not True:
+        blockers.append("BROKER_COMMAND_LANE_DISCONNECTED")
+    if values.get("broker_command_next_valid_id_received") is not True:
+        blockers.append("BROKER_COMMAND_NEXT_VALID_ID_MISSING")
+    if values.get("broker_command_account_authenticated") is not True:
+        blockers.append("BROKER_COMMAND_ACCOUNT_UNAUTHENTICATED")
+    if values.get("broker_command_write_authority_granted") is not False:
+        blockers.append("BROKER_COMMAND_WRITE_AUTHORITY_NOT_DISABLED")
+    return tuple(blockers)
+
+
+def _risk_observation_entry_blockers(
+    store: LiveStateStore, *, account_key: str
+) -> tuple[str, ...]:
+    """Retain an interrupted final risk read across days and release rebinds.
+
+    A later recovered P&L cannot prove which irreversible thresholds were
+    crossed in the missing interval.  This read never resolves an incident;
+    it blocks entries only, leaving the coordinator's safety paths available.
+    """
+
+    try:
+        rows = store.rows(
+            "SELECT COUNT(*) AS n FROM incidents WHERE account_key=? "
+            "AND category='IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED' "
+            "AND resolved_at IS NULL",
+            (account_key,),
+        )
+        if len(rows) != 1 or type(rows[0]["n"]) is not int or rows[0]["n"] < 0:
+            raise ValueError("risk observation incident count is invalid")
+        if rows[0]["n"]:
+            return ("IBKR_FINAL_RISK_OBSERVATION_UNRESOLVED",)
+    except Exception:
+        return ("IBKR_FINAL_RISK_OBSERVATION_STATE_UNAVAILABLE",)
+    return ()
+
+
 def _machine_readiness(
     *,
     layout: InstallLayout,
@@ -830,8 +1177,10 @@ def _machine_readiness(
     clock: Callable[[], datetime] | None = None,
     monotonic_clock: Callable[[], float] | None = None,
     legacy_process_listing: str | None = None,
-    legacy_scheduler_runtime_evidence: LegacySchedulerRuntimeEvidence | None = None,
+    legacy_scheduler_runtime_evidence: SchedulerRetirementEvidence | None = None,
+    scheduler_control_plane: SchedulerControlPlane | None = None,
     runtime_composition: RuntimeComposition | None = None,
+    coordinator_runtime_composition: RuntimeComposition | None = None,
 ) -> ReadinessEvidence:
     """Collect activation facts from live dependencies and durable state.
 
@@ -847,7 +1196,11 @@ def _machine_readiness(
         monotonic_clock=monotonic_clock or time.monotonic,
     )
     current = probe_timer.started_at
-    probe_errors: list[str] = []
+    probe_errors = list(
+        _risk_observation_entry_blockers(
+            store, account_key=_policy_account_key(policy)
+        )
+    )
     runtime = store.runtime_status()
     runtime_identity_valid = runtime is not None and all(
         runtime[field] == expected
@@ -856,7 +1209,7 @@ def _machine_readiness(
             ("config_hash", policy.config_hash),
             ("policy_hash", policy.policy_hash),
             ("runtime_id", policy.runtime_id),
-            ("account_key", ACCOUNT_KEY),
+            ("account_key", _policy_account_key(policy)),
         )
     )
 
@@ -910,6 +1263,29 @@ def _machine_readiness(
             "RUNTIME_COMPOSITION_INVALID", exc
         )
         probe_errors.append(composition_error)
+    coordinator_composition = coordinator_runtime_composition or composition
+    coordinator_composition_error: str | None = None
+    if coordinator_composition is not composition:
+        try:
+            coordinator_composition.bind_release(
+                manifest, release_root=layout.release_root
+            )
+            if (
+                coordinator_composition.notification_provider is not None
+                or coordinator_composition.discovery_provider is not None
+                or coordinator_composition.production_transport
+                is not composition.production_transport
+                or coordinator_composition.autonomous_plan_sealer
+                is not composition.autonomous_plan_sealer
+            ):
+                raise RuntimeCompositionError(
+                    "UNSIGNED_COMPOSITION:RUNTIME:coordinator safety graph differs"
+                )
+        except RuntimeCompositionError as exc:
+            coordinator_composition_error = _external_failure_code(
+                "COORDINATOR_COMPOSITION_INVALID", exc
+            )
+            probe_errors.append(coordinator_composition_error)
     if broker is not None:
         broker_client = broker
     elif composition_error is not None:
@@ -920,6 +1296,15 @@ def _machine_readiness(
     else:
         broker_client = composition.broker_client(
             policy.config["execution"], account_masked=f"••••{policy.account_last4}"
+        )
+    if (
+        policy.execution_authority_mode == "attended_only"
+        and policy.config["execution"].get("broker_adapter")
+        == "supported_production_transport"
+        and not composition.managed_control_ready(policy.config["execution"])
+    ):
+        probe_errors.append(
+            "control_inbox:AUTHENTICATED_MANAGED_CLOSEOUT_CONTROL_UNAVAILABLE"
         )
     capabilities = broker_client.capabilities
     descriptor = getattr(broker_client, "descriptor", None)
@@ -959,7 +1344,7 @@ def _machine_readiness(
         try:
             reconciler = AuthoritativeReconciler(
                 account_masked=f"••••{policy.account_last4}",
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 max_snapshot_age=timedelta(
                     seconds=int(
                         policy.config["evidence"]["broker_snapshot_max_age_seconds"]
@@ -978,7 +1363,7 @@ def _machine_readiness(
             )
             persisted = persist_account_snapshot(
                 store,
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 snapshot=broker_snapshot,
                 reconciliation_report=reconciliation_report,
                 accept_reconciliation_envelope=not invalid_envelope,
@@ -1000,15 +1385,31 @@ def _machine_readiness(
         and capabilities.supports_daemon_writes
         and capabilities.supports_unattended_writes
     )
+    attended_supported = bool(
+        capabilities.supports_equity_review
+        and capabilities.supports_equity_place
+        and capabilities.supports_equity_cancel
+        and capabilities.supports_daemon_writes
+        and capabilities.supports_ref_id_lookup
+        and not capabilities.supports_unattended_writes
+        and capabilities.review_requires_explicit_confirmation
+        and capabilities.cancel_requires_explicit_confirmation
+    )
     confirmation_required = bool(
         capabilities.review_requires_explicit_confirmation
         or capabilities.cancel_requires_explicit_confirmation
     )
+    command_lane, command_lane_error = _broker_command_lane_report(
+        composition,
+        policy.config["execution"],
+    )
+    if command_lane_error is not None:
+        probe_errors.append(command_lane_error)
 
     durable_rows = store.rows(
         "SELECT * FROM broker_snapshots WHERE account_key=? "
         "ORDER BY observed_at DESC,received_at DESC,snapshot_id DESC LIMIT 1",
-        (ACCOUNT_KEY,),
+        (_policy_account_key(policy),),
     )
     durable = durable_rows[0] if durable_rows else None
     durable_snapshot_id = str(durable["snapshot_id"]) if durable is not None else None
@@ -1023,7 +1424,7 @@ def _machine_readiness(
             "SELECT event_id FROM audit_events WHERE stream=? "
             "AND event_type='POSITIONS_RECONCILED' AND entity_type='broker_snapshot' "
             "AND entity_id=? ORDER BY sequence DESC LIMIT 1",
-            (ACCOUNT_KEY, durable_snapshot_id),
+            (_policy_account_key(policy), durable_snapshot_id),
         )
         reconciliation_event = str(rows[0]["event_id"]) if rows else None
     fresh_material_matches = bool(
@@ -1103,7 +1504,7 @@ def _machine_readiness(
         store.rows(
             "SELECT COUNT(*) AS n FROM order_intents WHERE account_key=? "
             "AND state IN ('SUBMITTING','UNKNOWN')",
-            (ACCOUNT_KEY,),
+            (_policy_account_key(policy),),
         )[0]["n"]
     )
 
@@ -1115,13 +1516,13 @@ def _machine_readiness(
                 "SELECT symbol,SUM(working_quantity) AS quantity "
                 "FROM protection_obligations WHERE account_key=? AND state='WORKING' "
                 "GROUP BY symbol",
-                (ACCOUNT_KEY,),
+                (_policy_account_key(policy),),
             )
         }
         for row in store.rows(
             "SELECT symbol,quantity FROM positions WHERE account_key=? "
             "AND CAST(quantity AS REAL)<>0",
-            (ACCOUNT_KEY,),
+            (_policy_account_key(policy),),
         ):
             quantity = Decimal(str(row["quantity"]))
             missing = (
@@ -1134,30 +1535,20 @@ def _machine_readiness(
         uncovered_quantity = max(uncovered_quantity, 1)
         probe_errors.append(f"protection_state:{type(exc).__name__}")
 
-    (
-        legacy_heartbeat_id,
-        legacy_heartbeat_status,
-        legacy_heartbeat_config_hash,
-        legacy_scheduler_disabled,
-        legacy_error,
-    ) = _probe_legacy_heartbeat(legacy_heartbeat_path)
-    if legacy_error is not None:
-        probe_errors.append(legacy_error)
+    expected_scheduler = _scheduler_evidence_bindings(manifest, policy)
     scheduler_runtime, scheduler_runtime_error = _probe_legacy_scheduler_runtime(
         now=current,
+        expected=expected_scheduler,
+        control_plane=scheduler_control_plane,
         observed=legacy_scheduler_runtime_evidence,
     )
     if scheduler_runtime_error is not None:
         probe_errors.append(scheduler_runtime_error)
-    scheduler_runtime_disabled = bool(
-        scheduler_runtime is not None
-        and scheduler_runtime.automation_id == legacy_heartbeat_id
-        and scheduler_runtime.status.upper() == legacy_heartbeat_status.upper()
-        and scheduler_runtime.config_hash == legacy_heartbeat_config_hash
-        and scheduler_runtime.active_execution_count == 0
-    )
-    if scheduler_runtime is not None and not scheduler_runtime_disabled:
-        probe_errors.append("legacy_retirement:SCHEDULER_RUNTIME_BINDING_MISMATCH")
+    (
+        legacy_heartbeat_id,
+        legacy_heartbeat_status,
+        legacy_heartbeat_config_hash,
+    ) = _scheduler_summary(scheduler_runtime)
     process_observations, process_error = _probe_legacy_writer_processes(
         legacy_process_listing
     )
@@ -1181,12 +1572,6 @@ def _machine_readiness(
             manifest=manifest,
             policy=policy,
             writer_lock=writer_lock,
-            legacy_heartbeat_id=legacy_heartbeat_id,
-            legacy_heartbeat_status=legacy_heartbeat_status,
-            legacy_heartbeat_config_hash=legacy_heartbeat_config_hash,
-            scheduler_disabled=(
-                legacy_scheduler_disabled and scheduler_runtime_disabled
-            ),
             scheduler_runtime=scheduler_runtime,
             process_observations=process_observations,
             process_error=process_error,
@@ -1275,7 +1660,7 @@ def _machine_readiness(
     if notification_destination_configured and notification_route is not None:
         verified_receipt = _verified_notification_receipt(
             store,
-            account_key=ACCOUNT_KEY,
+            account_key=_policy_account_key(policy),
             route=notification_route,
         )
         if verified_receipt is not None:
@@ -1295,7 +1680,7 @@ def _machine_readiness(
     if notification_destination_configured and notification_route is not None:
         notification_worker_healthy, worker_errors = notification_worker_health(
             store,
-            account_key=ACCOUNT_KEY,
+            account_key=_policy_account_key(policy),
             route=notification_route,
             now=current,
         )
@@ -1308,6 +1693,17 @@ def _machine_readiness(
             and delivery_age is not None
             and 0 <= delivery_age <= _NOTIFICATION_RECEIPT_MAX_AGE_SECONDS
         )
+    current = probe_timer.sample("scheduler_evidence_completion")
+    if scheduler_runtime is not None:
+        _, completion_scheduler_error = _probe_legacy_scheduler_runtime(
+            now=current,
+            expected=expected_scheduler,
+            observed=scheduler_runtime,
+        )
+        if completion_scheduler_error is not None:
+            old_writer_disabled = False
+            probe_errors.append(completion_scheduler_error)
+    probe_errors.extend(probe_timer.errors)
     quote_age_seconds = _age_seconds(current, latest_quote_at)
     completed_bar_age_seconds = _age_seconds(current, latest_completed_bar_at)
 
@@ -1318,7 +1714,7 @@ def _machine_readiness(
         policy_hash=policy.policy_hash,
         runtime_id=policy.runtime_id,
         database_schema_version=store.schema_version,
-        account_key=ACCOUNT_KEY,
+        account_key=_policy_account_key(policy),
         account_last4=policy.account_last4,
         runtime_identity_valid=runtime_identity_valid,
         evidence_source=MACHINE_EVIDENCE_SOURCE,
@@ -1383,11 +1779,88 @@ def _machine_readiness(
             and broker_authorization_binding_id is not None
             else None
         ),
+        coordinator_component_provenance_hash=(
+            coordinator_composition.component_provenance_hash
+            if broker_account_binding_fingerprint is not None
+            and broker_authorization_binding_id is not None
+            and coordinator_composition_error is None
+            else None
+        ),
+        execution_authority_mode=policy.execution_authority_mode,
+        attended_mutation_supported=attended_supported,
+        broker_command_connected=(
+            None
+            if command_lane is None
+            else command_lane["broker_command_connected"]
+        ),
+        broker_command_next_valid_id_received=(
+            None
+            if command_lane is None
+            else command_lane["broker_command_next_valid_id_received"]
+        ),
+        broker_command_account_authenticated=(
+            None
+            if command_lane is None
+            else command_lane["broker_command_account_authenticated"]
+        ),
+        broker_command_write_authority_granted=(
+            None
+            if command_lane is None
+            else command_lane["broker_command_write_authority_granted"]
+        ),
+        entry_risk_evidence_ready=bool(
+            broker_snapshot is not None
+            and broker_snapshot.authenticated_entry_risk_evidence_ready
+        ),
+        weekly_realized_pnl_complete=bool(
+            broker_snapshot is not None
+            and broker_snapshot.weekly_realized_pnl_complete
+        ),
+        peak_equity_complete=bool(
+            broker_snapshot is not None and broker_snapshot.peak_equity_complete
+        ),
+        risk_evidence_as_of=(
+            None if broker_snapshot is None else broker_snapshot.risk_evidence_as_of
+        ),
+        risk_evidence_age_seconds=_age_seconds(
+            current,
+            None if broker_snapshot is None else broker_snapshot.risk_evidence_as_of,
+        ),
+        risk_baseline_identity_hash=(
+            None
+            if broker_snapshot is None
+            else broker_snapshot.risk_baseline_identity_hash
+        ),
+        risk_baseline_receipt_hash=(
+            None
+            if broker_snapshot is None
+            else broker_snapshot.risk_baseline_receipt_hash
+        ),
+        risk_high_water_identity_hash=(
+            None
+            if broker_snapshot is None
+            else broker_snapshot.risk_high_water_identity_hash
+        ),
+        risk_high_water_lineage_hash=(
+            None
+            if broker_snapshot is None
+            else broker_snapshot.risk_high_water_lineage_hash
+        ),
+        risk_high_water_peak_equity=_canonical_decimal_text(
+            None if broker_snapshot is None else broker_snapshot.peak_equity
+        ),
+        risk_high_water_receipt_hash=(
+            None
+            if broker_snapshot is None
+            else broker_snapshot.risk_high_water_receipt_hash
+        ),
     )
 
 
 def _read_runtime_and_lease(
     layout: InstallLayout,
+    *,
+    account_key: str = ACCOUNT_KEY,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Read control-plane state without opening a second SQLite writer."""
 
@@ -1404,13 +1877,88 @@ def _read_runtime_and_lease(
         lease_rows = connection.execute(
             """SELECT * FROM account_writer_lease
                  WHERE account_key=? AND released_at IS NULL""",
-            (ACCOUNT_KEY,),
+            (account_key,),
         ).fetchall()
     finally:
         connection.close()
     if len(runtime_rows) != 1 or len(lease_rows) > 1:
         raise CommandBlocked("runtime identity or writer lease is ambiguous")
     return dict(runtime_rows[0]), (dict(lease_rows[0]) if lease_rows else None)
+
+
+def _assert_runtime_bindings(
+    runtime: Mapping[str, Any],
+    *,
+    manifest: Mapping[str, Any],
+    policy: PolicyBundle,
+) -> None:
+    """Require the local database to belong to this exact release/account."""
+
+    for field, expected in (
+        ("release_manifest_hash", manifest["release_manifest_hash"]),
+        ("config_hash", policy.config_hash),
+        ("policy_hash", policy.policy_hash),
+        ("runtime_id", policy.runtime_id),
+        ("account_key", _policy_account_key(policy)),
+    ):
+        if runtime.get(field) != expected:
+            raise CommandBlocked(f"runtime binding mismatch: {field}")
+
+
+def _read_local_status_counts(layout: InstallLayout) -> Mapping[str, int]:
+    """Read operator status from SQLite without opening a writable store."""
+
+    connection = sqlite3.connect(
+        f"file:{layout.state_path}?mode=ro", uri=True, timeout=1.0
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        return {
+            "nonzero_positions": connection.execute(
+                "SELECT COUNT(*) AS n FROM positions WHERE CAST(quantity AS REAL)<>0"
+            ).fetchone()["n"],
+            "unknown_or_submitting_intents": connection.execute(
+                "SELECT COUNT(*) AS n FROM order_intents "
+                "WHERE state IN ('UNKNOWN','SUBMITTING')"
+            ).fetchone()["n"],
+            "open_incidents": connection.execute(
+                "SELECT COUNT(*) AS n FROM incidents WHERE resolved_at IS NULL"
+            ).fetchone()["n"],
+            "pending_notifications": connection.execute(
+                "SELECT COUNT(*) AS n FROM notification_outbox WHERE state='PENDING'"
+            ).fetchone()["n"],
+        }
+    finally:
+        connection.close()
+
+
+def _control_request_counts(layout: InstallLayout) -> Mapping[str, int]:
+    """Count local private spool entries without creating or changing them."""
+
+    counts: dict[str, int] = {}
+    for name in ("inbox", "processed", "rejected"):
+        directory = layout.control_path / name
+        try:
+            directory_metadata = directory.lstat()
+        except FileNotFoundError:
+            counts[name] = 0
+            continue
+        if (
+            not stat.S_ISDIR(directory_metadata.st_mode)
+            or stat.S_IMODE(directory_metadata.st_mode) & 0o077
+        ):
+            raise CommandBlocked("control status path is not a private directory")
+        count = 0
+        for path in directory.glob("*.json"):
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
+                raise CommandBlocked("control status entry is not a private file")
+            count += 1
+        counts[name] = count
+    return counts
 
 
 def _queue_runtime_control(
@@ -1428,23 +1976,16 @@ def _queue_runtime_control(
         raise CommandBlocked(
             _external_failure_code("RUNTIME_COMPOSITION_INVALID", exc)
         ) from exc
-    runtime, lease = _read_runtime_and_lease(layout)
-    for field, expected in (
-        ("release_manifest_hash", manifest["release_manifest_hash"]),
-        ("config_hash", policy.config_hash),
-        ("policy_hash", policy.policy_hash),
-        ("runtime_id", policy.runtime_id),
-        ("account_key", ACCOUNT_KEY),
-    ):
-        if runtime[field] != expected:
-            raise CommandBlocked(f"runtime binding mismatch: {field}")
+    account_key = _policy_account_key(policy)
+    runtime, lease = _read_runtime_and_lease(layout, account_key=account_key)
+    _assert_runtime_bindings(runtime, manifest=manifest, policy=policy)
     if not bool(runtime["authority_enabled"]) or runtime["activated_at"] is None:
         raise CommandBlocked("runtime has no activated authority")
 
     # A queued safety command is useful only when the sole writer is actually
     # present to consume it.  The kernel lock is authority; the matching DB
     # lease proves it belongs to the live service rather than another tool.
-    probe = _account_writer_lock(layout, policy, owner_id="control-probe")
+    probe = _service_process_lock(layout, policy, owner_id="control-probe")
     try:
         probe.acquire(blocking=False)
     except WriterLockBusy:
@@ -1457,7 +1998,7 @@ def _queue_runtime_control(
 
     inbox = composition.control_inbox(
         layout.control_path,
-        account_key=ACCOUNT_KEY,
+        account_key=account_key,
         runtime_id=policy.runtime_id,
         release_manifest_hash=manifest["release_manifest_hash"],
         max_snapshot_age=timedelta(
@@ -1485,11 +2026,13 @@ def _queue_runtime_control(
 def command_init_state(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
-    with _account_writer_lock(layout, policy):
+    with _maintenance_interlock(
+        layout, policy, owner_id="state-initializer"
+    ):
         with LiveStateStore(layout.state_path) as store:
             created = store.initialize_runtime(
                 runtime_id=policy.runtime_id,
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 release_manifest_hash=manifest["release_manifest_hash"],
                 config_hash=policy.config_hash,
                 policy_hash=policy.policy_hash,
@@ -1539,7 +2082,7 @@ def _doctor(
                 "config_hash": policy.config_hash,
                 "policy_hash": policy.policy_hash,
                 "runtime_id": policy.runtime_id,
-                "account_key": ACCOUNT_KEY,
+                "account_key": _policy_account_key(policy),
             }
             for field, expected in bindings.items():
                 if runtime[field] != expected:
@@ -1574,12 +2117,52 @@ def _doctor(
             capabilities = RobinhoodBrokerAdapter().capabilities
     if not capabilities.daemon_transport_configured:
         blockers.append("DAEMON_BROKER_TRANSPORT_UNAVAILABLE")
-    if not capabilities.supports_unattended_writes:
-        blockers.append("UNATTENDED_BROKER_WRITES_UNSUPPORTED")
-    if capabilities.review_requires_explicit_confirmation:
-        blockers.append("PER_MUTATION_CONFIRMATION_REQUIRED")
+    authority_mode = policy.execution_authority_mode if policy is not None else ""
+    if authority_mode == "unattended":
+        if not capabilities.supports_unattended_writes:
+            blockers.append("UNATTENDED_BROKER_WRITES_UNSUPPORTED")
+        if (
+            capabilities.review_requires_explicit_confirmation
+            or capabilities.cancel_requires_explicit_confirmation
+        ):
+            blockers.append("PER_MUTATION_CONFIRMATION_REQUIRED")
+    elif authority_mode == "attended_only" and not all(
+        (
+            capabilities.supports_equity_review,
+            capabilities.supports_equity_place,
+            capabilities.supports_equity_cancel,
+            capabilities.supports_daemon_writes,
+            capabilities.supports_ref_id_lookup,
+            not capabilities.supports_unattended_writes,
+            capabilities.review_requires_explicit_confirmation,
+            capabilities.cancel_requires_explicit_confirmation,
+        )
+    ):
+        blockers.append("ATTENDED_MUTATION_CONTRACT_UNSUPPORTED")
+    elif authority_mode not in {"unattended", "attended_only"}:
+        blockers.append("EXECUTION_AUTHORITY_MODE_UNAVAILABLE")
     if not capabilities.can_prove_whole_broker_reconciliation:
         blockers.append("WHOLE_BROKER_RECONCILIATION_UNSUPPORTED")
+    command_lane_required = (
+        broker_config.get("broker_adapter") == "supported_production_transport"
+    )
+    command_lane, command_lane_error = _broker_command_lane_report(
+        composition,
+        broker_config,
+    )
+    if command_lane_error is not None:
+        blockers.append(command_lane_error)
+    blockers.extend(
+        _broker_command_lane_blockers(
+            command_lane,
+            required=command_lane_required,
+        )
+    )
+    reported_connector = str(capabilities.connector)
+    if broker_config.get("broker_adapter") == "ibkr_local_gateway_staged":
+        # A fail-closed capability placeholder must not relabel an IBKR-staged
+        # release as the legacy Robinhood connector in operator output.
+        reported_connector = "ibkr_local_gateway_staged"
     market_report: dict[str, Any] | None = None
     if policy is not None:
         market_config = policy.config["market_data"]
@@ -1632,11 +2215,46 @@ def _doctor(
             "head": chain_head,
         },
         "broker": {
-            "connector": capabilities.connector,
+            "connector": reported_connector,
+            "execution_authority_mode": authority_mode,
             "daemon_transport_configured": capabilities.daemon_transport_configured,
             "unattended_writes": capabilities.supports_unattended_writes,
-            "per_mutation_confirmation_required": capabilities.review_requires_explicit_confirmation,
+            "attended_mutation_contract_supported": bool(
+                capabilities.supports_equity_review
+                and capabilities.supports_equity_place
+                and capabilities.supports_equity_cancel
+                and capabilities.supports_daemon_writes
+                and capabilities.supports_ref_id_lookup
+                and not capabilities.supports_unattended_writes
+                and capabilities.review_requires_explicit_confirmation
+                and capabilities.cancel_requires_explicit_confirmation
+            ),
+            "per_mutation_confirmation_required": bool(
+                capabilities.review_requires_explicit_confirmation
+                or capabilities.cancel_requires_explicit_confirmation
+            ),
             "whole_broker_reconciliation": capabilities.can_prove_whole_broker_reconciliation,
+            "command_lane_required_for_activation": command_lane_required,
+            "command_connected": (
+                None
+                if command_lane is None
+                else command_lane["broker_command_connected"]
+            ),
+            "command_next_valid_id_received": (
+                None
+                if command_lane is None
+                else command_lane["broker_command_next_valid_id_received"]
+            ),
+            "command_account_authenticated": (
+                None
+                if command_lane is None
+                else command_lane["broker_command_account_authenticated"]
+            ),
+            "command_write_authority_granted": (
+                None
+                if command_lane is None
+                else command_lane["broker_command_write_authority_granted"]
+            ),
         },
         "market_data": market_report,
         "ready_for_owner_activation": not blockers,
@@ -1645,38 +2263,46 @@ def _doctor(
 
 
 def command_doctor(args: argparse.Namespace) -> int:
-    report = _doctor(
-        InstallLayout(args.install_root),
-        runtime_composition=_runtime_composition(args),
-    )
+    layout = InstallLayout(args.install_root)
+    try:
+        _manifest, policy = layout.load_release()
+    except Exception:
+        # Preserve the diagnostic report for a broken/missing release without
+        # resolving a provider factory that could open fixed client IDs.
+        report = _doctor(layout, runtime_composition=RuntimeComposition())
+    else:
+        with _maintenance_interlock(
+            layout, policy, owner_id="doctor-readiness-probe"
+        ):
+            report = _doctor(
+                layout,
+                runtime_composition=_runtime_composition(args),
+            )
     _print(report)
     return 0 if report["ready_for_owner_activation"] else 2
 
 
 def command_status(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
-    report = _doctor(layout, runtime_composition=_runtime_composition(args))
-    if layout.state_path.exists():
-        with LiveStateStore(layout.state_path) as store:
-            report["counts"] = {
-                "nonzero_positions": store.rows(
-                    "SELECT COUNT(*) AS n FROM positions WHERE CAST(quantity AS REAL)<>0"
-                )[0]["n"],
-                "unknown_or_submitting_intents": store.rows(
-                    "SELECT COUNT(*) AS n FROM order_intents WHERE state IN ('UNKNOWN','SUBMITTING')"
-                )[0]["n"],
-                "open_incidents": store.rows(
-                    "SELECT COUNT(*) AS n FROM incidents WHERE resolved_at IS NULL"
-                )[0]["n"],
-                "pending_notifications": store.rows(
-                    "SELECT COUNT(*) AS n FROM notification_outbox WHERE state='PENDING'"
-                )[0]["n"],
-            }
-    report["control_requests"] = {
-        name: len(tuple((layout.control_path / name).glob("*.json")))
-        if (layout.control_path / name).is_dir()
-        else 0
-        for name in ("inbox", "processed", "rejected")
+    manifest, policy = layout.load_release()
+    runtime, lease = _read_runtime_and_lease(
+        layout,
+        account_key=_policy_account_key(policy),
+    )
+    _assert_runtime_bindings(runtime, manifest=manifest, policy=policy)
+    report = {
+        "schema_version": "titan_full_live_control_status_2026-09-14_v1",
+        "install_root": str(layout.root),
+        "release_valid": True,
+        "release_manifest_hash": manifest["release_manifest_hash"],
+        "source_commit": manifest.get("source_commit"),
+        "state_present": True,
+        "runtime": runtime,
+        "runtime_bindings_valid": True,
+        "service_writer_lease_present": lease is not None,
+        "counts": _read_local_status_counts(layout),
+        "control_requests": _control_request_counts(layout),
+        "provider_checks_performed": False,
     }
     _print(report)
     return 0
@@ -1689,7 +2315,15 @@ def command_provider_status(args: argparse.Namespace) -> int:
     reporter = getattr(assembly, "connection_report", None)
     if not callable(reporter):
         raise CommandBlocked("LOCAL_PROVIDER_ASSEMBLY_UNAVAILABLE")
-    report = reporter(probe_network=args.probe_network is True)
+    if args.probe_network is True:
+        layout = InstallLayout(args.install_root)
+        _manifest, policy = layout.load_release()
+        with _maintenance_interlock(
+            layout, policy, owner_id="provider-network-readiness-probe"
+        ):
+            report = reporter(probe_network=True)
+    else:
+        report = reporter(probe_network=False)
     if not isinstance(report, Mapping):
         raise CommandBlocked("LOCAL_PROVIDER_CONNECTION_REPORT_INVALID")
     _print(report)
@@ -1702,10 +2336,157 @@ def command_provider_status(args: argparse.Namespace) -> int:
     ) else 2
 
 
+def command_local_profile_status(args: argparse.Namespace) -> int:
+    """Report the signed IBKR endpoint and SDK snapshot without connecting."""
+
+    layout = InstallLayout(args.install_root)
+    _manifest, policy = layout.load_release()
+    try:
+        profile = IbkrLocalProviderProfile.from_config(policy.config)
+    except ProviderProfileError as exc:
+        raise CommandBlocked("LOCAL_PROVIDER_PROFILE_INVALID") from exc
+    if profile is None:
+        raise CommandBlocked("LOCAL_IBKR_PROVIDER_PROFILE_NOT_CONFIGURED")
+    report = redacted_profile_status(layout.root, profile)
+    _print(report)
+    sdk = report.get("sdk")
+    return 0 if isinstance(sdk, Mapping) and sdk.get("status") == "ATTESTED" else 2
+
+
+def command_notification_setup_status(args: argparse.Namespace) -> int:
+    """Inspect named notification metadata without composing any provider."""
+
+    from .notification_setup import notification_setup_status
+
+    layout = InstallLayout(args.install_root)
+    manifest, policy = layout.load_release()
+    profile = json.loads(
+        (layout.release_root / "config/provider_bindings.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    if (
+        not isinstance(profile, Mapping)
+        or profile.get("schema_version")
+        != "titan_local_provider_bindings_2026-09-08_v1"
+    ):
+        raise CommandBlocked("NOTIFICATION_PROVIDER_PROFILE_INVALID")
+    report = notification_setup_status(
+        policy.config,
+        profile,
+        keychain=getattr(getattr(args, "provider_assembly", None), "keychain", None),
+    )
+    report["release_manifest_hash"] = manifest["release_manifest_hash"]
+    report["config_hash"] = policy.config_hash
+    _print(report)
+    return 2
+
+
+def _attended_order_control(args: argparse.Namespace) -> AttendedOrderControl:
+    """Resolve only a signed, release-bound attended IBKR runtime facade."""
+
+    layout = InstallLayout(args.install_root)
+    manifest, policy = layout.load_release()
+    profile = IbkrLocalProviderProfile.from_config(policy.config)
+    if profile is None or profile.account_key != "ibkr-live-ending-3103":
+        raise CommandBlocked("IBKR_ATTENDED_PROFILE_NOT_CONFIGURED")
+    execution = policy.config["execution"]
+    if (
+        execution.get("broker_adapter") != "supported_production_transport"
+        or execution.get("production_transport_id") != "ibkr-tws-api-10.50.2-v1"
+    ):
+        raise CommandBlocked("IBKR_ATTENDED_SIGNED_TRANSPORT_NOT_SUPPORTED")
+    composition = _runtime_composition(args)
+    try:
+        composition.bind_release(manifest, release_root=layout.release_root)
+    except RuntimeCompositionError as exc:
+        raise CommandBlocked(
+            _external_failure_code("RUNTIME_COMPOSITION_INVALID", exc)
+        ) from exc
+    assembly = getattr(args, "provider_assembly", None)
+    factory = getattr(assembly, "attended_runtime", None)
+    if not callable(factory):
+        raise CommandBlocked("IBKR_ATTENDED_RUNTIME_FACTORY_UNAVAILABLE")
+    try:
+        runtime = factory()
+        store = AttendedReviewStore(
+            root=layout.root,
+            release_manifest_hash=str(manifest["release_manifest_hash"]),
+            config_hash=policy.config_hash,
+            policy_hash=policy.policy_hash,
+            account_key=profile.account_key,
+            account_masked=str(runtime.account_masked),
+        )
+        return AttendedOrderControl(store, runtime)
+    except AttendedControlError as exc:
+        raise CommandBlocked(exc.code) from exc
+
+
+def _attended_request(args: argparse.Namespace, account_masked: str) -> OrderRequest:
+    try:
+        return OrderRequest(
+            account_masked=account_masked,
+            symbol=args.symbol,
+            side=BrokerSide(args.side),
+            order_type=EquityOrderType(args.order_type),
+            quantity=args.quantity,
+            market_hours=MarketHours.REGULAR,
+            time_in_force=TimeInForce(args.time_in_force),
+            client_ref_id=args.client_ref_id or str(uuid4()),
+            limit_price=args.limit_price,
+            stop_price=args.stop_price,
+        )
+    except (TypeError, ValueError) as exc:
+        raise CommandBlocked("IBKR_ATTENDED_ORDER_TUPLE_INVALID") from exc
+
+
+def command_attended_review(args: argparse.Namespace) -> int:
+    control = _attended_order_control(args)
+    report = control.create_order_review(
+        _attended_request(args, control.store.account_masked),
+        purpose=args.purpose,
+    )
+    _print(report)
+    return 0
+
+
+def command_attended_confirm(args: argparse.Namespace) -> int:
+    report = _attended_order_control(args).confirm_order(
+        args.review_id, args.confirm
+    )
+    _print(report)
+    return 2
+
+
+def command_attended_cancel_review(args: argparse.Namespace) -> int:
+    report = _attended_order_control(args).create_cancel_review(
+        args.broker_order_id
+    )
+    _print(report)
+    return 0
+
+
+def command_attended_cancel_confirm(args: argparse.Namespace) -> int:
+    report = _attended_order_control(args).confirm_cancel(
+        args.review_id, args.confirm
+    )
+    _print(report)
+    return 2
+
+
+def command_attended_protection_review(args: argparse.Namespace) -> int:
+    report = _attended_order_control(args).create_protection_review(
+        args.source_review_id
+    )
+    _print(report)
+    return 0
+
+
 def command_serve(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
     store = _open_state(layout)
+    writer_authority: AcquiredServiceWriterAuthority | None = None
     try:
         runtime = store.runtime_status()
         if runtime is None:
@@ -1714,11 +2495,79 @@ def command_serve(args: argparse.Namespace) -> int:
             ("release_manifest_hash", manifest["release_manifest_hash"]),
             ("config_hash", policy.config_hash),
             ("policy_hash", policy.policy_hash),
-            ("account_key", ACCOUNT_KEY),
+            ("account_key", _policy_account_key(policy)),
         ):
             if runtime[field] != expected:
                 raise CommandBlocked(f"runtime binding mismatch: {field}")
-        activated_profile_hash = _activated_runtime_profile_hash(store, runtime)
+        activated_record = _activated_runtime_record(store, runtime)
+        activated_profile_hash = (
+            None
+            if activated_record is None
+            else activated_record.readiness_evidence.coordinator_component_provenance_hash
+        )
+        if activated_record is not None and activated_profile_hash is None:
+            raise CommandBlocked(
+                "armed runtime activation has no coordinator composition profile"
+            )
+
+        # Resolve the authority primitives from the already-constructed local
+        # assembly before touching the lazy runtime composition.  In the
+        # autonomous path that composition opens fixed-ID IBKR sessions, so
+        # kernel-lock and durable-lease contention must stop the process before
+        # even those clients are constructed.
+        provider_assembly = getattr(args, "provider_assembly", None)
+        assembly_lock = None
+        plan_sealer = None
+        if provider_assembly is not None:
+            lock_provider = getattr(provider_assembly, "service_writer_lock", None)
+            sealer_provider = getattr(
+                provider_assembly, "autonomous_plan_sealer", None
+            )
+            if callable(lock_provider):
+                try:
+                    assembly_lock = lock_provider()
+                except Exception as exc:
+                    raise CommandBlocked(
+                        _external_failure_code(
+                            "AUTONOMOUS_SERVICE_LOCK_UNAVAILABLE", exc
+                        )
+                    ) from exc
+            if callable(sealer_provider):
+                try:
+                    plan_sealer = sealer_provider()
+                except Exception as exc:
+                    raise CommandBlocked(
+                        _external_failure_code(
+                            "AUTONOMOUS_PLAN_SEALER_UNAVAILABLE", exc
+                        )
+                    ) from exc
+        autonomous_ibkr = bool(
+            policy.config["execution"].get("broker_adapter")
+            == "supported_production_transport"
+            and policy.execution_authority_mode == "unattended"
+        )
+        if autonomous_ibkr and (
+            not isinstance(assembly_lock, AccountWriterLock)
+            or not callable(plan_sealer)
+        ):
+            raise CommandBlocked(
+                "autonomous IBKR service authority dependencies are unavailable"
+            )
+        if not autonomous_ibkr and (
+            assembly_lock is not None or plan_sealer is not None
+        ):
+            raise CommandBlocked(
+                "autonomous service authority was supplied to a non-autonomous policy"
+            )
+        writer_lock = assembly_lock or _service_process_lock(layout, policy)
+        writer_authority = AcquiredServiceWriterAuthority.acquire(
+            state=store,
+            account_key=_policy_account_key(policy),
+            lock=writer_lock,
+            acquired_at=_now(),
+        )
+
+        # No provider-backed dependency may be composed above this boundary.
         composition = _runtime_composition(args)
         try:
             composition.bind_release(manifest, release_root=layout.release_root)
@@ -1729,14 +2578,38 @@ def command_serve(args: argparse.Namespace) -> int:
         broker = composition.broker_client(
             policy.config["execution"], account_masked=f"••••{policy.account_last4}"
         )
-        writer_lock = _account_writer_lock(layout, policy)
-        latency = LatencyRecorder(LiveStateLatencyAdapter(store, ACCOUNT_KEY))
-        # Validate the exact signed route and injected provider binding at
-        # startup. The trading coordinator still receives only enqueue
-        # authority; the independent notification worker owns provider I/O.
-        notification_sink = composition.notification_sink(
-            policy.config["notifications"],
-            local_jsonl_path=layout.notification_path,
+        if (
+            activated_record is not None
+            and policy.config["execution"].get("broker_adapter")
+            == "supported_production_transport"
+        ):
+            broker = _ActivationRiskBoundBroker(
+                broker,
+                activated_record.readiness_evidence,
+            )
+        latency = LatencyRecorder(
+            LiveStateLatencyAdapter(store, _policy_account_key(policy))
+        )
+        if activated_profile_hash is not None:
+            try:
+                composition.assert_runtime_profile(activated_profile_hash)
+            except RuntimeCompositionError as exc:
+                raise CommandBlocked(
+                    _external_failure_code("RUNTIME_COMPOSITION_INVALID", exc)
+                ) from exc
+
+        # The coordinator binds only the immutable signed route.  Gmail OAuth,
+        # destination and sender evidence remain mandatory for readiness and
+        # the independent worker, but provider I/O cannot own broker safety
+        # loop availability.
+        notification_config = policy.config["notifications"]
+        notification_route = (
+            notification_route_from_config(notification_config)
+            if notification_config.get("delivery_sink") == "gmail_api"
+            else composition.notification_sink(
+                notification_config,
+                local_jsonl_path=layout.notification_path,
+            ).route
         )
         lifecycle = ProductionLifecycleActions(
             policy=policy,
@@ -1744,25 +2617,60 @@ def command_serve(args: argparse.Namespace) -> int:
             broker=broker,
             writer_lock=writer_lock,
             discovery=None,
+            plan_sealer=plan_sealer,
             latency=latency,
-            allow_mutations=bool(
-                policy.config["execution"].get(
-                    "local_mutation_interlock_enabled", False
+            # A long-running coordinator is never the attended user.  In an
+            # attended-only release this loop remains reconciliation/discovery
+            # only; the separate one-shot control consumes the exact review.
+            allow_mutations=_background_mutations_enabled(policy),
+        )
+        entry_path_blockers = list(
+            _risk_observation_entry_blockers(
+                store, account_key=_policy_account_key(policy)
+            )
+        )
+        discovery_composition = composition
+        discovery_factory = getattr(
+            provider_assembly, "discovery_runtime_composition", None
+        )
+        try:
+            if callable(discovery_factory):
+                discovery_composition = discovery_factory()
+                if not isinstance(discovery_composition, RuntimeComposition):
+                    raise RuntimeCompositionError(
+                        "UNSIGNED_COMPOSITION:RUNTIME:discovery graph is not normalized"
+                    )
+                discovery_composition.bind_release(
+                    manifest, release_root=layout.release_root
                 )
-            ),
-        )
-        discovery = composition.build_discovery_executor(
-            policy=policy,
-            state=store,
-            broker=broker,
-            writer_lock=writer_lock,
-            latency=latency,
-            authority=lifecycle,
-        )
+                if (
+                    discovery_composition.notification_provider is not None
+                    or discovery_composition.production_transport
+                    is not composition.production_transport
+                    or discovery_composition.autonomous_plan_sealer
+                    is not composition.autonomous_plan_sealer
+                ):
+                    raise RuntimeCompositionError(
+                        "UNSIGNED_COMPOSITION:RUNTIME:discovery safety graph differs"
+                    )
+            discovery = discovery_composition.build_discovery_executor(
+                policy=policy,
+                state=store,
+                broker=broker,
+                writer_lock=writer_lock,
+                latency=latency,
+                authority=lifecycle,
+                plan_sealer=plan_sealer,
+            )
+        except Exception as exc:
+            discovery = None
+            entry_path_blockers.append(
+                _external_failure_code("DISCOVERY_COMPOSITION_UNAVAILABLE", exc)
+            )
         lifecycle.discovery = discovery
         control_inbox = composition.control_inbox(
             layout.control_path,
-            account_key=ACCOUNT_KEY,
+            account_key=_policy_account_key(policy),
             runtime_id=policy.runtime_id,
             release_manifest_hash=manifest["release_manifest_hash"],
             max_snapshot_age=timedelta(
@@ -1772,46 +2680,44 @@ def command_serve(args: argparse.Namespace) -> int:
             ),
             execution_config=policy.config["execution"],
         )
-        if activated_profile_hash is not None:
-            try:
-                composition.assert_runtime_profile(activated_profile_hash)
-            except RuntimeCompositionError as exc:
-                raise CommandBlocked(
-                    _external_failure_code("RUNTIME_COMPOSITION_INVALID", exc)
-                ) from exc
         service = FullLiveService(
             policy=policy,
             state=store,
             broker=broker,
-            notifications=build_enqueue_only_outbox(store, ACCOUNT_KEY),
-            notification_route=notification_sink.route,
+            notifications=build_enqueue_only_outbox(store, _policy_account_key(policy)),
+            notification_route=notification_route,
             actions=lifecycle,
+            entry_path_blockers=entry_path_blockers,
         )
         runner = ServiceRunner(
             service=service,
             lock=writer_lock,
             interval_seconds=float(policy.config["execution"]["reconcile_interval_seconds"]),
             control_inbox=control_inbox,
+            writer_authority=writer_authority,
         )
         result = runner.run(once=args.once)
         if result is not None:
             _print(asdict(result))
         return 0
     finally:
-        store.close()
+        try:
+            if writer_authority is not None and not writer_authority.released:
+                writer_authority.release(_now())
+        finally:
+            store.close()
 
 
 def command_prepare_activation(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
     probe_started = _now()
-    lock = _account_writer_lock(
+    with _maintenance_interlock(
         layout, policy, owner_id="activation-readiness-prepare"
-    )
-    with lock:
+    ) as lock:
         with _open_state(layout) as store:
             store.acquire_writer_lease(
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 owner_id=lock.owner_id,
                 acquired_at=probe_started,
                 recover_stale=True,
@@ -1830,7 +2736,15 @@ def command_prepare_activation(args: argparse.Namespace) -> int:
                     writer_lock=lock,
                     now=probe_started,
                     clock=_now,
+                    scheduler_control_plane=_scheduler_control_plane(
+                        args,
+                        layout=layout,
+                        policy=policy,
+                    ),
                     runtime_composition=_runtime_composition(args),
+                    coordinator_runtime_composition=_coordinator_runtime_composition(
+                        args, fallback=_runtime_composition(args)
+                    ),
                 )
                 created = readiness.collected_at
                 expires = created + timedelta(seconds=args.ttl_seconds)
@@ -1853,18 +2767,18 @@ def command_prepare_activation(args: argparse.Namespace) -> int:
                 payload = _record_payload(record)
                 store.record_activation(
                     activation_id=record.activation_id,
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     record=payload,
                     created_at=created,
                     expires_at=expires,
                 )
             finally:
                 store.release_writer_lease(
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     owner_id=lock.owner_id,
                     released_at=_now(),
                 )
-    phrase = f"ACTIVATE FULL LIVE ending-7153 {record.activation_id}"
+    phrase = f"ACTIVATE FULL LIVE {_policy_account_key(policy)} {record.activation_id}"
     _print(
         {
             "activation": payload,
@@ -1881,13 +2795,12 @@ def command_readiness(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
     observed = _now()
-    lock = _account_writer_lock(
+    with _maintenance_interlock(
         layout, policy, owner_id="activation-readiness-inspect"
-    )
-    with lock:
+    ) as lock:
         with _open_state(layout) as store:
             store.acquire_writer_lease(
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 owner_id=lock.owner_id,
                 acquired_at=observed,
                 recover_stale=True,
@@ -1901,12 +2814,20 @@ def command_readiness(args: argparse.Namespace) -> int:
                     writer_lock=lock,
                     now=observed,
                     clock=_now,
+                    scheduler_control_plane=_scheduler_control_plane(
+                        args,
+                        layout=layout,
+                        policy=policy,
+                    ),
                     runtime_composition=_runtime_composition(args),
+                    coordinator_runtime_composition=_coordinator_runtime_composition(
+                        args, fallback=_runtime_composition(args)
+                    ),
                 )
                 blockers = readiness.blockers(policy, now=_now())
             finally:
                 store.release_writer_lease(
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     owner_id=lock.owner_id,
                     released_at=_now(),
                 )
@@ -1928,13 +2849,12 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
     started = _now()
-    lock = _account_writer_lock(
+    with _maintenance_interlock(
         layout, policy, owner_id="legacy-retirement-recorder"
-    )
-    with lock:
+    ) as lock:
         with _open_state(layout) as store:
             store.acquire_writer_lease(
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 owner_id=lock.owner_id,
                 acquired_at=started,
                 recover_stale=True,
@@ -1949,8 +2869,15 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
                     raise CommandBlocked(
                         "legacy retirement can be recorded only while authority is PAUSED"
                     )
+                scheduler_control_plane = _scheduler_control_plane(
+                    args,
+                    layout=layout,
+                    policy=policy,
+                )
                 scheduler_runtime, scheduler_error = _probe_legacy_scheduler_runtime(
-                    now=_now()
+                    now=_now(),
+                    expected=_scheduler_evidence_bindings(manifest, policy),
+                    control_plane=scheduler_control_plane,
                 )
                 if scheduler_error is not None or scheduler_runtime is None:
                     raise CommandBlocked(
@@ -1967,17 +2894,16 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
                     clock=_now,
                     legacy_scheduler_runtime_evidence=scheduler_runtime,
                     runtime_composition=_runtime_composition(args),
+                    coordinator_runtime_composition=_coordinator_runtime_composition(
+                        args, fallback=_runtime_composition(args)
+                    ),
                 )
                 process_observations, process_error = _probe_legacy_writer_processes()
                 scheduler_disabled = bool(
-                    evidence.legacy_heartbeat_status in {"PAUSED", "DISABLED"}
-                    and scheduler_runtime.automation_id
-                    == evidence.legacy_heartbeat_id
-                    and scheduler_runtime.status.upper()
-                    == evidence.legacy_heartbeat_status
-                    and scheduler_runtime.config_hash
-                    == evidence.legacy_heartbeat_config_hash
+                    scheduler_runtime.all_retired
                     and scheduler_runtime.active_execution_count == 0
+                    and evidence.legacy_heartbeat_config_hash
+                    == scheduler_runtime.automation_config_hash
                 )
                 drain_proven = all(
                     (
@@ -2012,12 +2938,29 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
                 ):
                     raise CommandBlocked("retirement evidence is incomplete")
                 recorded_at = _now()
+                final_scheduler_runtime, scheduler_error = (
+                    _probe_legacy_scheduler_runtime(
+                        now=recorded_at,
+                        expected=_scheduler_evidence_bindings(manifest, policy),
+                        control_plane=scheduler_control_plane,
+                    )
+                )
+                if scheduler_error is not None or final_scheduler_runtime is None:
+                    raise CommandBlocked(
+                        scheduler_error
+                        or "legacy scheduler runtime identity is unavailable"
+                    )
+                if (
+                    scheduler_runtime.stable_binding
+                    != final_scheduler_runtime.stable_binding
+                ):
+                    raise CommandBlocked(
+                        "legacy_retirement:SCHEDULER_CHANGED_DURING_PROBE"
+                    )
+                scheduler_runtime = final_scheduler_runtime
                 payload = _legacy_retirement_payload(
                     manifest=manifest,
                     policy=policy,
-                    legacy_heartbeat_id=evidence.legacy_heartbeat_id,
-                    legacy_heartbeat_status=evidence.legacy_heartbeat_status,
-                    legacy_heartbeat_config_hash=evidence.legacy_heartbeat_config_hash,
                     scheduler_runtime=scheduler_runtime,
                     durable_snapshot_id=evidence.durable_snapshot_id,
                     reconciliation_audit_event_id=evidence.reconciliation_audit_event_id,
@@ -2028,7 +2971,7 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
                 )
                 receipt_id = object_hash(payload)
                 store.append_event(
-                    stream=ACCOUNT_KEY,
+                    stream=_policy_account_key(policy),
                     event_type="LEGACY_ACCOUNT_WRITER_RETIRED",
                     entity_type="legacy_writer_retirement",
                     entity_id=receipt_id,
@@ -2037,7 +2980,7 @@ def command_record_legacy_retirement(args: argparse.Namespace) -> int:
                 )
             finally:
                 store.release_writer_lease(
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     owner_id=lock.owner_id,
                     released_at=_now(),
                 )
@@ -2058,16 +3001,15 @@ def command_activate(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
     manifest, policy = layout.load_release()
     now = _now()
-    expected_phrase = f"ACTIVATE FULL LIVE ending-7153 {args.activation_id}"
+    expected_phrase = f"ACTIVATE FULL LIVE {_policy_account_key(policy)} {args.activation_id}"
     if args.confirm != expected_phrase:
         raise CommandBlocked("exact activation confirmation phrase does not match")
-    lock = _account_writer_lock(
+    with _maintenance_interlock(
         layout, policy, owner_id="activation-readiness-consume"
-    )
-    with lock:
+    ) as lock:
         with _open_state(layout) as store:
             store.acquire_writer_lease(
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 owner_id=lock.owner_id,
                 acquired_at=now,
                 recover_stale=True,
@@ -2088,7 +3030,15 @@ def command_activate(args: argparse.Namespace) -> int:
                     writer_lock=lock,
                     now=now,
                     clock=_now,
+                    scheduler_control_plane=_scheduler_control_plane(
+                        args,
+                        layout=layout,
+                        policy=policy,
+                    ),
                     runtime_composition=_runtime_composition(args),
+                    coordinator_runtime_composition=_coordinator_runtime_composition(
+                        args, fallback=_runtime_composition(args)
+                    ),
                     # The activation record is bound to the exact durable
                     # snapshot staged by prepare-activation.  A second live
                     # read must match all material facts, but must not replace
@@ -2112,7 +3062,7 @@ def command_activate(args: argparse.Namespace) -> int:
                 runtime = dict(store.runtime_status() or {})
             finally:
                 store.release_writer_lease(
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     owner_id=lock.owner_id,
                     released_at=_now(),
                 )
@@ -2153,7 +3103,11 @@ def command_managed_closeout(args: argparse.Namespace) -> int:
 
 def command_deactivate(args: argparse.Namespace) -> int:
     layout = InstallLayout(args.install_root)
-    phrase = f"DEACTIVATE FULL LIVE ending-7153 FLAT {args.flatness_snapshot_id}"
+    _, policy = layout.load_release()
+    phrase = (
+        f"DEACTIVATE FULL LIVE {_policy_account_key(policy)} FLAT "
+        f"{args.flatness_snapshot_id}"
+    )
     if args.confirm != phrase:
         raise CommandBlocked("exact deactivation confirmation phrase does not match")
     _print(
@@ -2182,10 +3136,9 @@ def command_notification_test(args: argparse.Namespace) -> int:
         policy.config["notifications"],
         local_jsonl_path=layout.notification_path,
     )
-    lock = _account_writer_lock(
+    with _maintenance_interlock(
         layout, policy, owner_id="notification-readiness-test"
-    )
-    with lock:
+    ) as lock:
         with _open_state(layout) as store:
             runtime = store.runtime_status()
             if (
@@ -2198,13 +3151,13 @@ def command_notification_test(args: argparse.Namespace) -> int:
                 )
             now = _now()
             store.acquire_writer_lease(
-                account_key=ACCOUNT_KEY,
+                account_key=_policy_account_key(policy),
                 owner_id=lock.owner_id,
                 acquired_at=now,
                 recover_stale=True,
             )
             try:
-                publisher = build_enqueue_only_outbox(store, ACCOUNT_KEY)
+                publisher = build_enqueue_only_outbox(store, _policy_account_key(policy))
                 message_id = publisher.enqueue(
                     "READINESS",
                     {
@@ -2217,7 +3170,7 @@ def command_notification_test(args: argparse.Namespace) -> int:
                 )
             finally:
                 store.release_writer_lease(
-                    account_key=ACCOUNT_KEY,
+                    account_key=_policy_account_key(policy),
                     owner_id=lock.owner_id,
                     released_at=_now(),
                 )
@@ -2254,7 +3207,7 @@ def command_notification_worker(args: argparse.Namespace) -> int:
             ("config_hash", policy.config_hash),
             ("policy_hash", policy.policy_hash),
             ("runtime_id", policy.runtime_id),
-            ("account_key", ACCOUNT_KEY),
+            ("account_key", _policy_account_key(policy)),
         ):
             if runtime[field] != expected:
                 raise CommandBlocked(f"runtime binding mismatch: {field}")
@@ -2282,7 +3235,7 @@ def command_notification_worker(args: argparse.Namespace) -> int:
     try:
         sent, failed = run_notification_worker(
             state_path=layout.state_path,
-            account_key=ACCOUNT_KEY,
+            account_key=_policy_account_key(policy),
             sink=sink,
             stop_event=stop_event,
             settings=NotificationWorkerSettings(
@@ -2314,7 +3267,7 @@ def command_export_eod(args: argparse.Namespace) -> int:
     with _open_state(layout) as store:
         payload = build_eod_evidence(
             store,
-            account_key=ACCOUNT_KEY,
+            account_key=_policy_account_key(policy),
             trading_date=trading_date,
             generated_at=_now(),
             max_snapshot_age=timedelta(
@@ -2352,6 +3305,62 @@ def build_parser() -> argparse.ArgumentParser:
         command_provider_status,
     )
     provider_status.add_argument("--probe-network", action="store_true")
+    command(
+        "notification-setup-status",
+        "read-only account-scoped Gmail metadata and missing setup prerequisites",
+        command_notification_setup_status,
+    )
+    command(
+        "local-profile-status",
+        "show the signed local IBKR endpoint and SDK attestation without network access",
+        command_local_profile_status,
+    )
+    attended_review = command(
+        "attended-review",
+        "persist one exact expiring regular-hours IBKR order review",
+        command_attended_review,
+    )
+    attended_review.add_argument("--purpose", required=True, choices=("entry", "exit"))
+    attended_review.add_argument("--side", required=True, choices=("buy", "sell"))
+    attended_review.add_argument("--symbol", required=True)
+    attended_review.add_argument("--quantity", required=True, type=int)
+    attended_review.add_argument(
+        "--order-type",
+        required=True,
+        choices=("market", "limit", "stop_market"),
+    )
+    attended_review.add_argument(
+        "--time-in-force", required=True, choices=("gfd", "gtc")
+    )
+    attended_review.add_argument("--limit-price", type=Decimal)
+    attended_review.add_argument("--stop-price", type=Decimal)
+    attended_review.add_argument("--client-ref-id")
+    attended_confirm = command(
+        "attended-confirm",
+        "revalidate and consume one exact attended IBKR order review",
+        command_attended_confirm,
+    )
+    attended_confirm.add_argument("--review-id", required=True)
+    attended_confirm.add_argument("--confirm", required=True)
+    cancel_review = command(
+        "attended-cancel-review",
+        "persist one exact expiring attended IBKR cancel review",
+        command_attended_cancel_review,
+    )
+    cancel_review.add_argument("--broker-order-id", required=True)
+    cancel_confirm = command(
+        "attended-cancel-confirm",
+        "revalidate and consume one exact attended IBKR cancel review",
+        command_attended_cancel_confirm,
+    )
+    cancel_confirm.add_argument("--review-id", required=True)
+    cancel_confirm.add_argument("--confirm", required=True)
+    protection_review = command(
+        "attended-protection-review",
+        "reconcile a confirmed fill and persist its separate stop review",
+        command_attended_protection_review,
+    )
+    protection_review.add_argument("--source-review-id", required=True)
     command(
         "readiness",
         "collect activation evidence directly from installed dependencies",
@@ -2418,11 +3427,13 @@ def main(
     *,
     runtime_composition: RuntimeComposition | None = None,
     provider_assembly: object | None = None,
+    scheduler_control_plane: SchedulerControlPlane | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.runtime_composition = runtime_composition or RuntimeComposition()
     args.provider_assembly = provider_assembly
+    args.scheduler_control_plane = scheduler_control_plane
     try:
         return int(args.handler(args))
     except (CommandBlocked, ValueError, OSError, RuntimeError) as exc:
