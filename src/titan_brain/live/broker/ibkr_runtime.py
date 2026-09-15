@@ -38,6 +38,7 @@ from .base import (
 )
 from .ibkr_account import IbkrStableAccountSnapshotReader
 from .ibkr_instrument import IbkrInstrumentProvider
+from .ibkr_position_valuation import IbkrPositionValuationCollector
 from .ibkr_read import (
     IBKR_API_READ_ONLY_MESSAGE,
     IbkrWholeAccountReadBridge,
@@ -192,6 +193,7 @@ class IbkrRuntimeComponents:
     account_masked: str
     account_binding_fingerprint: str
     read_generation: int
+    position_valuation_collector: IbkrPositionValuationCollector
 
 
 @dataclass(frozen=True)
@@ -364,6 +366,8 @@ _READ_CALLBACK_MEMBERS = (
     "commissionReport",
     "pnl",
     "pnlProtoBuf",
+    "pnlSingle",
+    "pnlSingleProtoBuf",
     "contractDetails",
     "contractDataProtoBuf",
     "contractDetailsEnd",
@@ -416,7 +420,7 @@ class _ReadCallbackRouter:
         self._targets: tuple[object, ...] = ()
 
     def bind_targets(self, targets: tuple[object, ...], managed_accounts: str) -> None:
-        if len(targets) != 2 or any(target is None for target in targets):
+        if len(targets) != 3 or any(target is None for target in targets):
             raise IbkrRuntimeError("IBKR_RUNTIME_READ_CALLBACK_BINDING_INVALID")
         self._targets = targets
         self._forward("connectAck")
@@ -442,6 +446,7 @@ class _ReadCallbackRouter:
     executionDetailsProtoBuf = _discard_proto
     executionDetailsEndProtoBuf = _discard_proto
     pnlProtoBuf = _discard_proto
+    pnlSingleProtoBuf = _discard_proto
     contractDataProtoBuf = _discard_proto
     contractDataEndProtoBuf = _discard_proto
 
@@ -519,6 +524,9 @@ class _ReadCallbackRouter:
 
     def pnl(self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float) -> None:
         self._forward("pnl", reqId, dailyPnL, unrealizedPnL, realizedPnL)
+
+    def pnlSingle(self, reqId, pos, dailyPnL, unrealizedPnL, realizedPnL, value):
+        self._forward("pnlSingle", reqId, pos, dailyPnL, unrealizedPnL, realizedPnL, value)
 
     def contractDetails(self, reqId: int, contractDetails: object) -> None:
         self._forward("contractDetails", reqId, contractDetails)
@@ -632,6 +640,12 @@ class _OfficialReadRequester:
 
     def cancelPnL(self, reqId: int) -> None:
         self._client.cancelPnL(reqId)
+
+    def reqPnLSingle(self, reqId: int, account: str, modelCode: str, conId: int) -> None:
+        self._client.reqPnLSingle(reqId, account, modelCode, conId)
+
+    def cancelPnLSingle(self, reqId: int) -> None:
+        self._client.cancelPnLSingle(reqId)
 
     def reqContractDetails(self, reqId: int, contract: object) -> None:
         self._client.reqContractDetails(reqId, contract)
@@ -1198,9 +1212,14 @@ class IbkrOfficialRuntime:
                 account_masked=account_masked,
                 clock=stable_account_clock,
             )
+            position_valuation_collector = IbkrPositionValuationCollector(
+                requester=requester, exact_account_id=exact, account_masked=account_masked,
+                clock=IbkrRuntimeClock(self._clock), timeout_seconds=min(5, self._read_timeout),
+            )
             callbacks = (
                 read_bridge.open_generation(generation),
                 instrument_provider.open_generation(generation),
+                position_valuation_collector.open_generation(generation),
             )
             router.bind_targets(callbacks, accounts)
             fingerprint = self._account_fingerprint
@@ -1215,6 +1234,7 @@ class IbkrOfficialRuntime:
                 account_masked=account_masked,
                 account_binding_fingerprint=fingerprint,
                 read_generation=generation,
+                position_valuation_collector=position_valuation_collector,
             )
             with self._condition:
                 if self._fatal_code is not None or not requester.is_connected():
@@ -1479,6 +1499,22 @@ class IbkrOfficialRuntime:
             if self._attended_facade is None or self._state != "READY":
                 raise IbkrRuntimeError("IBKR_RUNTIME_ATTENDED_TRANSPORT_NOT_READY")
             return self._attended_facade
+
+    def probe_position_valuations(self):
+        """Explicit account/reqPnLSingle diagnostic; never a mutation preflight.
+
+        Uses only the existing read client, not an instrument/market-data
+        request or command connection. Callback receipt is not source time.
+        """
+        with self._condition:
+            components, exact = self._components, self._exact_account_id
+            if components is None or exact is None or self._read_requester is None or not self._read_requester.is_connected():
+                raise IbkrRuntimeError("IBKR_RUNTIME_READS_NOT_READY")
+        observation = components.read_bridge.get_account_base(exact)
+        contracts, snapshot = components.read_bridge.position_valuation_inputs(observation.collection_id)
+        return components.position_valuation_collector.collect(
+            contracts=contracts, snapshot=snapshot, collection_id=observation.collection_id,
+        )
 
     def probe_reads(self, symbol: str = "SPY") -> IbkrReadProbe:
         """Exercise normalized account callbacks and one contract metadata read.

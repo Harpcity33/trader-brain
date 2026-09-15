@@ -19,6 +19,45 @@ ZERO = Decimal("0")
 AUTONOMOUS_ENTRY_FIXED_ORDER_LEGS = 2
 
 
+def remaining_position_stop_downside(
+    *, quantity: int, current_market_value: object,
+    stop_allocations: Iterable[tuple[str, int, object]],
+    execution_reserve: object, remaining_fee_reserve: object,
+) -> Decimal:
+    """Exact remaining-risk arithmetic, not an evidence or authority gate.
+
+    A caller must independently prove the current accounting valuation, exact
+    working stop allocations, and all remaining fees against the same complete
+    broker observation. The connected TWS diagnostic cannot yet prove a common
+    valuation epoch, so the production open-position entry blocker remains.
+    Incurred fees already in account equity are not accepted as an input here.
+    """
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("remaining position quantity must be positive whole shares")
+    value = decimal_value(current_market_value, "current_market_value")
+    reserve = decimal_value(execution_reserve, "execution_reserve")
+    fees = decimal_value(remaining_fee_reserve, "remaining_fee_reserve")
+    if value <= ZERO or reserve <= ZERO or fees <= ZERO:
+        raise ValueError("remaining position value, execution and fee reserves must be positive")
+    allocations = tuple(stop_allocations)
+    covered, proceeds, identifiers = 0, ZERO, set()
+    for order_id, shares, stop in allocations:
+        if (
+            type(order_id) is not str or not order_id or order_id in identifiers
+            or type(shares) is not int or shares <= 0
+        ):
+            raise ValueError("stop allocations must be unique exact positive whole quantities")
+        price = decimal_value(stop, "stop_price")
+        if price <= ZERO or price * quantity >= value:
+            raise ValueError("each working stop must be positive and below current accounting mark")
+        identifiers.add(order_id)
+        covered += shares
+        proceeds += price * shares
+    if covered != quantity:
+        raise ValueError("working stop quantities must cover the position exactly")
+    return value - proceeds + reserve + fees
+
+
 def entry_lifecycle_fee_reserve(
     policy: PolicyBundle, *, quantity: int
 ) -> Decimal:
@@ -535,6 +574,7 @@ __all__ = [
     "daily_starting_equity_capacity",
     "daily_starting_equity_performance",
     "entry_lifecycle_fee_reserve",
+    "remaining_position_stop_downside",
     "evaluate_entry",
     "update_session_latch",
 ]

@@ -44,6 +44,7 @@ from .base import (
     TimeInForce,
 )
 from .production import CollectedObservation, OrderFamilyPage
+from .ibkr_position_valuation import PositionValuationContract, PositionValuationError
 
 
 _UUID = re.compile(
@@ -162,6 +163,7 @@ class _CompletedCollection:
     observation: CollectedObservation
     pages: dict[OrderFamily, OrderFamilyPage]
     all_equity_orders: tuple[OrderSnapshot, ...]
+    valuation_contracts: tuple[PositionValuationContract, ...] | None = None
 
 
 class _GenerationCallbacks:
@@ -335,6 +337,20 @@ class IbkrWholeAccountReadBridge:
     def sanitized_errors(self) -> tuple[SanitizedIbkrError, ...]:
         with self._condition:
             return tuple(self._errors)
+
+    def position_valuation_inputs(self, collection_id: str):
+        """Retain real contract IDs for an explicit read-only valuation probe.
+
+        Missing currency/conId cannot break the existing conservative account
+        diagnostic, but never becomes a symbol- or average-cost substitution.
+        """
+        with self._condition:
+            completed = self._last
+            if completed is None or completed.collection_id != collection_id:
+                raise BrokerContractViolation("IBKR_POSITION_VALUATION_COLLECTION_CHANGED")
+            if completed.valuation_contracts is None:
+                raise BrokerContractViolation("IBKR_POSITION_VALUATION_CONTRACT_SCOPE_UNPROVEN")
+            return completed.valuation_contracts, completed.observation.snapshot
 
     def release_components(self) -> tuple[tuple[str, object, tuple[str, ...]], ...]:
         """Return retained SDK dependencies for outer lifecycle teardown.
@@ -694,11 +710,20 @@ class IbkrWholeAccountReadBridge:
                 received_at=completed_at,
                 next_cursor=None,
             )
+        try:
+            valuation_contracts = tuple(
+                PositionValuationContract.from_callback(contract, quantity, received)
+                for contract, quantity, _cost, received in collection.positions
+                if quantity != 0
+            )
+        except PositionValuationError:
+            valuation_contracts = None
         return _CompletedCollection(
             collection_id=collection_id,
             observation=observation,
             pages=pages,
             all_equity_orders=all_equity,
+            valuation_contracts=valuation_contracts,
         )
 
     def _normalize_summary(

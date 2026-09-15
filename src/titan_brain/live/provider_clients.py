@@ -40,6 +40,16 @@ GMAIL_KEYCHAIN_SERVICE_FIELDS = (
     "desktop_client_service", "refresh_token_service", "consent_status_service",
     "sender_service", "destination_service",
 )
+
+
+def gmail_desktop_loopback_uris_valid(value: object) -> bool:
+    """Validate downloaded Desktop client loopback declarations, not prefixes."""
+    return (type(value) is list and bool(value)
+            and all(type(uri) is str and uri in {
+                "http://localhost", "http://127.0.0.1", "http://[::1]"
+            } for uri in value))
+
+
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _KEYCHAIN_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}")
 
@@ -878,8 +888,7 @@ class GmailDesktopOAuthAuthorizer:
             not self._client_id
             or not self._client_secret
             or token_uri != self.TOKEN_ENDPOINT
-            or not isinstance(redirect_uris, list)
-            or not any(str(value).startswith("http://localhost") for value in redirect_uris)
+            or not gmail_desktop_loopback_uris_valid(redirect_uris)
         ):
             raise CredentialUnavailable("CREDENTIAL_GMAIL_DESKTOP_CLIENT_INVALID")
         if not refresh or consent not in {"production", "internal"}:

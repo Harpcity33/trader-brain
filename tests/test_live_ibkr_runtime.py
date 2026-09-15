@@ -594,6 +594,7 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
             "executionDetailsEndProtoBuf",
             "commissionAndFeesReportProtoBuf",
             "pnlProtoBuf",
+            "pnlSingleProtoBuf",
             "contractDataProtoBuf",
             "contractDataEndProtoBuf",
             "errorProtoBuf",
