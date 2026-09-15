@@ -118,7 +118,18 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
         approval = config["owner_policy_approval"]
         self.assertEqual(records[approval["proposal_path"]]["sha256"], approval["proposal_sha256"])
         self.assertEqual(records[approval["approval_record_path"]]["sha256"], approval["approval_record_sha256"])
+        amendment = config["owner_risk_policy_amendment"]
+        self.assertEqual(records[amendment["amendment_path"]]["sha256"], amendment["amendment_sha256"])
         self.assertEqual(config["execution"]["per_mutation_user_confirmation_required"], True)
+
+    def test_committed_daily_percentage_amendment_tampering_blocks_release(self) -> None:
+        path = self.source_root / "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md"
+        path.write_text(path.read_text() + "\nUnapproved alteration.\n")
+        self.git("add", ".")
+        self.git("commit", "--quiet", "-m", "alter amendment without binding")
+        self.source_revision = self.git("rev-parse", "HEAD").stdout.strip()
+        with self.assertRaisesRegex(ValueError, "owner risk policy amendment artifact binding"):
+            self.build(config_path="config/full_live_ibkr.json")
 
     def test_committed_approval_artifact_tampering_blocks_release(self) -> None:
         approval_path = self.source_root / "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md"

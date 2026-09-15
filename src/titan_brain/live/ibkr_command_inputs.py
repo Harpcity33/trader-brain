@@ -31,7 +31,7 @@ from .broker.ibkr_sdk import IbkrWriteEvidence
 from .local_assembly import IbkrCommandAssemblyInputs
 from .money import from_cents
 from .policy import PolicyBundle, canonical_json
-from .risk_runtime import dollar_headroom_capacity, entry_lifecycle_fee_reserve
+from .risk_runtime import dollar_headroom_capacity, daily_starting_equity_capacity, entry_lifecycle_fee_reserve
 from .state import SCHEMA_VERSION, object_hash
 from .writer_lock import (
     AccountWriterLock,
@@ -180,18 +180,20 @@ class DurableIbkrRiskPolicyCheck:
             return
         if not snapshot.daily_realized_pnl_ready or snapshot.daily_realized_pnl is None:
             raise IbkrCommandInputError("IBKR_COMMAND_DAILY_PNL_UNAVAILABLE")
-        daily_lock = Decimal(
-            str(self.policy.config["risk"]["daily_realized_loss_lock_dollars"])
-        )
-        if snapshot.daily_realized_pnl <= -daily_lock:
-            raise IbkrCommandInputError("IBKR_COMMAND_DAILY_LOSS_LOCKED")
+        if self.policy.daily_starting_equity_risk:
+            if not snapshot.daily_starting_equity_ready:
+                raise IbkrCommandInputError("IBKR_COMMAND_DAILY_STARTING_EQUITY_UNPROVEN")
+        else:
+            daily_lock = Decimal(str(self.policy.config["risk"]["daily_realized_loss_lock_dollars"]))
+            if snapshot.daily_realized_pnl <= -daily_lock:
+                raise IbkrCommandInputError("IBKR_COMMAND_DAILY_LOSS_LOCKED")
         dollar_snapshot = None
         try:
             connection = sqlite3.connect(
                 f"file:{self.state_path}?mode=ro", uri=True
             )
             connection.row_factory = sqlite3.Row
-            if self.policy.dollar_headroom_risk:
+            if self.policy.account_day_headroom_risk:
                 # Latches, candidate identity, and every possible exposure
                 # must come from one read-only durable-state snapshot.
                 connection.execute("PRAGMA query_only=ON")
@@ -221,7 +223,7 @@ class DurableIbkrRiskPolicyCheck:
                     WHERE p.plan_id=? AND i.client_ref=? AND i.kind='ENTRY'""",
                 (plan.plan_id, plan.request.client_ref_id),
             ).fetchall()
-            if self.policy.dollar_headroom_risk and len(reservation) == 1:
+            if self.policy.account_day_headroom_risk and len(reservation) == 1:
                 dollar_snapshot = self._dollar_account_risk(
                     connection, snapshot, plan, current
                 )
@@ -292,7 +294,7 @@ class DurableIbkrRiskPolicyCheck:
             or from_cents(int(row["notional_cents"])) != notional
         ):
             raise IbkrCommandInputError("IBKR_COMMAND_DURABLE_RISK_MISMATCH")
-        if self.policy.dollar_headroom_risk:
+        if self.policy.account_day_headroom_risk:
             if (
                 dollar_snapshot is None
                 or plan.fee_reserve != entry_lifecycle_fee_reserve(
@@ -322,11 +324,17 @@ class DurableIbkrRiskPolicyCheck:
                 )
             ):
                 raise IbkrCommandInputError("IBKR_COMMAND_DOLLAR_EXPOSURE_UNRESOLVED")
-            capacity = dollar_headroom_capacity(
-                self.policy,
-                realized_pnl=dollar_snapshot.daily_realized_pnl,
-                profit_goal_crossed=bool(int(latch["objective_crossed"])),
-            )
+            if self.policy.daily_starting_equity_risk:
+                capacity = daily_starting_equity_capacity(
+                    self.policy, starting_equity=snapshot.daily_starting_equity,
+                    total_equity=snapshot.funds.total_value,
+                    external_cash_flow=snapshot.daily_external_cash_flow,
+                )
+            else:
+                capacity = dollar_headroom_capacity(
+                    self.policy, realized_pnl=dollar_snapshot.daily_realized_pnl,
+                    profit_goal_crossed=bool(int(latch["objective_crossed"])),
+                )
             # The exact candidate reservation is already in this collection.
             # Count it once alongside every open/pending/unresolved obligation,
             # including execution and lifecycle-fee reserves.
@@ -341,7 +349,7 @@ class DurableIbkrRiskPolicyCheck:
                 dollar_snapshot.cash, dollar_snapshot.unleveraged_buying_power
             ):
                 raise IbkrCommandInputError("IBKR_COMMAND_DOLLAR_UNLEVERAGED_FUNDS_EXCEEDED")
-        if int(latch["objective_crossed"]):
+        if not self.policy.daily_starting_equity_risk and int(latch["objective_crossed"]):
             floor = Decimal(str(self.policy.config["risk"]["post_goal_floor_dollars"]))
             if snapshot.daily_realized_pnl - plan.stress_downside < floor:
                 raise IbkrCommandInputError("IBKR_COMMAND_POST_GOAL_FLOOR_BLOCKED")
@@ -357,6 +365,7 @@ class DurableIbkrRiskPolicyCheck:
         if (
             not isinstance(snapshot, AccountSnapshot)
             or not snapshot.authenticated_entry_risk_evidence_ready
+            or (self.policy.daily_starting_equity_risk and not snapshot.daily_starting_equity_ready)
             or snapshot.account_masked not in {
                 f"****{self.policy.account_last4}", f"••••{self.policy.account_last4}"
             }

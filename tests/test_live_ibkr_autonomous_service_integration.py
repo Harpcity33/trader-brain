@@ -69,6 +69,7 @@ from titan_brain.live.provider_clients import CredentialUnavailable
 from titan_brain.live.risk_evidence_binding import risk_high_water_receipt_hash
 from titan_brain.live.state import LiveStateStore
 from titan_brain.live.writer_lock import AccountWriterLock
+from tests.live_dollar_policy_support import legacy_dollar_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -337,9 +338,7 @@ class _RiskWiringRuntime:
 
 
 def supported_policy(mode: str = "unattended") -> PolicyBundle:
-    base = PolicyBundle.load(
-        ROOT, config_relative="config/full_live_ibkr.json"
-    )
+    base = legacy_dollar_policy(ROOT)
     config = copy.deepcopy(base.config)
     config["risk"]["limits_live_provenance_verified"] = True
     config["evidence"].update(

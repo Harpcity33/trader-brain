@@ -62,6 +62,7 @@ from .risk_runtime import (
     RiskExposure,
     SessionLatch,
     dollar_headroom_capacity,
+    daily_starting_equity_capacity,
     entry_lifecycle_fee_reserve,
     evaluate_entry,
 )
@@ -620,6 +621,17 @@ def build_account_risk_snapshot(
         failures.append("BROKER_AUTH_POINT_IN_TIME_UNPROVEN")
     if not broker_snapshot.entry_risk_evidence_ready:
         failures.append("AUTHORITATIVE_ACCOUNT_RISK_EVIDENCE_INCOMPLETE")
+    if policy.daily_starting_equity_risk and not broker_snapshot.daily_starting_equity_ready:
+        failures.append("DAILY_STARTING_EQUITY_EVIDENCE_NOT_READY")
+        return None, _unique(failures)
+    if policy.daily_starting_equity_risk and any(
+        position.quantity != 0 for position in broker_snapshot.equity_positions
+    ):
+        # The connected position reader has average cost, not an authenticated
+        # mark-to-stop remaining-risk valuation matched to current account NLV.
+        # Protection/exits bypass this new-entry-only pipeline.
+        failures.append("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED")
+        return None, _unique(failures)
     if broker_snapshot.option_position_count:
         failures.append("OPTION_POSITION_PRESENT_OUTSIDE_EQUITY_SCOPE")
     if broker_snapshot.option_order_count:
@@ -841,10 +853,22 @@ def build_account_risk_snapshot(
         for row in safety_unknown
     )
 
+    # A newer flat broker snapshot cannot release a filled durable reservation
+    # by itself. Final dispatch also consumes this builder without calling
+    # evaluate_entry, so retain the same remaining-risk gate here.
+    if policy.daily_starting_equity_risk and any(
+        exposure.category in {"open", "manual"} for exposure in exposures
+    ):
+        failures.append("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED")
+        return None, _unique(failures)
+
     result = AccountRiskSnapshot.build(
         account_last4=policy.account_last4,
         observed_at=risk_as_of,
         usable_equity=broker_snapshot.funds.total_value,
+        total_equity=broker_snapshot.funds.total_value,
+        daily_starting_equity=broker_snapshot.daily_starting_equity,
+        daily_external_cash_flow=broker_snapshot.daily_external_cash_flow,
         unleveraged_buying_power=broker_snapshot.funds.unleveraged_buying_power,
         cash=broker_snapshot.funds.cash,
         daily_realized_pnl=broker_snapshot.daily_realized_pnl,
@@ -1497,7 +1521,16 @@ class FullLiveEntryPipeline:
         quantity_caps = [
             min(snapshot.cash, snapshot.unleveraged_buying_power) / validation.entry_limit,
         ]
-        if self.policy.dollar_headroom_risk:
+        if self.policy.daily_starting_equity_risk:
+            try:
+                quantity_caps.append(daily_starting_equity_capacity(
+                    self.policy, starting_equity=snapshot.daily_starting_equity,
+                    total_equity=snapshot.total_equity,
+                    external_cash_flow=snapshot.daily_external_cash_flow,
+                ) / per_share_stress)
+            except (ValueError, TypeError):
+                return None, snapshot, ("DAILY_STARTING_EQUITY_EVIDENCE_INCOMPLETE",)
+        elif self.policy.dollar_headroom_risk:
             quantity_caps.append(dollar_headroom_capacity(
                 self.policy, realized_pnl=snapshot.daily_realized_pnl,
                 profit_goal_crossed=latch.profit_goal_crossed,

@@ -86,7 +86,7 @@ class PolicyCalendarTests(unittest.TestCase):
                         "ibkr-live-ending-3103"
                     ),
                     "ibkr_daily_risk_baseline_schema": (
-                        "titan_ibkr_daily_risk_baseline_2026-09-14_v1"
+                        base.daily_risk_baseline_schema
                     ),
                     "ibkr_daily_risk_baseline_relative_path": (
                         "control/ibkr/daily-risk-baseline.json"
@@ -142,7 +142,7 @@ class PolicyCalendarTests(unittest.TestCase):
                 "IBKR_TIERED_ALL_IN_FEE_BOUND_NOT_VERIFIED",
                 "IBKR_LOCAL_GATEWAY_TRANSPORT_STAGED_ONLY",
                 "LOCAL_MUTATION_INTERLOCK_NOT_ENABLED",
-                "LIVE_DRAWDOWN_REVIEW_POLICY_UNVERIFIED",
+                "AUTHENTICATED_DAILY_STARTING_EQUITY_AND_CASH_FLOW_EVIDENCE_REQUIRED",
                 "NOTIFICATION_DESTINATION_BRIDGE_NOT_CONFIGURED",
                 "LIVE_DISCOVERY_PIPELINE_NOT_CONFIGURED",
             }.issubset(policy.activation_blockers)

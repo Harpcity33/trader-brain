@@ -15,7 +15,7 @@ from titan_brain.live.risk_runtime import (
 )
 from tests import test_live_pipeline as pipeline_fixtures
 from tests import test_live_risk_runtime as risk_fixtures
-from tests.live_dollar_policy_support import copy_dollar_policy_inputs
+from tests.live_dollar_policy_support import copy_dollar_policy_inputs, legacy_dollar_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ NOW = risk_fixtures.NOW
 
 class DollarHeadroomRiskTests(unittest.TestCase):
     def setUp(self):
-        self.policy = PolicyBundle.load(ROOT, config_relative="config/full_live_ibkr.json")
+        self.policy = legacy_dollar_policy(ROOT)
         self.fixture = risk_fixtures.RiskRuntimeTests()
         self.fixture.policy = self.policy
 

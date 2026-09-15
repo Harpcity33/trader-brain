@@ -105,6 +105,7 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
         )
         connection.execute("DROP TABLE binding_v3")
         connection.execute("DROP TABLE carry_forward")
+        connection.execute("DROP TABLE daily_starting_equity")
         connection.execute("PRAGMA user_version=1")
         connection.commit()
         connection.close()
@@ -189,7 +190,7 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
             "PAUSED_RELEASE_SCOPED_ARCHIVE_CARRY_FORWARD",
         )
         self.assertEqual(migration["source_schema_version"], 1)
-        self.assertEqual(migration["target_schema_version"], 3)
+        self.assertEqual(migration["target_schema_version"], 4)
         self.assertEqual(migration["highest_equity"], "1300")
         first_lineage = self.lineage_hash()
         self.assertRegex(first_lineage, r"^[0-9a-f]{64}$")
@@ -246,7 +247,7 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
         self.assertEqual(repeated["reason"], "RISK_LEDGER_ALREADY_BOUND")
         self.assertEqual(self.lineage_hash(), first_lineage)
 
-    def test_v2_release_upgrade_is_accepted_and_migrated_to_v3(self) -> None:
+    def test_v2_release_upgrade_is_accepted_and_migrated_to_v4(self) -> None:
         connection = sqlite3.connect(self.ledger_path)
         connection.execute(
             "CREATE TABLE carry_forward ("
@@ -272,7 +273,7 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
 
         self.assertTrue(migration["performed"])
         self.assertEqual(migration["source_schema_version"], 2)
-        self.assertEqual(migration["target_schema_version"], 3)
+        self.assertEqual(migration["target_schema_version"], 4)
         self.assertEqual(migration["highest_equity"], "1300")
         self.assertRegex(self.lineage_hash(), r"^[0-9a-f]{64}$")
 
@@ -284,11 +285,11 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
         self.assertTrue(first["required"])
         self.assertTrue(first["performed"])
         self.assertEqual(first["reason"], "PAUSED_RISK_LEDGER_BOOTSTRAPPED")
-        self.assertEqual(first["target_schema_version"], 3)
+        self.assertEqual(first["target_schema_version"], 4)
         first_lineage = self.lineage_hash()
         self.assertRegex(first_lineage, r"^[0-9a-f]{64}$")
         installed = installer._read_ibkr_risk_ledger(self.ledger_path)
-        self.assertEqual(installed["schema_version"], 3)
+        self.assertEqual(installed["schema_version"], 4)
         self.assertIsNone(installed["highest_equity"])
         ledger = IbkrRiskHighWaterLedger(
             self.ledger_path,
@@ -309,8 +310,8 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
         migration = self.migrate()
 
         self.assertTrue(migration["performed"])
-        self.assertEqual(migration["source_schema_version"], 3)
-        self.assertEqual(migration["target_schema_version"], 3)
+        self.assertEqual(migration["source_schema_version"], 4)
+        self.assertEqual(migration["target_schema_version"], 4)
         self.assertEqual(migration["highest_equity"], "1300")
         self.assertNotEqual(self.lineage_hash(), first_lineage)
 
@@ -438,6 +439,44 @@ class IbkrRiskHighWaterUpgradeTests(unittest.TestCase):
             caught.exception.code,
             "IBKR_RISK_EVIDENCE_BASELINE_HIGH_WATER_REGRESSION",
         )
+
+
+    def test_v3_schema_upgrade_archives_old_peak_and_creates_empty_daily_baseline_table(self):
+        self.migrate()
+        connection = sqlite3.connect(self.ledger_path)
+        connection.execute("DROP TABLE daily_starting_equity")
+        connection.execute("PRAGMA user_version=3")
+        connection.commit()
+        connection.close()
+        result = self.migrate()
+        self.assertEqual(result["source_schema_version"], 3)
+        self.assertEqual(result["target_schema_version"], 4)
+        self.assertEqual(installer._read_ibkr_risk_ledger(self.ledger_path)["highest_equity"], 1300)
+        self.assertEqual(installer._read_ibkr_risk_ledger(self.ledger_path)["daily_starting_equity"], [])
+        archive = self.install_root / result["archive_relative_path"]
+        self.assertEqual(installer._read_ibkr_risk_ledger(archive)["schema_version"], 3)
+
+    def test_real_paused_release_migration_carries_fixed_baseline_and_flow_watermark(self):
+        from tests.test_live_ibkr_daily_starting_equity import equity_payload
+        self.migrate()
+        expected = self.target_bindings()
+        write_receipt(self.receipt_path, equity_payload(expected, total="1300", flow="300"))
+        ledger = IbkrRiskHighWaterLedger(self.ledger_path, bindings=expected.ledger_bindings)
+        enricher = IbkrRiskEvidenceEnricher(
+            baseline_authenticator=DailyIbkrRiskBaselineAuthenticator(
+                path=self.receipt_path, key_reader=RecordingKeyReader(),
+                key_item=KeychainItem(service="test-risk", account="test-account"),
+                expected=expected, clock=FixedClock()),
+            high_water_ledger=ledger, snapshot_max_age_seconds=5)
+        self.assertTrue(enricher.enrich(raw_snapshot(net_liquidation="1300")).daily_starting_equity_ready)
+        ledger.close()
+        before = installer._read_ibkr_risk_ledger(self.ledger_path)["daily_starting_equity"]
+        self.manifest["release_manifest_hash"] = "8" * 64
+        result = self.migrate()
+        self.assertEqual(result["source_schema_version"], 4)
+        self.assertEqual(installer._read_ibkr_risk_ledger(self.ledger_path)["daily_starting_equity"], before)
+        self.assertEqual(before[0]["starting_equity"], "1000")
+        self.assertEqual(before[0]["latest_external_cash_flow"], "300")
 
 
 if __name__ == "__main__":

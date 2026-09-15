@@ -358,7 +358,7 @@ class DurableIbkrAutonomousRiskPolicyCheck:
 
     def _dollar_policy(self):
         policy = getattr(self.delegate, "policy", None)
-        return policy if isinstance(policy, PolicyBundle) and policy.dollar_headroom_risk else None
+        return policy if isinstance(policy, PolicyBundle) and policy.account_day_headroom_risk else None
 
     def begin_account_snapshot(self, now, *, entry: bool):
         """Durably arm one exact broker read before it can expose risk facts.
@@ -433,7 +433,8 @@ class DurableIbkrAutonomousRiskPolicyCheck:
                     or snapshot.risk_evidence_as_of.astimezone(local_zone).date() != local_date
                     or started.astimezone(local_zone).date() != local_date
                     or not policy.calendar.is_trading_day(local_date)
-                    or snapshot.funds.total_value <= 0
+                    or (not policy.daily_starting_equity_risk and snapshot.funds.total_value <= 0)
+                    or (policy.daily_starting_equity_risk and not snapshot.daily_starting_equity_ready)
                     or any(
                         not 0 <= (current - stamp).total_seconds() <= maximum_age
                         for stamp in (snapshot.observed_at, snapshot.received_at, snapshot.risk_evidence_as_of, started)
@@ -463,7 +464,12 @@ class DurableIbkrAutonomousRiskPolicyCheck:
                     updated = update_session_latch(
                         policy, prior, realized_pnl=snapshot.daily_realized_pnl,
                         usable_equity=snapshot.funds.total_value,
-                        observed_at=snapshot.risk_evidence_as_of.astimezone(local_zone),
+                        observed_at=(snapshot.observed_at if policy.daily_starting_equity_risk else snapshot.risk_evidence_as_of).astimezone(local_zone),
+                        **({
+                            "daily_starting_equity": snapshot.daily_starting_equity,
+                            "daily_external_cash_flow": snapshot.daily_external_cash_flow,
+                            "total_equity": snapshot.funds.total_value,
+                        } if policy.daily_starting_equity_risk else {}),
                     )
                     durable = DurableSessionLatch(
                         account_key=policy.account_key, trading_date=local_date,
@@ -537,6 +543,9 @@ class DurableIbkrAutonomousRiskPolicyCheck:
             or snapshot.peak_equity < floor
         ):
             raise _failure("ACTIVATION_RISK_EVIDENCE_CHANGED")
+        policy = self._dollar_policy()
+        if policy is not None and policy.daily_starting_equity_risk and not snapshot.daily_starting_equity_ready:
+            raise _failure("DAILY_STARTING_EQUITY_EVIDENCE_UNPROVEN")
         return snapshot.peak_equity
 
     def __call__(self, snapshot, plan, now) -> None:

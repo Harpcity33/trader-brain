@@ -9,6 +9,10 @@
     "approval_record_path": "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
     "approval_record_sha256": "d27a1cc0c79629292f1353652440c984d3c7d510bcf3e08c4c595f25da7f4aae"
   },
+  "owner_risk_policy_amendment": {
+    "amendment_path": "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
+    "amendment_sha256": "78571bb3f19157d5f2a8d81976ba7a4a4f0bdc782683b276130b59ca1627c2ad"
+  },
   "deployment": {
     "profile_id": "ibkr-local-live-ending-3103-v1",
     "install_subtree": "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
@@ -71,15 +75,18 @@
     "flat_deadline_minutes_before_close": 5
   },
   "risk": {
-    "model": "account_day_dollar_headroom",
-    "limits_path": "config/risk_limits_ibkr_dollar_headroom.json",
+    "model": "account_day_starting_equity_percentage",
+    "limits_path": "config/risk_limits_ibkr_daily_starting_equity.json",
     "limits_live_provenance_verified": false,
-    "limits_provenance_state": "retained_owner_approved_dollar_headroom_bound_to_2026-09-14_approval",
-    "daily_realized_loss_lock_dollars": "100.00",
-    "profit_goal_dollars": "150.00",
-    "post_goal_floor_dollars": "125.00",
+    "limits_provenance_state": "owner_approved_daily_starting_equity_amendment_bound_to_2026-09-14_artifact",
+    "daily_loss_fraction": "0.10",
+    "daily_profit_aspiration_fraction": "0.15",
+    "post_goal_floor": null,
     "positive_execution_reserve_required": true,
-    "loss_lock_is_irreversible_for_session": true
+    "loss_lock_is_irreversible_for_session": true,
+    "daily_loss_requires_guarded_closeout": true,
+    "authenticated_daily_starting_equity_required": true,
+    "authenticated_daily_external_cash_flow_required": true
   },
   "exits": {
     "target_exit_mode": "first_target_completed_minute_full_exit",
@@ -131,6 +138,7 @@
   },
   "execution": {
     "execution_authority_mode": "attended_only",
+    "ibkr_daily_risk_baseline_schema": "titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1",
     "order_ack_timeout_seconds": 10,
     "reconcile_interval_seconds": 2,
     "unknown_reconcile_interval_seconds": 1,
@@ -184,7 +192,7 @@
       "SUPPORTED_IBKR_TRANSPORT_NOT_SELECTED",
       "LOCAL_MUTATION_INTERLOCK_DISABLED",
       "SUPPORTED_LIVE_DISCOVERY_NOT_SELECTED",
-      "LIVE_DRAWDOWN_REVIEW_POLICY_UNVERIFIED",
+      "AUTHENTICATED_DAILY_STARTING_EQUITY_AND_CASH_FLOW_EVIDENCE_REQUIRED",
       "IBKR_ALL_CLIENT_EXECUTION_COVERAGE_UNVERIFIED",
       "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
       "IBKR_MANAGED_CONTROL_KEY_NOT_PROVISIONED",

@@ -33,6 +33,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 
 MANIFEST_SCHEMA = "titan_full_live_release_2026-09-14_v2"
@@ -57,7 +58,7 @@ _IBKR_SDK_RECEIPT_RELATIVE = Path("control/ibkr-sdk-attestation.json")
 _MAX_SDK_FILE_BYTES = 16 * 1024 * 1024
 _MAX_SDK_TOTAL_BYTES = 128 * 1024 * 1024
 _IBKR_RISK_LEDGER_APPLICATION_ID = 0x54495242
-_IBKR_RISK_LEDGER_SCHEMA_VERSION = 3
+_IBKR_RISK_LEDGER_SCHEMA_VERSION = 4
 _IBKR_RISK_LEDGER_RELATIVE = Path("state/ibkr-risk-high-water.sqlite3")
 _IBKR_RISK_LEDGER_ARCHIVE_RELATIVE = Path(
     "state/ibkr-risk-high-water-archive"
@@ -88,6 +89,11 @@ _IBKR_RISK_DAILY_COLUMNS = (
     "last_net_liquidation",
     "last_observed_at",
 )
+_IBKR_RISK_STARTING_COLUMNS = (
+    "trading_date", "starting_equity", "starting_equity_as_of",
+    "starting_equity_provider_receipt_sha256", "latest_external_cash_flow",
+    "latest_external_cash_flow_as_of", "latest_external_cash_flow_receipt_sha256",
+)
 _IBKR_RISK_CARRY_COLUMNS = (
     "singleton",
     "source_release_manifest_hash",
@@ -117,6 +123,7 @@ _FIXED_RELEASE_PATHS = frozenset(
         "validation/full-live/2026-09-08/OPERATIONS.md",
         "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
         "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+        "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
     }
 )
 _REQUIRED_RUNTIME_MODULES = frozenset(
@@ -820,6 +827,20 @@ def _verify_trusted_source_provenance(
                     or sha256_bytes(blobs[committed_release[relative][2]]) != digest
                 ):
                     raise InstallError("owner policy approval artifact binding is invalid")
+        amendment = config.get("owner_risk_policy_amendment")
+        if amendment is not None:
+            if not isinstance(amendment, dict):
+                raise InstallError("owner risk policy amendment must be an object")
+            relative = amendment.get("amendment_path")
+            digest = amendment.get("amendment_sha256")
+            if (
+                not isinstance(relative, str)
+                or relative not in _FIXED_RELEASE_PATHS
+                or relative not in committed_release
+                or not isinstance(digest, str)
+                or sha256_bytes(blobs[committed_release[relative][2]]) != digest
+            ):
+                raise InstallError("owner risk policy amendment artifact binding is invalid")
         risk_relative = str(config["risk"]["limits_path"])
         risk = json.loads(blobs[committed_release[risk_relative][2]])
         if not isinstance(risk, dict):
@@ -1895,9 +1916,9 @@ def _ibkr_risk_hash(value: object, field: str) -> str:
     return value
 
 
-def _ibkr_risk_decimal(value: object, field: str) -> Decimal:
+def _ibkr_risk_decimal(value: object, field: str, *, positive: bool = True) -> Decimal:
     if type(value) is not str or not re.fullmatch(
-        r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", value
+        r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", value
     ):
         raise InstallError(f"IBKR risk ledger {field} is invalid")
     try:
@@ -1908,7 +1929,7 @@ def _ibkr_risk_decimal(value: object, field: str) -> Decimal:
     if "." in normalized:
         normalized = normalized.rstrip("0").rstrip(".")
     normalized = "0" if parsed == 0 else normalized
-    if not parsed.is_finite() or parsed <= 0 or normalized != value:
+    if not parsed.is_finite() or (positive and parsed <= 0) or normalized != value:
         raise InstallError(f"IBKR risk ledger {field} is invalid")
     return parsed
 
@@ -2079,7 +2100,7 @@ def _validate_ibkr_risk_ledger_file(path: Path) -> os.stat_result:
 
 
 def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
-    """Validate a closed v1/v2/v3 ledger and return its conservative floor."""
+    """Validate a closed ledger, including frozen v4 day-start/flow history."""
 
     before = _validate_ibkr_risk_ledger_file(path)
     connection = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
@@ -2098,7 +2119,7 @@ def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
         ):
             raise InstallError("IBKR risk ledger application identity is invalid")
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version not in {1, 2, _IBKR_RISK_LEDGER_SCHEMA_VERSION}:
+        if version not in {1, 2, 3, _IBKR_RISK_LEDGER_SCHEMA_VERSION}:
             raise InstallError("IBKR risk ledger schema is unsupported")
         tables = {
             str(row[0])
@@ -2110,17 +2131,22 @@ def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
         expected_tables = {"binding", "daily_high_water"}
         if version >= 2:
             expected_tables.add("carry_forward")
+        if version >= 4:
+            expected_tables.add("daily_starting_equity")
         if tables != expected_tables:
             raise InstallError("IBKR risk ledger tables differ from its schema")
         if (
             _ibkr_risk_table_columns(connection, "binding")
             != (
                 _IBKR_RISK_BINDING_COLUMNS
-                if version == _IBKR_RISK_LEDGER_SCHEMA_VERSION
+                if version >= 3
                 else _IBKR_RISK_LEGACY_BINDING_COLUMNS
             )
             or _ibkr_risk_table_columns(connection, "daily_high_water")
             != _IBKR_RISK_DAILY_COLUMNS
+            or (
+                version >= 4 and _ibkr_risk_table_columns(connection, "daily_starting_equity") != _IBKR_RISK_STARTING_COLUMNS
+            )
             or (
                 version >= 2
                 and _ibkr_risk_table_columns(connection, "carry_forward")
@@ -2140,7 +2166,7 @@ def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
             "account_binding_fingerprint",
         ):
             _ibkr_risk_hash(binding.get(field), field)
-        if version == _IBKR_RISK_LEDGER_SCHEMA_VERSION:
+        if version >= 3:
             _ibkr_risk_hash(binding.get("lineage_hash"), "lineage hash")
         if (
             not re.fullmatch(r"ibkr-live-ending-[0-9]{4}", str(binding["account_key"]))
@@ -2165,7 +2191,7 @@ def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
             )
             peak = _ibkr_risk_decimal(row["peak_equity"], "daily peak")
             last = _ibkr_risk_decimal(
-                row["last_net_liquidation"], "last net liquidation"
+                row["last_net_liquidation"], "last net liquidation", positive=version < 4
             )
             _ibkr_risk_time(row["last_observed_at"], "last observed time")
             if peak < max(baseline_peak, last):
@@ -2239,11 +2265,31 @@ def _read_ibkr_risk_ledger(path: Path) -> dict[str, Any]:
         peak_candidates = [
             item for item in (current_peak, carried_peak) if item is not None
         ]
+        starting_rows = []
+        if version >= 4:
+            starting_rows = [dict(row) for row in connection.execute("SELECT * FROM daily_starting_equity ORDER BY trading_date").fetchall()]
+            for row in starting_rows:
+                day = _ibkr_risk_date(row["trading_date"], "day-start trading date")
+                _ibkr_risk_decimal(row["starting_equity"], "starting equity")
+                start = _ibkr_risk_time(row["starting_equity_as_of"], "starting equity as of")
+                flow_as_of = _ibkr_risk_time(row["latest_external_cash_flow_as_of"], "cash-flow as of")
+                _ibkr_risk_decimal(row["latest_external_cash_flow"], "cash flow", positive=False)
+                for key in ("starting_equity_provider_receipt_sha256", "latest_external_cash_flow_receipt_sha256"):
+                    _ibkr_risk_hash(row[key], key)
+                if (
+                    start != datetime.combine(day, datetime.min.time(), ZoneInfo("America/New_York"))
+                    or flow_as_of.astimezone(ZoneInfo("America/New_York")).date() != day
+                    or row["starting_equity_as_of"] != start.isoformat()
+                    or row["latest_external_cash_flow_as_of"] != flow_as_of.isoformat()
+                    or not latest_candidates or day > max(latest_candidates)
+                ):
+                    raise InstallError("IBKR frozen daily equity history is inconsistent")
         result = {
             "schema_version": version,
             "binding": binding,
             "latest_trading_date": max(latest_candidates) if latest_candidates else None,
             "highest_equity": max(peak_candidates) if peak_candidates else None,
+            "daily_starting_equity": starting_rows,
         }
     except sqlite3.Error as exc:
         raise InstallError(
@@ -2273,7 +2319,7 @@ def _create_ibkr_risk_ledger(
     archive_relative: str | None = None,
     migrated_at: datetime | None = None,
 ) -> str:
-    """Create one canonical v3 ledger with a fresh persistent lineage."""
+    """Create v4; carry authenticated fixed day-start and flow watermarks."""
 
     lineage_hash = os.urandom(32).hex()
     _ibkr_risk_hash(lineage_hash, "lineage hash")
@@ -2300,6 +2346,13 @@ def _create_ibkr_risk_ledger(
             "baseline_prior_high_water_equity TEXT NOT NULL,"
             "peak_equity TEXT NOT NULL,last_net_liquidation TEXT NOT NULL,"
             "last_observed_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE daily_starting_equity (trading_date TEXT PRIMARY KEY,"
+            "starting_equity TEXT NOT NULL,starting_equity_as_of TEXT NOT NULL,"
+            "starting_equity_provider_receipt_sha256 TEXT NOT NULL,"
+            "latest_external_cash_flow TEXT NOT NULL,latest_external_cash_flow_as_of TEXT NOT NULL,"
+            "latest_external_cash_flow_receipt_sha256 TEXT NOT NULL)"
         )
         connection.execute(
             "CREATE TABLE carry_forward ("
@@ -2353,6 +2406,15 @@ def _create_ibkr_risk_ledger(
                     archive_relative,
                     migrated_at.astimezone(timezone.utc).isoformat(),
                 ),
+            )
+        if source is not None:
+            # These are retained historical facts, never fresh flow authority.
+            # The runtime still requires a new release-bound receipt matching
+            # the exact current broker valuation before readiness is true.
+            connection.executemany(
+                "INSERT INTO daily_starting_equity VALUES (?,?,?,?,?,?,?)",
+                [tuple(row[key] for key in _IBKR_RISK_STARTING_COLUMNS)
+                 for row in source.get("daily_starting_equity", ())],
             )
         connection.execute(
             f"PRAGMA application_id={_IBKR_RISK_LEDGER_APPLICATION_ID}"
@@ -2538,6 +2600,7 @@ def _migrate_ibkr_risk_high_water_ledger(
             or staged["binding"].get("lineage_hash") != lineage_hash
             or staged["highest_equity"] != source["highest_equity"]
             or staged["latest_trading_date"] != source["latest_trading_date"]
+            or staged["daily_starting_equity"] != source.get("daily_starting_equity", [])
             or (
                 source["schema_version"] == _IBKR_RISK_LEDGER_SCHEMA_VERSION
                 and source_binding.get("lineage_hash") == lineage_hash

@@ -977,6 +977,7 @@ class LocalProviderAssembly:
                         key_item=baseline_key_item,
                         expected=binding_provider,
                         clock=IbkrPreflightClock(self._clock),
+                        required_schema=policy.daily_risk_baseline_schema,
                     )
                     # Baseline or ledger failure denies only entry-risk
                     # authority.  Keep the exact release-profiled wrapper and

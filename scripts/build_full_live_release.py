@@ -37,6 +37,7 @@ FIXED_RELEASE_PATHS = (
     "validation/full-live/2026-09-08/OPERATIONS.md",
     "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
     "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
 )
 
 
@@ -312,6 +313,20 @@ def build_manifest(
                 or sha256_bytes(payloads[relative]) != digest
             ):
                 raise ValueError("owner policy approval artifact binding is invalid")
+    amendment = config.get("owner_risk_policy_amendment")
+    if amendment is not None:
+        if not isinstance(amendment, dict):
+            raise ValueError("owner risk policy amendment must be an object")
+        relative = amendment.get("amendment_path")
+        digest = amendment.get("amendment_sha256")
+        if (
+            not isinstance(relative, str)
+            or relative not in FIXED_RELEASE_PATHS
+            or relative not in payloads
+            or not isinstance(digest, str)
+            or sha256_bytes(payloads[relative]) != digest
+        ):
+            raise ValueError("owner risk policy amendment artifact binding is invalid")
     risk_relative = str(config["risk"]["limits_path"])
     if risk_relative not in payloads:
         raise ValueError("configured risk limits file is not in the committed release")

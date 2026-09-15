@@ -14,6 +14,13 @@ an account high-water equity value to an immutable upstream receipt hash.
 This module only authenticates and consumes that input; it never creates or
 fetches the upstream baseline.
 
+The distinct daily-starting-equity schema additionally authenticates the
+00:00 America/New_York balance and cumulative external cash flows for an exact
+current valuation.  Current flows expire after five seconds and never default
+to zero.  The v4 ledger preserves the fixed baseline and flow watermark across
+restart and installer-controlled release rebinding; retained historical flow
+rows never become fresh authority by themselves.
+
 The account-snapshot wrapper adds the freshly collected TWS current-day value
 to the authenticated prior-day value.  A separate, identity-bound SQLite
 ledger retains the maximum observed NetLiquidation so peak equity cannot
@@ -41,15 +48,16 @@ from typing import Callable, Mapping, Protocol
 from ..calendar import ExchangeCalendar, NEW_YORK
 from ..policy import IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH, canonical_json
 from ..provider_clients import KeychainItem
-from ..risk_evidence_binding import risk_high_water_receipt_hash
+from ..risk_evidence_binding import risk_high_water_receipt_hash, daily_starting_equity_receipt_hash
 from .base import AccountSnapshot, OrderCoverageContract
 
 
 IBKR_DAILY_RISK_BASELINE_SCHEMA = (
     "titan_ibkr_daily_risk_baseline_2026-09-14_v1"
 )
+IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA = "titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1"
 _APPLICATION_ID = 0x54495242  # TIRB: Titan IBKR risk baseline ledger.
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MAX_BASELINE_BYTES = 64 * 1024
 _CLOCK_SKEW = timedelta(seconds=2)
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -88,6 +96,16 @@ _EVIDENCE_FIELDS = frozenset(
         "provider_receipt_sha256",
     }
 )
+_DAILY_EQUITY_FIELDS = frozenset({
+    "daily_starting_equity", "daily_starting_equity_as_of",
+    "daily_starting_equity_provider_receipt_sha256", "daily_external_cash_flow",
+    "daily_external_cash_flow_as_of", "daily_external_cash_flow_provider_receipt_sha256",
+    "valuation_total_equity", "valuation_observed_at",
+})
+_FLOW_FIELDS = frozenset({
+    "daily_external_cash_flow", "daily_external_cash_flow_as_of",
+    "daily_external_cash_flow_provider_receipt_sha256", "valuation_total_equity", "valuation_observed_at",
+})
 
 
 class IbkrRiskEvidenceError(RuntimeError):
@@ -353,6 +371,14 @@ class VerifiedIbkrDailyRiskBaseline:
     provider_receipt_sha256: str
     receipt_hash: str
     verified_at: datetime
+    daily_starting_equity: Decimal | None = None
+    daily_starting_equity_as_of: datetime | None = None
+    daily_starting_equity_provider_receipt_sha256: str | None = None
+    daily_external_cash_flow: Decimal | None = None
+    daily_external_cash_flow_as_of: datetime | None = None
+    daily_external_cash_flow_receipt_hash: str | None = None
+    valuation_total_equity: Decimal | None = None
+    valuation_observed_at: datetime | None = None
     _verification_seal: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -431,6 +457,7 @@ def load_verified_ibkr_daily_risk_baseline(
     secret: bytes,
     expected: IbkrRiskEvidenceBindings,
     now: datetime,
+    required_schema: str | None = None,
 ) -> VerifiedIbkrDailyRiskBaseline:
     """Authenticate one externally produced baseline; never generate it."""
 
@@ -438,6 +465,8 @@ def load_verified_ibkr_daily_risk_baseline(
         raise _failure("HMAC_KEY_INVALID")
     if type(expected) is not IbkrRiskEvidenceBindings:
         raise _failure("EXPECTED_BINDINGS_INVALID")
+    if required_schema not in {None, IBKR_DAILY_RISK_BASELINE_SCHEMA, IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA}:
+        raise _failure("REQUIRED_SCHEMA_INVALID")
     verified_at = _now(now)
     encoded = _read_canonical_private_baseline(path)
     try:
@@ -446,8 +475,11 @@ def load_verified_ibkr_daily_risk_baseline(
         raise _failure("BASELINE_JSON_INVALID") from None
     if type(raw) is not dict or set(raw) != _TOP_LEVEL_FIELDS:
         raise _failure("BASELINE_FIELDS_INVALID")
-    if raw.get("schema_version") != IBKR_DAILY_RISK_BASELINE_SCHEMA:
+    starting_equity_schema = raw.get("schema_version") == IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA
+    if raw.get("schema_version") not in {IBKR_DAILY_RISK_BASELINE_SCHEMA, IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA}:
         raise _failure("BASELINE_SCHEMA_INVALID")
+    if required_schema is not None and raw["schema_version"] != required_schema:
+        raise _failure("BASELINE_SCHEMA_BINDING_MISMATCH")
     canonical = (canonical_json(raw) + "\n").encode("utf-8")
     if encoded != canonical:
         raise _failure("BASELINE_FILE_NOT_CANONICAL")
@@ -485,7 +517,7 @@ def load_verified_ibkr_daily_risk_baseline(
     if verified_at.astimezone(NEW_YORK).date() != expected.valid_for_trading_date:
         raise _failure("TRADING_DATE_MISMATCH")
 
-    evidence = _mapping(raw["evidence"], _EVIDENCE_FIELDS, "evidence")
+    evidence = _mapping(raw["evidence"], _EVIDENCE_FIELDS | (_DAILY_EQUITY_FIELDS if starting_equity_schema else frozenset()), "evidence")
     if evidence["currency"] != "USD":
         raise _failure("CURRENCY_UNSUPPORTED")
     if evidence["broker_authoritative"] is not True:
@@ -525,9 +557,39 @@ def load_verified_ibkr_daily_risk_baseline(
         "prior_high_water_equity",
         positive=True,
     )
-    receipt_hash = hashlib.sha256(
+    envelope_hash = hashlib.sha256(
         canonical_json(body).encode("utf-8")
     ).hexdigest()
+    daily = {}
+    receipt_hash = envelope_hash
+    if starting_equity_schema:
+        starting_as_of = _time(evidence["daily_starting_equity_as_of"], "daily_starting_equity_as_of")
+        expected_start = datetime.combine(expected.valid_for_trading_date, datetime.min.time(), NEW_YORK)
+        flow_as_of = _time(evidence["daily_external_cash_flow_as_of"], "daily_external_cash_flow_as_of")
+        valuation_as_of = _time(evidence["valuation_observed_at"], "valuation_observed_at")
+        if (
+            starting_as_of != expected_start
+            or flow_as_of != valuation_as_of
+            or flow_as_of.astimezone(NEW_YORK).date() != expected.valid_for_trading_date
+            or not timedelta(0) <= verified_at - flow_as_of <= timedelta(seconds=5)
+            or issued_at < flow_as_of or issued_at > verified_at
+        ):
+            raise _failure("DAILY_STARTING_EQUITY_TIME_UNPROVEN")
+        daily = {
+            "daily_starting_equity": _decimal(evidence["daily_starting_equity"], "daily_starting_equity", positive=True),
+            "daily_starting_equity_as_of": starting_as_of,
+            "daily_starting_equity_provider_receipt_sha256": _hash(evidence["daily_starting_equity_provider_receipt_sha256"], "starting_equity_provider_receipt"),
+            "daily_external_cash_flow": _decimal(evidence["daily_external_cash_flow"], "daily_external_cash_flow"),
+            "daily_external_cash_flow_as_of": flow_as_of,
+            "daily_external_cash_flow_receipt_hash": envelope_hash,
+            "valuation_total_equity": _decimal(evidence["valuation_total_equity"], "valuation_total_equity"),
+            "valuation_observed_at": valuation_as_of,
+        }
+        _hash(evidence["daily_external_cash_flow_provider_receipt_sha256"], "cash_flow_provider_receipt")
+        # Rotating current-flow evidence must not rotate the frozen baseline.
+        immutable_body = {"schema_version": body["schema_version"], "bindings": body["bindings"],
+                          "evidence": {key: value for key, value in evidence.items() if key not in _FLOW_FIELDS}}
+        receipt_hash = hashlib.sha256(canonical_json(immutable_body).encode("utf-8")).hexdigest()
     return VerifiedIbkrDailyRiskBaseline(
         bindings=observed,
         issued_at=issued_at,
@@ -540,6 +602,7 @@ def load_verified_ibkr_daily_risk_baseline(
         receipt_hash=receipt_hash,
         verified_at=verified_at,
         _verification_seal=_VERIFIED_BASELINE_SEAL,
+        **daily,
     )
 
 
@@ -554,6 +617,7 @@ class DailyIbkrRiskBaselineAuthenticator:
         key_item: KeychainItem,
         expected: IbkrRiskEvidenceBindings | IbkrDailyRiskBindingProvider,
         clock: Callable[[], datetime],
+        required_schema: str | None = None,
     ) -> None:
         if not callable(getattr(key_reader, "read", None)):
             raise _failure("KEY_READER_INVALID")
@@ -566,11 +630,14 @@ class DailyIbkrRiskBaselineAuthenticator:
             raise _failure("EXPECTED_BINDINGS_INVALID")
         if not callable(clock):
             raise _failure("CLOCK_INVALID")
+        if required_schema not in {None, IBKR_DAILY_RISK_BASELINE_SCHEMA, IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA}:
+            raise _failure("REQUIRED_SCHEMA_INVALID")
         self.path = Path(path)
         self.key_reader = key_reader
         self.key_item = key_item
         self.expected = expected
         self._clock = clock
+        self.required_schema = required_schema
 
     def release_components(self) -> tuple[tuple[str, object, tuple[str, ...]], ...]:
         result: tuple[tuple[str, object, tuple[str, ...]], ...] = (
@@ -613,6 +680,7 @@ class DailyIbkrRiskBaselineAuthenticator:
                 secret=secret,
                 expected=expected,
                 now=current,
+                required_schema=self.required_schema,
             )
         except IbkrRiskEvidenceError:
             raise
@@ -711,7 +779,7 @@ class IbkrRiskHighWaterLedger:
 
     A release upgrade never rewrites that identity in place.  The PAUSED
     installer archives the prior release-scoped ledger and creates a new one
-    with one immutable ``carry_forward`` row.  That row is an equity floor,
+    with one immutable ``carry_forward`` row and retained daily-start rows.  The carry row is an equity floor,
     not a synthetic daily observation: it lets a same-session upgrade retain
     today's intraday peak while the new release authenticates its own daily
     baseline receipt.
@@ -931,6 +999,13 @@ class IbkrRiskHighWaterLedger:
                 "last_observed_at TEXT NOT NULL)"
             )
             self._db.execute(
+                "CREATE TABLE daily_starting_equity (trading_date TEXT PRIMARY KEY,"
+                "starting_equity TEXT NOT NULL,starting_equity_as_of TEXT NOT NULL,"
+                "starting_equity_provider_receipt_sha256 TEXT NOT NULL,"
+                "latest_external_cash_flow TEXT NOT NULL,latest_external_cash_flow_as_of TEXT NOT NULL,"
+                "latest_external_cash_flow_receipt_sha256 TEXT NOT NULL)"
+            )
+            self._db.execute(
                 "CREATE TABLE carry_forward ("
                 "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
                 "source_release_manifest_hash TEXT NOT NULL,"
@@ -1066,7 +1141,7 @@ class IbkrRiskHighWaterLedger:
         if (
             isinstance(net_liquidation, (float, bool))
             or not current.is_finite()
-            or current <= 0
+            or (baseline.daily_starting_equity is None and current <= 0)
         ):
             raise _failure("NET_LIQUIDATION_INVALID")
         stamp = _now(observed_at)
@@ -1079,6 +1154,7 @@ class IbkrRiskHighWaterLedger:
                 if self._closed:
                     raise _failure("LEDGER_CLOSED")
                 self._db.execute("BEGIN IMMEDIATE")
+                self._observe_daily_starting_equity(baseline)
                 identity = self._db.execute(
                     "SELECT latest_trading_date,highest_equity FROM binding "
                     "WHERE singleton=1"
@@ -1253,6 +1329,42 @@ class IbkrRiskHighWaterLedger:
             ),
         )
 
+    def _observe_daily_starting_equity(self, baseline: VerifiedIbkrDailyRiskBaseline) -> None:
+        """Retain fixed day-start and flow watermarks, never derive from NLV."""
+        if baseline.daily_starting_equity is None:
+            return
+        target = baseline.bindings.valid_for_trading_date.isoformat()
+        row = self._db.execute("SELECT * FROM daily_starting_equity WHERE trading_date=?", (target,)).fetchone()
+        fixed = (
+            _decimal_text(baseline.daily_starting_equity),
+            baseline.daily_starting_equity_as_of.isoformat(),
+            baseline.daily_starting_equity_provider_receipt_sha256,
+        )
+        flow = (
+            _decimal_text(baseline.daily_external_cash_flow),
+            baseline.daily_external_cash_flow_as_of.isoformat(),
+            baseline.daily_external_cash_flow_receipt_hash,
+        )
+        if row is None:
+            latest = self._db.execute("SELECT MAX(trading_date) FROM daily_starting_equity").fetchone()[0]
+            if latest is not None and target < latest:
+                raise _failure("DAILY_STARTING_EQUITY_DATE_REGRESSION")
+            self._db.execute("INSERT INTO daily_starting_equity VALUES (?,?,?,?,?,?,?)", (target, *fixed, *flow))
+            return
+        if tuple(row[key] for key in ("starting_equity", "starting_equity_as_of", "starting_equity_provider_receipt_sha256")) != fixed:
+            raise _failure("DAILY_STARTING_EQUITY_CHANGED")
+        prior_as_of = _time(row["latest_external_cash_flow_as_of"], "prior_cash_flow_as_of")
+        if baseline.daily_external_cash_flow_as_of < prior_as_of:
+            raise _failure("CASH_FLOW_EVIDENCE_REGRESSION")
+        if baseline.daily_external_cash_flow_as_of == prior_as_of and tuple(row[key] for key in (
+            "latest_external_cash_flow", "latest_external_cash_flow_as_of", "latest_external_cash_flow_receipt_sha256"
+        )) != flow:
+            raise _failure("CASH_FLOW_EVIDENCE_EQUIVOCATION")
+        self._db.execute(
+            "UPDATE daily_starting_equity SET latest_external_cash_flow=?,latest_external_cash_flow_as_of=?,"
+            "latest_external_cash_flow_receipt_sha256=? WHERE trading_date=?", (*flow, target),
+        )
+
 
 class IbkrRiskEvidenceEnricher:
     """Apply authenticated daily risk evidence to any fresh TWS snapshot.
@@ -1327,6 +1439,9 @@ class IbkrRiskEvidenceEnricher:
             or raw.weekly_realized_pnl_complete
             or raw.peak_equity is not None
             or raw.peak_equity_complete
+            or raw.daily_starting_equity is not None
+            or raw.daily_external_cash_flow is not None
+            or raw.daily_starting_equity_receipt_hash is not None
         ):
             raise _failure("RAW_SNAPSHOT_ALREADY_ENRICHED")
         if (
@@ -1356,6 +1471,31 @@ class IbkrRiskEvidenceEnricher:
             baseline.week_to_date_realized_pnl_through_prior_trading_day
             + raw.daily_realized_pnl
         )
+        daily_fields = {}
+        if baseline.daily_starting_equity is not None:
+            if (
+                baseline.valuation_total_equity != raw.funds.total_value
+                or baseline.valuation_observed_at != raw.observed_at
+                or baseline.daily_external_cash_flow_as_of != raw.observed_at
+                or raw.received_at - raw.observed_at > self._snapshot_max_age
+            ):
+                raise _failure("CASH_FLOW_VALUATION_BINDING_MISMATCH")
+            daily_fields = {
+                "daily_starting_equity": baseline.daily_starting_equity,
+                "daily_external_cash_flow": baseline.daily_external_cash_flow,
+                "daily_starting_equity_as_of": baseline.daily_starting_equity_as_of,
+                "daily_external_cash_flow_as_of": baseline.daily_external_cash_flow_as_of,
+                "daily_external_cash_flow_receipt_hash": baseline.daily_external_cash_flow_receipt_hash,
+                "daily_starting_equity_receipt_hash": daily_starting_equity_receipt_hash(
+                    baseline_receipt_hash=baseline.receipt_hash,
+                    cash_flow_receipt_hash=baseline.daily_external_cash_flow_receipt_hash,
+                    starting_equity=baseline.daily_starting_equity,
+                    external_cash_flow=baseline.daily_external_cash_flow,
+                    starting_equity_as_of=baseline.daily_starting_equity_as_of,
+                    cash_flow_as_of=baseline.daily_external_cash_flow_as_of,
+                    total_equity=raw.funds.total_value,
+                ),
+            }
         record = self._high_water_ledger.observe(
             baseline=baseline,
             net_liquidation=raw.funds.total_value,
@@ -1383,6 +1523,7 @@ class IbkrRiskEvidenceEnricher:
                 risk_high_water_identity_hash=record.identity_hash,
                 risk_high_water_lineage_hash=record.lineage_hash,
                 risk_high_water_receipt_hash=record.receipt_hash,
+                **daily_fields,
             )
         except Exception:
             raise _failure("SNAPSHOT_ENRICHMENT_FAILED") from None
@@ -1470,12 +1611,19 @@ class IbkrRiskEvidenceAccountSnapshotReader:
                 risk_high_water_identity_hash=None,
                 risk_high_water_lineage_hash=None,
                 risk_high_water_receipt_hash=None,
+                daily_starting_equity=None,
+                daily_external_cash_flow=None,
+                daily_starting_equity_as_of=None,
+                daily_external_cash_flow_as_of=None,
+                daily_external_cash_flow_receipt_hash=None,
+                daily_starting_equity_receipt_hash=None,
             )
 
 
 __all__ = [
     "DailyIbkrRiskBaselineAuthenticator",
     "IBKR_DAILY_RISK_BASELINE_SCHEMA",
+    "IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA",
     "IbkrDailyRiskBindingProvider",
     "IbkrRiskEvidenceAccountSnapshotReader",
     "IbkrRiskEvidenceBindings",

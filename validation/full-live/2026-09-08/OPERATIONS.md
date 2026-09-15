@@ -28,6 +28,54 @@ account settings are verified, exhaustive reads pass, and every
 release-bound authority and notification receipt exists. Those evidence gates
 cannot be waived with a confirmation phrase or cleared by editing booleans.
 
+## Current IBKR daily policy — September 14 amendment
+
+The owner-approved `account_day_starting_equity_percentage` model replaces the
+previous IBKR −$100 loss lock, +$150 aspiration, and +$125 post-goal floor. The
+immutable original approval remains in the release, together with the
+hash-bound September 14 daily-starting-equity amendment. The Robinhood legacy
+policy and legacy regression fixtures are not silently rewritten.
+
+For each America/New_York account day, authenticate and freeze account equity
+(IBKR NetLiquidation, not buying power or cash alone) effective at 00:00.
+Daily performance is current total equity minus net external deposits and
+withdrawals minus that fixed starting equity. This includes unrealized P&L
+and incurred fees through account equity. The +15% target is aspirational,
+not a forced trade, mandatory exit, profit ceiling, or guaranteed result.
+At or below −10%, persist the irreversible account-day entry lock and route
+through guarded closeout. Gaps, slippage, illiquidity, halts, missing approvals,
+or broker failures can produce a larger actual loss.
+
+The new baseline schema is
+`titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1`.
+The authenticated external-cash-flow receipt must match the exact current
+account valuation and timestamp, with at most five seconds of age. A current
+balance must never be substituted for missing midnight equity; zero cash flow
+must never be assumed. Legacy realized-P&L baseline receipts cannot authorize
+the new model. The local HMAC verification and receipt binding are built, but
+an authentic provider-backed baseline/flow issuer must still be provisioned.
+Schema-v4 risk-ledger migration retains the frozen baseline, flow watermark,
+and prior irreversible risk observations across restart and PAUSED upgrades;
+copying evidence does not refresh its age.
+
+Remaining entry capacity is the lesser of the original 10% starting-equity
+budget and that budget plus adjusted daily performance. Pending reservations,
+candidate stop-defined downside, execution reserves, and lifecycle fee
+reserves consume it. Profits do not automatically increase the original daily
+budget. Current open-position mark-to-stop remaining risk is not yet proved
+by the connected position reader. Therefore additional entries fail closed
+with `DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED` while any open/manual
+exposure or unreleased filled reservation remains, even if its original stop
+is working. Reconciliation, protection, and exits remain available through
+their existing guarded paths. Do not delete reservations to evade this gate.
+
+Premarket stays analysis-only (07:00–09:00 every 30 minutes); regular-session
+heartbeats remain every minute from 09:30 through 15:59. Entry begins no
+earlier than 09:35 and stops at 15:30. The whole-share, long-equity, no-borrow,
+no-options, no-add/reentry, no-overnight, fee, quote/depth, broker-control, and
+release-bound activation requirements remain unchanged. Updating the policy
+or heartbeat does not start the autonomous service or authorize an order.
+
 ## Deterministic build
 
 From a clean, reviewed repository checkout, record the exact `HEAD` commit and

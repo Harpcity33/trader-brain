@@ -32,11 +32,15 @@ _IBKR_AUTONOMOUS_POLICY_RECEIPT_SCHEMA = (
 _IBKR_DAILY_RISK_BASELINE_SCHEMA = (
     "titan_ibkr_daily_risk_baseline_2026-09-14_v1"
 )
+_IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA = (
+    "titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1"
+)
 IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH = Path(
     "state/ibkr-risk-high-water.sqlite3"
 )
 _NONSECRET_LOCATOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{2,127}\Z")
 DOLLAR_HEADROOM_MODEL = "account_day_dollar_headroom"
+DAILY_STARTING_EQUITY_MODEL = "account_day_starting_equity_percentage"
 _DOLLAR_POLICY_APPROVAL = {
     "proposal_path": "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
     "proposal_sha256": "cc9de013e880864b8d7400837a71c8742b3116a2fe7269f252cfc88bd50617cf",
@@ -58,6 +62,49 @@ _DOLLAR_RISK_CONTRACT = {
     "loss_lock_is_irreversible_for_session": True,
     "live_drawdown_review_policy": "unverified_existing_rule_no_percentage_assumed",
     "owner_approval": _DOLLAR_POLICY_APPROVAL,
+}
+_DAILY_STARTING_EQUITY_AMENDMENT = {
+    "amendment_path": "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
+    "amendment_sha256": "78571bb3f19157d5f2a8d81976ba7a4a4f0bdc782683b276130b59ca1627c2ad",
+}
+_DAILY_STARTING_EQUITY_RISK_CONTRACT = {
+    "schema_version": "titan_account_day_starting_equity_percentage_2026-09-14_v1",
+    "model": DAILY_STARTING_EQUITY_MODEL,
+    "currency": "USD",
+    "daily_loss_fraction": "0.10",
+    "daily_profit_aspiration_fraction": "0.15",
+    "post_goal_floor": None,
+    "capacity_basis": "authenticated_fixed_account_day_starting_total_equity",
+    "daily_start_time": "00:00",
+    "daily_start_timezone": "America/New_York",
+    "daily_performance_basis": "current_total_equity_minus_external_net_cash_flow_minus_daily_starting_equity",
+    "daily_loss_action": "irreversible_entry_lock_and_guarded_closeout",
+    "profit_goal_action": "aspirational_only_no_forced_trade_or_profit_floor",
+    "maximum_entry_risk_capacity": "min_daily_loss_budget_and_remaining_adjusted_equity_headroom",
+    "includes_open_pnl": True,
+    "includes_incurred_fees": True,
+    "authenticated_daily_starting_equity_required": True,
+    "authenticated_daily_external_cash_flow_required": True,
+    "intraday_baseline_reset_allowed": False,
+    "all_open_pending_uncovered_unresolved_downside_required": True,
+    "positive_execution_reserve_required": True,
+    "commission_reserve_required": True,
+    "unleveraged_cash_and_buying_power_required": True,
+    "loss_lock_is_irreversible_for_session": True,
+    "owner_approval": _DOLLAR_POLICY_APPROVAL,
+    "owner_risk_amendment": _DAILY_STARTING_EQUITY_AMENDMENT,
+}
+_DAILY_STARTING_EQUITY_CONFIG_CONTRACT = {
+    "model": DAILY_STARTING_EQUITY_MODEL,
+    "limits_path": "config/risk_limits_ibkr_daily_starting_equity.json",
+    "daily_loss_fraction": "0.10",
+    "daily_profit_aspiration_fraction": "0.15",
+    "post_goal_floor": None,
+    "positive_execution_reserve_required": True,
+    "loss_lock_is_irreversible_for_session": True,
+    "daily_loss_requires_guarded_closeout": True,
+    "authenticated_daily_starting_equity_required": True,
+    "authenticated_daily_external_cash_flow_required": True,
 }
 
 
@@ -166,8 +213,8 @@ class PolicyBundle:
 
     @property
     def risk_limits(self) -> RiskLimits:
-        if self.dollar_headroom_risk:
-            raise ValueError("dollar-headroom policy has no percentage limits")
+        if self.account_day_headroom_risk:
+            raise ValueError("account-day headroom policy has no legacy percentage limits")
         return RiskLimits.from_mapping(self.risk_raw)
 
     @property
@@ -175,8 +222,35 @@ class PolicyBundle:
         return self.config["risk"].get("model") == DOLLAR_HEADROOM_MODEL
 
     @property
+    def daily_starting_equity_risk(self) -> bool:
+        return self.config["risk"].get("model") == DAILY_STARTING_EQUITY_MODEL
+
+    @property
+    def account_day_headroom_risk(self) -> bool:
+        return self.dollar_headroom_risk or self.daily_starting_equity_risk
+
+    @property
+    def daily_risk_baseline_schema(self) -> str:
+        return (
+            _IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA
+            if self.daily_starting_equity_risk
+            else _IBKR_DAILY_RISK_BASELINE_SCHEMA
+        )
+
+    def _daily_starting_equity_config_matches(self) -> bool:
+        risk = self.config["risk"]
+        metadata_fields = {"limits_live_provenance_verified", "limits_provenance_state"}
+        return (
+            set(risk) == set(_DAILY_STARTING_EQUITY_CONFIG_CONTRACT) | metadata_fields
+            and all(
+                canonical_json(risk.get(field)) == canonical_json(value)
+                for field, value in _DAILY_STARTING_EQUITY_CONFIG_CONTRACT.items()
+            )
+        )
+
+    @property
     def risk_provenance_verified(self) -> bool:
-        """Recognize the exact approved dollar contract, not a new approval flag.
+        """Recognize exact approved risk contracts, never an approval boolean.
 
         The release builder and manifest verifier bind the referenced original
         approval bytes. This check also binds the executable risk semantics to
@@ -184,22 +258,44 @@ class PolicyBundle:
         receipts remain independently mandatory.
         """
 
-        if not self.dollar_headroom_risk:
+        if not self.account_day_headroom_risk:
             return self.config["risk"].get("limits_live_provenance_verified") is True
         approval = self.config.get("owner_policy_approval")
+        contract = (
+            _DAILY_STARTING_EQUITY_RISK_CONTRACT
+            if self.daily_starting_equity_risk
+            else _DOLLAR_RISK_CONTRACT
+        )
         if not (
-            canonical_json(self.risk_raw) == canonical_json(_DOLLAR_RISK_CONTRACT)
+            canonical_json(self.risk_raw) == canonical_json(contract)
             and isinstance(approval, Mapping)
             and all(approval.get(k) == v for k, v in _DOLLAR_POLICY_APPROVAL.items())
             and self.account_key == "ibkr-live-ending-3103"
         ):
             return False
+        if self.daily_starting_equity_risk:
+            amendment = self.config.get("owner_risk_policy_amendment")
+            if (
+                not self._daily_starting_equity_config_matches()
+                or not isinstance(amendment, Mapping)
+                or any(
+                    amendment.get(key) != value
+                    for key, value in _DAILY_STARTING_EQUITY_AMENDMENT.items()
+                )
+            ):
+                return False
         try:
-            return all(
+            original_verified = all(
                 hashlib.sha256(
                     (self.root / _DOLLAR_POLICY_APPROVAL[f"{name}_path"]).read_bytes()
                 ).hexdigest() == _DOLLAR_POLICY_APPROVAL[f"{name}_sha256"]
                 for name in ("proposal", "approval_record")
+            )
+            return original_verified and (
+                not self.daily_starting_equity_risk
+                or hashlib.sha256(
+                    (self.root / _DAILY_STARTING_EQUITY_AMENDMENT["amendment_path"]).read_bytes()
+                ).hexdigest() == _DAILY_STARTING_EQUITY_AMENDMENT["amendment_sha256"]
             )
         except OSError:
             return False
@@ -408,12 +504,16 @@ class PolicyBundle:
                         "full-live target exit contract is incomplete or changed"
                     )
         risk = self.config["risk"]
-        if decimal_value(risk["daily_realized_loss_lock_dollars"], "daily_lock") != Decimal("100.00"):
-            raise ValueError("daily dollar lock changed")
-        if decimal_value(risk["profit_goal_dollars"], "profit_goal") != Decimal("150.00"):
-            raise ValueError("profit goal changed")
-        if decimal_value(risk["post_goal_floor_dollars"], "post_goal_floor") != Decimal("125.00"):
-            raise ValueError("post-goal floor changed")
+        if self.daily_starting_equity_risk:
+            if not self._daily_starting_equity_config_matches():
+                raise ValueError("daily starting-equity risk configuration differs from the approved amendment")
+        else:
+            if decimal_value(risk["daily_realized_loss_lock_dollars"], "daily_lock") != Decimal("100.00"):
+                raise ValueError("daily dollar lock changed")
+            if decimal_value(risk["profit_goal_dollars"], "profit_goal") != Decimal("150.00"):
+                raise ValueError("profit goal changed")
+            if decimal_value(risk["post_goal_floor_dollars"], "post_goal_floor") != Decimal("125.00"):
+                raise ValueError("post-goal floor changed")
         if not isinstance(risk.get("limits_live_provenance_verified"), bool):
             raise ValueError("risk-policy provenance gate must be boolean")
         notifications = self.config["notifications"]
@@ -719,7 +819,7 @@ class PolicyBundle:
                     )
                 if (
                     execution.get("ibkr_daily_risk_baseline_schema")
-                    != _IBKR_DAILY_RISK_BASELINE_SCHEMA
+                    != self.daily_risk_baseline_schema
                 ):
                     raise ValueError(
                         "IBKR unattended daily risk baseline schema is missing or invalid"
@@ -958,20 +1058,20 @@ class PolicyBundle:
         # Separate schemas prevent staged percentages from becoming hidden
         # dollar-mode limits, or a config boolean from approving altered risk.
         risk_model = risk.get("model", "percentage_overlay")
-        if risk_model == DOLLAR_HEADROOM_MODEL:
+        if risk_model in {DOLLAR_HEADROOM_MODEL, DAILY_STARTING_EQUITY_MODEL}:
             if not self.risk_provenance_verified:
-                raise ValueError("dollar-headroom risk must match the exact approved contract")
+                raise ValueError("account-day risk provenance must match the exact approved contract")
             if (
                 risk.get("positive_execution_reserve_required") is not True
                 or risk.get("loss_lock_is_irreversible_for_session") is not True
             ):
-                raise ValueError("dollar-headroom reserve and irreversible loss lock are mandatory")
+                raise ValueError("account-day reserve and irreversible loss lock are mandatory")
             for field, minimum in (
                 ("minimum_commission_reserve_per_order_dollars", Decimal("1")),
                 ("minimum_entry_lifecycle_fee_reserve_dollars", Decimal("2")),
             ):
                 if decimal_value(execution.get(field), field) < minimum:
-                    raise ValueError("dollar-headroom commission reserve is below the approved minimum")
+                    raise ValueError("account-day commission reserve is below the approved minimum")
         elif risk_model == "percentage_overlay":
             self.risk_limits
         else:

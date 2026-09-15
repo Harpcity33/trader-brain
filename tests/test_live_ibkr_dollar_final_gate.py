@@ -28,6 +28,7 @@ from titan_brain.live.writer_lock import AccountWriterLock
 from tests.test_live_ibkr_instrument_preflight import NOW, FakeContractRequester, snapshot as raw_snapshot
 from tests.test_live_ibkr_autonomous_interlock import autonomous_policy, ACCOUNT_BINDING, AUTHORIZATION_BINDING, PROVIDER_CONTRACT, TRANSPORT, CLIENT_ID
 from tests.live_activation_support import activate_canonical_runtime
+from tests.live_dollar_policy_support import legacy_dollar_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class DollarFinalGateTests(unittest.TestCase):
     def setUp(self):
-        self.policy = getattr(self, "policy", None) or PolicyBundle.load(ROOT, config_relative="config/full_live_ibkr.json")
+        self.policy = getattr(self, "policy", None) or legacy_dollar_policy(ROOT)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name) / "state.sqlite3"
@@ -198,7 +199,7 @@ class DollarObservationPersistenceTests(unittest.TestCase):
     prepare = DollarFinalGateTests.prepare
 
     def setUp(self):
-        self.policy = autonomous_policy()
+        self.policy = getattr(self, "policy", None) or autonomous_policy(base_policy=legacy_dollar_policy(ROOT))
         DollarFinalGateTests.setUp(self)
         self.path = self.path.resolve()
         self.lock = AccountWriterLock(

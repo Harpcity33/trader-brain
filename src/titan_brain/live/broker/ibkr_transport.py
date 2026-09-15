@@ -773,6 +773,12 @@ class IbkrProductionTransport:
                     risk_high_water_identity_hash=None,
                     risk_high_water_lineage_hash=None,
                     risk_high_water_receipt_hash=None,
+                    daily_starting_equity=None,
+                    daily_external_cash_flow=None,
+                    daily_starting_equity_as_of=None,
+                    daily_external_cash_flow_as_of=None,
+                    daily_external_cash_flow_receipt_hash=None,
+                    daily_starting_equity_receipt_hash=None,
                 )
             else:
                 if (

@@ -18,7 +18,7 @@ from uuid import UUID
 
 from ..models import BrokerOrderState
 from ..money import finite_decimal, positive_decimal, whole_shares
-from ..risk_evidence_binding import risk_high_water_receipt_hash
+from ..risk_evidence_binding import risk_high_water_receipt_hash, daily_starting_equity_receipt_hash
 
 
 _ACCOUNT_MASK = re.compile(r"^(?:•{4}|\*{4})[0-9]{4}$")
@@ -616,6 +616,12 @@ class AccountSnapshot:
     risk_high_water_identity_hash: str | None = None
     risk_high_water_lineage_hash: str | None = None
     risk_high_water_receipt_hash: str | None = None
+    daily_starting_equity: Decimal | None = None
+    daily_external_cash_flow: Decimal | None = None
+    daily_starting_equity_as_of: datetime | None = None
+    daily_external_cash_flow_as_of: datetime | None = None
+    daily_external_cash_flow_receipt_hash: str | None = None
+    daily_starting_equity_receipt_hash: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "account_masked", _account_mask(self.account_masked))
@@ -659,12 +665,17 @@ class AccountSnapshot:
                 raise ValueError(f"{name} must be boolean")
         if any(order.account_masked != self.account_masked for order in self.equity_orders):
             raise ValueError("all orders must belong to the snapshot account")
-        for name in ("daily_realized_pnl", "weekly_realized_pnl", "peak_equity"):
+        for name in ("daily_realized_pnl", "weekly_realized_pnl", "peak_equity", "daily_starting_equity", "daily_external_cash_flow"):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, finite_decimal(value, field=name))
         if self.peak_equity is not None and self.peak_equity <= 0:
             raise ValueError("peak_equity must be positive when supplied")
+        if self.daily_starting_equity is not None and self.daily_starting_equity <= 0:
+            raise ValueError("daily_starting_equity must be positive when supplied")
+        for name in ("daily_starting_equity_as_of", "daily_external_cash_flow_as_of"):
+            if getattr(self, name) is not None:
+                object.__setattr__(self, name, _utc(getattr(self, name), name))
         if (
             self.peak_equity is not None
             and self.peak_equity < self.funds.total_value
@@ -714,10 +725,34 @@ class AccountSnapshot:
             "risk_high_water_identity_hash",
             "risk_high_water_lineage_hash",
             "risk_high_water_receipt_hash",
+            "daily_external_cash_flow_receipt_hash",
+            "daily_starting_equity_receipt_hash",
         ):
             value = getattr(self, name)
             if value is not None and re.fullmatch(r"[0-9a-f]{64}", value) is None:
                 raise ValueError(f"{name} must be lowercase SHA-256 or null")
+
+    @property
+    def daily_starting_equity_ready(self) -> bool:
+        """A naked equity value or readiness flag is never baseline authority."""
+        return bool(
+            self.authenticated_entry_risk_evidence_ready
+            and self.daily_starting_equity is not None
+            and self.daily_external_cash_flow is not None
+            and self.daily_starting_equity_as_of is not None
+            and self.daily_external_cash_flow_as_of == self.observed_at
+            and self.daily_external_cash_flow_receipt_hash is not None
+            and self.daily_starting_equity_receipt_hash is not None
+            and self.daily_starting_equity_receipt_hash == daily_starting_equity_receipt_hash(
+                baseline_receipt_hash=self.risk_baseline_receipt_hash,
+                cash_flow_receipt_hash=self.daily_external_cash_flow_receipt_hash,
+                starting_equity=self.daily_starting_equity,
+                external_cash_flow=self.daily_external_cash_flow,
+                starting_equity_as_of=self.daily_starting_equity_as_of,
+                cash_flow_as_of=self.daily_external_cash_flow_as_of,
+                total_equity=self.funds.total_value,
+            )
+        )
 
     @property
     def whole_broker_reconciled(self) -> bool:

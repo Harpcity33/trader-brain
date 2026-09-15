@@ -37,7 +37,7 @@ def entry_lifecycle_fee_reserve(
         "minimum_commission_reserve_per_order_dollars"
     )
     if raw is None:
-        if policy.dollar_headroom_risk:
+        if policy.account_day_headroom_risk:
             raise ValueError("dollar-headroom commission reserve is required")
         return ZERO
     per_order = decimal_value(
@@ -49,7 +49,7 @@ def entry_lifecycle_fee_reserve(
             "minimum_commission_reserve_per_order_dollars must be positive"
         )
     reserve = per_order * Decimal(quantity + AUTONOMOUS_ENTRY_FIXED_ORDER_LEGS)
-    if policy.dollar_headroom_risk:
+    if policy.account_day_headroom_risk:
         lifecycle_minimum = decimal_value(
             policy.config["execution"].get("minimum_entry_lifecycle_fee_reserve_dollars"),
             "minimum_entry_lifecycle_fee_reserve_dollars",
@@ -124,6 +124,9 @@ class AccountRiskSnapshot:
     option_orders_reconciled: bool
     advanced_orders_reconciled: bool
     positions_reconciled: bool
+    total_equity: Decimal | None = None
+    daily_starting_equity: Decimal | None = None
+    daily_external_cash_flow: Decimal | None = None
 
     @classmethod
     def build(cls, **raw: object) -> "AccountRiskSnapshot":
@@ -153,6 +156,14 @@ class AccountRiskSnapshot:
             raise ValueError("peak_equity must be positive")
         if money["peak_equity"] < money["usable_equity"]:
             raise ValueError("peak_equity cannot be below usable_equity")
+        daily_fields = {
+            name: None if raw.get(name) is None else decimal_value(raw[name], name)
+            for name in ("total_equity", "daily_starting_equity", "daily_external_cash_flow")
+        }
+        if daily_fields["daily_starting_equity"] is not None and daily_fields["daily_starting_equity"] <= ZERO:
+            raise ValueError("daily starting equity must be positive")
+        if daily_fields["total_equity"] is not None and daily_fields["total_equity"] < ZERO:
+            raise ValueError("total equity cannot be negative")
         return cls(
             account_last4=str(raw["account_last4"]),
             observed_at=observed,
@@ -163,6 +174,7 @@ class AccountRiskSnapshot:
             option_orders_reconciled=raw.get("option_orders_reconciled") is True,
             advanced_orders_reconciled=raw.get("advanced_orders_reconciled") is True,
             positions_reconciled=raw.get("positions_reconciled") is True,
+            **daily_fields,
             **money,
         )
 
@@ -217,6 +229,39 @@ def dollar_headroom_capacity(
     return capacity
 
 
+def daily_starting_equity_performance(
+    *, starting_equity: object, total_equity: object, external_cash_flow: object
+) -> Decimal:
+    """Account-wide net performance from an authenticated fixed day baseline.
+
+    External deposits/withdrawals are excluded, not interpreted as trading
+    profits/losses. Callers must authenticate and freeze the baseline and prove
+    the cash-flow coverage; absent values never default to zero.
+    """
+
+    start = decimal_value(starting_equity, "daily_starting_equity")
+    total = decimal_value(total_equity, "total_equity")
+    flow = decimal_value(external_cash_flow, "daily_external_cash_flow")
+    if start <= ZERO or total < ZERO:
+        raise ValueError("positive starting equity and nonnegative total equity required")
+    return total - flow - start
+
+
+def daily_starting_equity_capacity(
+    policy: PolicyBundle, *, starting_equity: object, total_equity: object,
+    external_cash_flow: object,
+) -> Decimal:
+    """Fixed daily risk allowance with no profit-funded intraday expansion."""
+
+    pnl = daily_starting_equity_performance(
+        starting_equity=starting_equity, total_equity=total_equity,
+        external_cash_flow=external_cash_flow,
+    )
+    start = decimal_value(starting_equity, "daily_starting_equity")
+    allowance = start * decimal_value(policy.config["risk"]["daily_loss_fraction"], "daily_loss_fraction")
+    return min(allowance, allowance + pnl)
+
+
 def update_session_latch(
     policy: PolicyBundle,
     prior: SessionLatch,
@@ -224,13 +269,37 @@ def update_session_latch(
     realized_pnl: object,
     usable_equity: object,
     observed_at: datetime,
+    daily_starting_equity: object = None,
+    daily_external_cash_flow: object = None,
+    total_equity: object = None,
 ) -> SessionLatch:
     if observed_at.tzinfo is None or observed_at.date() != prior.trading_date:
         raise ValueError("latch update must use the same trading date and aware time")
     pnl = decimal_value(realized_pnl, "realized_pnl")
     equity = decimal_value(usable_equity, "usable_equity")
-    if equity <= 0:
+    if equity <= 0 and not policy.daily_starting_equity_risk:
         raise ValueError("usable equity must be positive")
+    if policy.daily_starting_equity_risk:
+        performance = daily_starting_equity_performance(
+            starting_equity=daily_starting_equity, total_equity=total_equity,
+            external_cash_flow=daily_external_cash_flow,
+        )
+        start = decimal_value(daily_starting_equity, "daily_starting_equity")
+        breached = performance <= -(start * decimal_value(
+            policy.config["risk"]["daily_loss_fraction"], "daily_loss_fraction"
+        ))
+        crossed = prior.profit_goal_crossed or performance >= start * decimal_value(
+            policy.config["risk"]["daily_profit_aspiration_fraction"], "daily_profit_aspiration_fraction"
+        )
+        return SessionLatch(
+            trading_date=prior.trading_date,
+            loss_lock=prior.loss_lock or breached,
+            hard_kill=prior.hard_kill or breached,
+            profit_goal_crossed=crossed,
+            first_profit_crossed_at=(prior.first_profit_crossed_at or observed_at) if crossed else None,
+            # Retain the existing storage column's realized-P&L meaning.
+            highest_realized_pnl=max(prior.highest_realized_pnl, pnl),
+        )
     absolute_daily = decimal_value(
         policy.config["risk"]["daily_realized_loss_lock_dollars"], "daily_lock"
     )
@@ -309,6 +378,14 @@ def evaluate_entry(
         failures.append("UNKNOWN_POSSIBLE_EXPOSURE")
     if any(item.category in {"open", "manual"} and not item.protected for item in snapshot.exposures):
         failures.append("UNPROTECTED_OPEN_EXPOSURE")
+    if policy.daily_starting_equity_risk and any(
+        item.category in {"open", "manual"} for item in snapshot.exposures
+    ):
+        # These reservations are entry-to-stop, not current-mark-to-stop.
+        # Current NLV includes open gains; crediting them while charging only
+        # original risk can fund a loss beyond the equity floor. Do not assume
+        # raw realized P&L is net of every closed-trade fee as a substitute.
+        failures.append("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED")
 
     existing_planned = sum(
         (
@@ -325,7 +402,27 @@ def evaluate_entry(
     fee_reserve = entry_lifecycle_fee_reserve(policy, quantity=plan.quantity)
     stress = plan.stress_risk + fee_reserve
     equity = snapshot.usable_equity
-    if policy.dollar_headroom_risk:
+    if policy.daily_starting_equity_risk:
+        try:
+            aggregate_cap = daily_starting_equity_capacity(
+                policy, starting_equity=snapshot.daily_starting_equity,
+                total_equity=snapshot.total_equity,
+                external_cash_flow=snapshot.daily_external_cash_flow,
+            )
+            performance = daily_starting_equity_performance(
+                starting_equity=snapshot.daily_starting_equity,
+                total_equity=snapshot.total_equity,
+                external_cash_flow=snapshot.daily_external_cash_flow,
+            )
+            if performance <= -(snapshot.daily_starting_equity * decimal_value(
+                policy.config["risk"]["daily_loss_fraction"], "daily_loss_fraction"
+            )):
+                failures.append("DAILY_STARTING_EQUITY_LOSS_LIMIT_REACHED")
+        except (ValueError, TypeError):
+            failures.append("DAILY_STARTING_EQUITY_EVIDENCE_INCOMPLETE")
+            aggregate_cap = ZERO
+        daily_cap = per_trade = stress_cap = portfolio_cap = portfolio_stress_cap = aggregate_cap
+    elif policy.dollar_headroom_risk:
         daily_cap = dollar_headroom_capacity(
             policy, realized_pnl=snapshot.daily_realized_pnl, profit_goal_crossed=False
         )
@@ -360,7 +457,7 @@ def evaluate_entry(
         failures.append("PLANNED_RISK_CAP_EXCEEDED")
     if stress > stress_cap:
         failures.append("STRESS_RISK_CAP_EXCEEDED")
-    realized_loss = ZERO if policy.dollar_headroom_risk else max(ZERO, -snapshot.daily_realized_pnl)
+    realized_loss = ZERO if policy.account_day_headroom_risk else max(ZERO, -snapshot.daily_realized_pnl)
     remaining_daily = (
         daily_cap
         - realized_loss
@@ -390,7 +487,7 @@ def evaluate_entry(
         failures.append("INSUFFICIENT_PORTFOLIO_STRESS_HEADROOM")
     if remaining_buying_power < 0 or remaining_cash < 0:
         failures.append("INSUFFICIENT_UNLEVERAGED_FUNDS")
-    if not policy.dollar_headroom_risk:
+    if not policy.account_day_headroom_risk:
         weekly_cap = _cap(policy, equity, "weekly_loss_lock_pct", "weekly_loss_lock_dollars")
         if snapshot.weekly_realized_pnl <= -weekly_cap:
             failures.append("WEEKLY_LOSS_LOCK")
@@ -399,12 +496,12 @@ def evaluate_entry(
         )
         if snapshot.peak_equity - snapshot.usable_equity >= drawdown_cap:
             failures.append("LIVE_DRAWDOWN_REVIEW_REQUIRED")
-    if latch.profit_goal_crossed or (
+    if not policy.daily_starting_equity_risk and (latch.profit_goal_crossed or (
         policy.dollar_headroom_risk
         and snapshot.daily_realized_pnl >= decimal_value(
             policy.config["risk"]["profit_goal_dollars"], "profit_goal"
         )
-    ):
+    )):
         floor = decimal_value(policy.config["risk"]["post_goal_floor_dollars"], "profit_floor")
         if (
             snapshot.daily_realized_pnl
@@ -435,6 +532,8 @@ __all__ = [
     "RiskDecision",
     "RiskExposure",
     "SessionLatch",
+    "daily_starting_equity_capacity",
+    "daily_starting_equity_performance",
     "entry_lifecycle_fee_reserve",
     "evaluate_entry",
     "update_session_latch",

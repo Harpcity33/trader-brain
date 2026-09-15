@@ -41,7 +41,7 @@ from titan_brain.live.policy import PolicyBundle, canonical_json
 from titan_brain.live.provider_clients import KeychainItem
 from titan_brain.live.risk_evidence_binding import risk_high_water_receipt_hash
 from titan_brain.live.state import LiveStateStore
-from tests.live_dollar_policy_support import copy_dollar_policy_inputs
+from tests.live_dollar_policy_support import copy_dollar_policy_inputs, legacy_dollar_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,9 +83,7 @@ class AutonomousIbkrInputTests(unittest.TestCase):
             config_root / "nyse_calendar_2026.json",
         )
         self.config_path = config_root / "full_live_ibkr_autonomous.json"
-        config = json.loads(
-            (ROOT / "config/full_live_ibkr.json").read_text(encoding="utf-8")
-        )
+        config = deepcopy(legacy_dollar_policy(ROOT).config)
         config["risk"]["limits_live_provenance_verified"] = True
         config["evidence"].update(
             {

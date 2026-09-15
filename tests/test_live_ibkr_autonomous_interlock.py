@@ -29,6 +29,7 @@ from titan_brain.live.policy import PolicyBundle, canonical_json, sha256_json
 from titan_brain.live.state import LiveStateStore
 from titan_brain.live.writer_lock import AccountWriterLock
 from tests.live_activation_support import activate_canonical_runtime
+from tests.live_dollar_policy_support import legacy_dollar_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,10 +41,8 @@ TRANSPORT = "ibkr-tws-api-10.50.2-v1"
 CLIENT_ID = 903
 
 
-def autonomous_policy() -> PolicyBundle:
-    base = PolicyBundle.load(
-        ROOT, config_relative="config/full_live_ibkr.json"
-    )
+def autonomous_policy(*, base_policy: PolicyBundle | None = None) -> PolicyBundle:
+    base = base_policy or legacy_dollar_policy(ROOT)
     config = dict(base.config)
     execution = dict(config["execution"])
     execution.update(

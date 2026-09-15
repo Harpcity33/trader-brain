@@ -260,6 +260,9 @@ def persist_account_snapshot(
             "unsettled_funds": snapshot.funds.unsettled_funds,
         },
         "daily_realized_pnl": snapshot.daily_realized_pnl,
+        "daily_starting_equity": snapshot.daily_starting_equity,
+        "daily_external_cash_flow": snapshot.daily_external_cash_flow,
+        "daily_starting_equity_receipt_hash": snapshot.daily_starting_equity_receipt_hash,
         "positions": positions_payload,
         "orders": orders_payload,
         "option_position_count": snapshot.option_position_count,
@@ -499,6 +502,8 @@ class FullLiveService:
         blockers = list(report.blockers)
         if not snapshot.daily_realized_pnl_ready:
             blockers.append("DAILY_REALIZED_PNL_NOT_READY")
+        if self.policy.daily_starting_equity_risk and not snapshot.daily_starting_equity_ready:
+            blockers.append("DAILY_STARTING_EQUITY_EVIDENCE_NOT_READY")
         blockers.extend(self.policy.activation_blockers)
         if not self.policy.live_entries_configured:
             blockers.append("LIVE_ENTRIES_DISABLED_IN_SIGNED_CONFIG")
@@ -2417,7 +2422,7 @@ class FullLiveService:
     def _update_risk_latch(
         self, snapshot: AccountSnapshot, now: datetime
     ) -> RiskSessionLatch | None:
-        if not snapshot.daily_realized_pnl_ready:
+        if not snapshot.daily_realized_pnl_ready and not self.policy.daily_starting_equity_risk:
             return None
         local_date = now.astimezone(NEW_YORK).date()
         if not self.policy.calendar.is_trading_day(local_date):
@@ -2444,27 +2449,45 @@ class FullLiveService:
         else:
             prior = RiskSessionLatch(trading_date=local_date)
             revision = 0
+        if self.policy.daily_starting_equity_risk and (
+            not snapshot.daily_starting_equity_ready
+            or not snapshot.entry_risk_evidence_ready
+            or snapshot.daily_starting_equity_as_of != datetime.combine(
+                local_date, datetime.min.time(), NEW_YORK
+            )
+            or snapshot.observed_at.astimezone(NEW_YORK).date() != local_date
+            or not 0 <= (now - snapshot.observed_at).total_seconds() <= int(
+                self.policy.config["evidence"]["broker_snapshot_max_age_seconds"]
+            )
+        ):
+            # An incomplete new observation cannot clear a prior durable
+            # breach or silently restore entry eligibility.
+            return prior if rows else None
         updated = update_session_latch(
             self.policy,
             prior,
             realized_pnl=snapshot.daily_realized_pnl,
             usable_equity=snapshot.funds.total_value,
             observed_at=now.astimezone(NEW_YORK),
+            daily_starting_equity=snapshot.daily_starting_equity,
+            daily_external_cash_flow=snapshot.daily_external_cash_flow,
+            total_equity=snapshot.funds.total_value,
         )
         durable = DurableSessionLatch(
             account_key=self.account_key,
             trading_date=local_date,
             loss_locked=updated.loss_lock,
             objective_crossed=updated.profit_goal_crossed,
-            pause_new_entries=updated.loss_lock or updated.hard_kill,
-            closeout_started=updated.hard_kill,
+            pause_new_entries=bool(rows and row["pause_new_entries"]) or updated.loss_lock or updated.hard_kill,
+            closeout_started=bool(rows and row["closeout_started"]) or updated.hard_kill,
             hard_kill=updated.hard_kill,
             highest_realized_pnl=updated.highest_realized_pnl,
             first_objective_crossed_at=updated.first_profit_crossed_at,
             revision=revision,
             updated_at=now,
         )
-        self.state.apply_session_latch(durable)
+        if not self.state.apply_session_latch(durable):
+            raise RuntimeError("RISK_LATCH_PERSISTENCE_NOT_CONFIRMED")
         return updated
 
     def _notify_unprotected(
