@@ -1,0 +1,424 @@
+{
+  "schema_version": "titan_daily_starting_equity_policy_deployment_2026-09-14_v1",
+  "local_source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+  "github_source_commit": "94cc5a3c7ecd167557c38174465f69184adfae96",
+  "source_tree": "1fea78de0d3330a41232ac8eb354563032428a7b",
+  "tests": {
+    "bundled_python": {
+      "chunk_id": "329c42",
+      "wall_time_seconds": 0.000001625,
+      "exit_code": 0,
+      "original_token_count": 29,
+      "output": "----------------------------------------------------------------------\nRan 1132 tests in 59.984s\n\nOK (skipped=2)\n",
+      "count": 1132,
+      "skipped": 2
+    },
+    "official_ibkr_sdk": {
+      "chunk_id": "9d539c",
+      "wall_time_seconds": 5.83e-7,
+      "exit_code": 0,
+      "original_token_count": 26,
+      "output": "----------------------------------------------------------------------\nRan 1132 tests in 60.199s\n\nOK\n",
+      "count": 1132,
+      "skipped": 0
+    }
+  },
+  "repository_validation": {
+    "status": "PASS",
+    "checked_bytes": 7729490,
+    "json_files": 29,
+    "python_files": 163,
+    "toml_files": 4,
+    "manifest_sha256": "980d21601ca2cfa9151ebc62dc5f139247b132ce7036be30b7688cbc48518c93"
+  },
+  "whitespace_check": "PASS",
+  "builds": {
+    "first": {
+      "archive": "/private/tmp/titan-daily-start-equity-release.78IN6a/first/titan-full-live-def43832f745c04559fd.tar.gz",
+      "archive_sha256": "e7b4fd73f439b41206e3008530eb3b0e4f75954d6491462c2dd29318521b0482",
+      "config_path": "config/full_live_ibkr.json",
+      "manifest": "/private/tmp/titan-daily-start-equity-release.78IN6a/first/titan-full-live-def43832f745c04559fd.tar.gz.manifest.json",
+      "manifest_sha256": "df2765ffcf5131b49db16fc4fd5fc0f7db855aa75d67fb0f64cfb8cd304b5613",
+      "release_id": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+      "source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0"
+    },
+    "second": {
+      "archive": "/private/tmp/titan-daily-start-equity-release.78IN6a/second/titan-full-live-def43832f745c04559fd.tar.gz",
+      "archive_sha256": "e7b4fd73f439b41206e3008530eb3b0e4f75954d6491462c2dd29318521b0482",
+      "config_path": "config/full_live_ibkr.json",
+      "manifest": "/private/tmp/titan-daily-start-equity-release.78IN6a/second/titan-full-live-def43832f745c04559fd.tar.gz.manifest.json",
+      "manifest_sha256": "df2765ffcf5131b49db16fc4fd5fc0f7db855aa75d67fb0f64cfb8cd304b5613",
+      "release_id": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+      "source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0"
+    },
+    "archive_bytes_identical": true
+  },
+  "installation": {
+    "activation_required": true,
+    "archive_sha256": "e7b4fd73f439b41206e3008530eb3b0e4f75954d6491462c2dd29318521b0482",
+    "broker_accessed": false,
+    "config_path": "config/full_live_ibkr.json",
+    "current_release": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103/releases/def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+    "deployment_profile_id": "ibkr-local-live-ending-3103-v1",
+    "external_dependencies": {
+      "ibapi_version": "10.50.2",
+      "inventory_hash": "3869276715cc00367a2927bfeda3b8c9741b9d81f6df25a3d6f93aae52b70ddc",
+      "kind": "ibkr_release_pinned_sdk_snapshot",
+      "profile_id": "ibkr-local-live-ending-3103-v1",
+      "protobuf_version": "5.29.5",
+      "receipt_path": "control/ibkr-sdk-attestation.json",
+      "receipt_sha256": "996ce65c9f9ca192eae75609cfa1651745c0fc91e0372ec6d44a64bc0cfa45f3",
+      "source_venv_persisted": false
+    },
+    "install_root": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+    "installed_at": "2026-09-15T01:16:38.736696+00:00",
+    "installed_mode": "PAUSED",
+    "installer_executable_path": "/Users/harp/Documents/Codex/2026-08-18/v/work/trader-brain/scripts/install_full_live_paused.py",
+    "installer_python_executable": "/Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12",
+    "installer_python_implementation": "cpython",
+    "installer_python_version": "3.12.14",
+    "installer_schema": "titan_full_live_paused_install_2026-09-14_v4",
+    "installer_sha256": "126836b197d4c03e5c28dd8eff38bacde8b610f1442820876042f35b2839fd94",
+    "installer_source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+    "launchd": {
+      "actual_loaded_state": "NOT_QUERIED",
+      "disabled": true,
+      "installer_called_launchctl": false,
+      "label": "com.harpcity.trader-brain-full-live-ibkr-3103",
+      "notification_worker": {
+        "actual_loaded_state": "NOT_QUERIED",
+        "disabled": true,
+        "installer_called_launchctl": false,
+        "label": "com.harpcity.trader-brain-full-live-ibkr-3103-notifications",
+        "process_role": "independent_notification_outbox_delivery",
+        "run_at_load": false,
+        "staged_plist": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103/launchd/com.harpcity.trader-brain-full-live-ibkr-3103-notifications.plist"
+      },
+      "process_role": "trading_coordinator_enqueue_only",
+      "run_at_load": false,
+      "staged_plist": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103/launchd/com.harpcity.trader-brain-full-live-ibkr-3103.plist"
+    },
+    "legacy_runtime_modified": false,
+    "release_id": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+    "release_manifest_sha256": "df2765ffcf5131b49db16fc4fd5fc0f7db855aa75d67fb0f64cfb8cd304b5613",
+    "risk_high_water_migration": {
+      "performed": false,
+      "reason": "RISK_LEDGER_NOT_CONFIGURED",
+      "required": false
+    },
+    "runtime_identity_migration": {
+      "audit_chain_head": "e2fb5e583214d8bd427e205e5b343437b24d0c4c31929b72572f1090e3b6b47d",
+      "audit_chain_length": 12,
+      "audit_event_id": "cc329e40-7dbf-44e6-85d6-380928e2fee7",
+      "generation": 5,
+      "invalidated_activation_records": 0,
+      "performed": true,
+      "reason": "PAUSED_IDENTITY_REBOUND",
+      "required": true,
+      "schema_migration": {
+        "path": [
+          3
+        ],
+        "performed": false,
+        "required": false,
+        "version_after": 3,
+        "version_before": 3
+      }
+    },
+    "runtime_mode_authority": "state/full-live.sqlite3:runtime_identity.mode",
+    "runtime_python_executable": "/Users/harp/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3.12",
+    "schema_version": "titan_full_live_paused_install_2026-09-14_v4",
+    "sdk_receipt_sha256": "996ce65c9f9ca192eae75609cfa1651745c0fc91e0372ec6d44a64bc0cfa45f3",
+    "source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+    "source_provenance": {
+      "expected_revision": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+      "git_replacement_objects_disabled": true,
+      "repository": "/Users/harp/Documents/Codex/2026-08-18/v/work/trader-brain",
+      "verified_release_files": 104
+    }
+  },
+  "installed_checks": {
+    "status": {
+      "exit_code": 0,
+      "result": {
+        "control_requests": {
+          "inbox": 0,
+          "processed": 0,
+          "rejected": 0
+        },
+        "counts": {
+          "nonzero_positions": 0,
+          "open_incidents": 0,
+          "pending_notifications": 0,
+          "unknown_or_submitting_intents": 0
+        },
+        "install_root": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+        "provider_checks_performed": false,
+        "release_manifest_hash": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+        "release_valid": true,
+        "runtime": {
+          "account_key": "ibkr-live-ending-3103",
+          "activated_at": null,
+          "authority_enabled": 0,
+          "config_hash": "36aa4eaa8694045fab994eb2e4d107d21c0e19e23a550bbd8d7b77fad82f3ec5",
+          "deactivated_at": null,
+          "generation": 5,
+          "initialized_at": "2026-09-14T14:41:35.005659+00:00",
+          "mode": "PAUSED",
+          "policy_hash": "f54292e461f5c27f721b9ffe939a267539af0358e8d43a994520ac94ee7e984e",
+          "release_manifest_hash": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+          "runtime_id": "titan_full_live_ibkr_2026-09-14_v1",
+          "singleton": 1,
+          "updated_at": "2026-09-15T01:16:38.736696+00:00"
+        },
+        "runtime_bindings_valid": true,
+        "schema_version": "titan_full_live_control_status_2026-09-14_v1",
+        "service_writer_lease_present": false,
+        "source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+        "state_present": true
+      }
+    },
+    "doctor": {
+      "exit_code": 2,
+      "result": {
+        "audit_chain": {
+          "head": "e2fb5e583214d8bd427e205e5b343437b24d0c4c31929b72572f1090e3b6b47d",
+          "length": 12,
+          "valid": true
+        },
+        "blockers": [
+          "IBKR_RUNTIME_AUTHENTICATION_RECHECK_REQUIRED",
+          "IBKR_UNCHANGED_PRECAUTION_SETTINGS_RECHECK_REQUIRED",
+          "IBKR_EXTERNAL_DATA_NO_BYPASS_TRANSMIT_CONTRACT_UNRESOLVED",
+          "IBKR_MARKET_DATA_API_ACKNOWLEDGEMENT_INCOMPLETE",
+          "IBKR_API_MARKET_DATA_ENTITLEMENT_UNVERIFIED",
+          "IBKR_TIERED_ALL_IN_FEE_BOUND_NOT_VERIFIED",
+          "SUPPORTED_IBKR_TRANSPORT_NOT_SELECTED",
+          "LOCAL_MUTATION_INTERLOCK_DISABLED",
+          "SUPPORTED_LIVE_DISCOVERY_NOT_SELECTED",
+          "AUTHENTICATED_DAILY_STARTING_EQUITY_AND_CASH_FLOW_EVIDENCE_REQUIRED",
+          "IBKR_ALL_CLIENT_EXECUTION_COVERAGE_UNVERIFIED",
+          "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
+          "IBKR_MANAGED_CONTROL_KEY_NOT_PROVISIONED",
+          "IBKR_COMMAND_AUTHORITY_ARTIFACT_NOT_ISSUED",
+          "IBKR_PLAN_ARTIFACT_PIPELINE_NOT_ACTIVATED",
+          "IBKR_LOCAL_GATEWAY_TRANSPORT_STAGED_ONLY",
+          "LOCAL_MUTATION_INTERLOCK_NOT_ENABLED",
+          "NOTIFICATION_DESTINATION_BRIDGE_NOT_CONFIGURED",
+          "LIVE_DISCOVERY_PIPELINE_NOT_CONFIGURED",
+          "LIVE_QUALITY_REVALIDATION_PROVIDER_UNAVAILABLE",
+          "LIVE_ENTRIES_DISABLED_IN_SIGNED_CONFIG",
+          "BROKER_COMPOSITION_INVALID:BrokerFactoryError",
+          "DAEMON_BROKER_TRANSPORT_UNAVAILABLE",
+          "ATTENDED_MUTATION_CONTRACT_UNSUPPORTED",
+          "WHOLE_BROKER_RECONCILIATION_UNSUPPORTED",
+          "MASSIVE_HEALTH_STALE:market_data_freshness",
+          "MASSIVE_HEALTH_STALE:massive_websocket",
+          "MASSIVE_QUOTE_STALE",
+          "MASSIVE_COMPLETED_BAR_STALE"
+        ],
+        "broker": {
+          "attended_mutation_contract_supported": false,
+          "command_account_authenticated": null,
+          "command_connected": null,
+          "command_lane_required_for_activation": false,
+          "command_next_valid_id_received": null,
+          "command_write_authority_granted": null,
+          "connector": "ibkr_local_gateway_staged",
+          "daemon_transport_configured": false,
+          "execution_authority_mode": "attended_only",
+          "per_mutation_confirmation_required": true,
+          "unattended_writes": false,
+          "whole_broker_reconciliation": false
+        },
+        "install_root": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+        "market_data": {
+          "adapter": "local_titan_massive_sqlite_read_only",
+          "blockers": [
+            "MASSIVE_HEALTH_STALE:market_data_freshness",
+            "MASSIVE_HEALTH_STALE:massive_websocket",
+            "MASSIVE_QUOTE_STALE",
+            "MASSIVE_COMPLETED_BAR_STALE"
+          ],
+          "component_states": {
+            "market_data_freshness": "healthy",
+            "massive_websocket": "healthy"
+          },
+          "database_path": "/Users/harp/Library/Application Support/Titan Momentum/runtime/titan-intelligence.sqlite3",
+          "latest_completed_bar_at": "2026-09-14 20:04:00+00:00",
+          "latest_quote_at": "2026-09-14 20:04:01.029000+00:00",
+          "producer_fresh": false,
+          "source_is_execution_authority": false
+        },
+        "ready_for_owner_activation": false,
+        "release_manifest_hash": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+        "release_valid": true,
+        "runtime": {
+          "account_key": "ibkr-live-ending-3103",
+          "activated_at": null,
+          "authority_enabled": 0,
+          "config_hash": "36aa4eaa8694045fab994eb2e4d107d21c0e19e23a550bbd8d7b77fad82f3ec5",
+          "deactivated_at": null,
+          "generation": 5,
+          "initialized_at": "2026-09-14T14:41:35.005659+00:00",
+          "mode": "PAUSED",
+          "policy_hash": "f54292e461f5c27f721b9ffe939a267539af0358e8d43a994520ac94ee7e984e",
+          "release_manifest_hash": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+          "runtime_id": "titan_full_live_ibkr_2026-09-14_v1",
+          "singleton": 1,
+          "updated_at": "2026-09-15T01:16:38.736696+00:00"
+        },
+        "schema_version": "titan_full_live_doctor_2026-09-08_v1",
+        "source_commit": "184ccb1e3ae31e48ac227f4fd2ad35ad2567e5d0",
+        "state_present": true
+      }
+    },
+    "readiness": {
+      "exit_code": 2,
+      "result": {
+        "error": "COMMAND_FAILED:BrokerFactoryError",
+        "error_type": "BrokerFactoryError",
+        "ok": false
+      }
+    },
+    "notification-setup-status": {
+      "exit_code": 2,
+      "result": {
+        "account_namespace_matches": true,
+        "broker_checks_performed": false,
+        "check_kind": "named_keychain_metadata_only",
+        "config_hash": "36aa4eaa8694045fab994eb2e4d107d21c0e19e23a550bbd8d7b77fad82f3ec5",
+        "configured_delivery_sink": "local_jsonl_staging",
+        "credential_account": "ibkr-live-ending-3103",
+        "credential_contents_read": false,
+        "delivery_attempted": false,
+        "intended_delivery_sink": "gmail_api",
+        "keychain_items": [
+          {
+            "account": "ibkr-live-ending-3103",
+            "metadata_status": "MISSING",
+            "purpose": "desktop_client",
+            "service": "titan-full-live-ibkr-ending-3103-gmail-desktop-client"
+          },
+          {
+            "account": "ibkr-live-ending-3103",
+            "metadata_status": "MISSING",
+            "purpose": "refresh_token",
+            "service": "titan-full-live-ibkr-ending-3103-gmail-refresh-token"
+          },
+          {
+            "account": "ibkr-live-ending-3103",
+            "metadata_status": "MISSING",
+            "purpose": "consent_status",
+            "service": "titan-full-live-ibkr-ending-3103-gmail-consent-status"
+          },
+          {
+            "account": "ibkr-live-ending-3103",
+            "metadata_status": "MISSING",
+            "purpose": "sender",
+            "service": "titan-full-live-ibkr-ending-3103-gmail-sender"
+          },
+          {
+            "account": "ibkr-live-ending-3103",
+            "metadata_status": "MISSING",
+            "purpose": "destination",
+            "service": "titan-full-live-ibkr-ending-3103-gmail-destination"
+          }
+        ],
+        "market_data_checks_performed": false,
+        "missing_prerequisites": [
+          "GMAIL_LOCAL_PROFILE_DISABLED",
+          "GMAIL_DESKTOP_CLIENT_SERVICE_MISSING",
+          "GMAIL_REFRESH_TOKEN_SERVICE_MISSING",
+          "GMAIL_CONSENT_STATUS_SERVICE_MISSING",
+          "GMAIL_SENDER_SERVICE_MISSING",
+          "GMAIL_DESTINATION_SERVICE_MISSING",
+          "GMAIL_DELIVERY_SINK_NOT_CONFIGURED",
+          "GMAIL_DESTINATION_BRIDGE_NOT_CONFIGURED",
+          "GMAIL_DESTINATION_FINGERPRINT_MISSING_OR_INVALID",
+          "GMAIL_AUTHORIZATION_BINDING_ID_MISSING_OR_INVALID",
+          "GMAIL_ROUTE_VERSION_MISSING_OR_INVALID",
+          "GMAIL_OWNER_CONFIRMED_DELIVERY_ASSURANCE_REQUIRED"
+        ],
+        "network_checks_performed": false,
+        "readiness_evidence_issued": false,
+        "ready_for_delivery": false,
+        "release_manifest_hash": "def43832f745c04559fde9283fade91240212cd2177f72fd045c38800bc97843",
+        "schema_version": "titan_notification_setup_status_2026-09-14_v1",
+        "selected_profile": "ibkr_gmail",
+        "status": "BLOCKED",
+        "unverified_prerequisites": [
+          "OWNER_AUTHORIZED_GMAIL_DESTINATION_CONSENT",
+          "AUTHENTIC_DURABLE_GMAIL_SEND_AUTHORIZATION",
+          "RELEASE_AND_ACCOUNT_BOUND_NOTIFICATION_ROUTE",
+          "VISIBLY_RECEIVED_CURRENT_ROUTE_BOUND_TEST"
+        ]
+      }
+    },
+    "local-profile-status": {
+      "exit_code": 0,
+      "result": {
+        "account_key": "ibkr-live-ending-3103",
+        "account_masked": "ending-3103",
+        "broker_authenticated": false,
+        "broker_write_authority": false,
+        "client_ids": {
+          "command": 19736,
+          "isolated": true,
+          "read": 19735
+        },
+        "endpoint": {
+          "host": "127.0.0.1",
+          "loopback_only": true,
+          "network_probe_performed": false,
+          "port": 4001
+        },
+        "environment": "live",
+        "full_account_identifier_persisted": false,
+        "install_root": "/Users/harp/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+        "profile_id": "ibkr-local-live-ending-3103-v1",
+        "provider": "interactive_brokers",
+        "schema_version": "titan_local_provider_status_v1",
+        "sdk": {
+          "file_count": 303,
+          "ibapi_version": "10.50.2",
+          "inventory_hash": "3869276715cc00367a2927bfeda3b8c9741b9d81f6df25a3d6f93aae52b70ddc",
+          "protobuf_version": "5.29.5",
+          "status": "ATTESTED"
+        }
+      }
+    },
+    "com.harpcity.trader-brain-full-live-ibkr-3103": {
+      "exit_code": 113,
+      "output": "Bad request.\nCould not find service \"com.harpcity.trader-brain-full-live-ibkr-3103\" in domain for user gui: 501\n"
+    },
+    "com.harpcity.trader-brain-full-live-ibkr-3103-notifications": {
+      "exit_code": 113,
+      "output": "Bad request.\nCould not find service \"com.harpcity.trader-brain-full-live-ibkr-3103-notifications\" in domain for user gui: 501\n"
+    }
+  },
+  "automation": {
+    "id": "robinhood-titan-premarket-deep-dive",
+    "name": "IBKR Titan — Premarket Analysis + Live Desk",
+    "status": "ACTIVE",
+    "target_thread_id": "01a01764-a7f0-7933-b753-333cb50ff178",
+    "updated_at": 1789434954139,
+    "prompt_matches": true,
+    "schedule_preserved": true,
+    "authority_preserved": "attended_only",
+    "premarket": "analysis_only",
+    "open_remaining_risk_gate_present": true,
+    "previous_dollar_goals_present": false
+  },
+  "current_turn_external_connections": "GitHub publication and existing Codex heartbeat update succeeded; no fresh IBKR or Massive network probe in this policy-only turn; no Gmail delivery attempted.",
+  "actual_orders_submitted": 0,
+  "service_starts": 0,
+  "credentials_provisioned": 0,
+  "additional_service_spending": 0,
+  "limitations": [
+    "Authentic midnight equity and matched current valuation/cash-flow receipt issuance/refresh not provisioned.",
+    "Additional entries blocked with open/manual or unreleased-filled exposure pending verified remaining mark-to-stop/fee evidence.",
+    "Current signed broker/discovery/Gmail production composition remains staged; required evidence and activation unavailable.",
+    "10% is a risk-control threshold, not a guaranteed maximum realized loss."
+  ]
+}

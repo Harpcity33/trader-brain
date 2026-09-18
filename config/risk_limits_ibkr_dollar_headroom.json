@@ -1,0 +1,21 @@
+{
+  "schema_version": "titan_account_day_dollar_headroom_2026-09-14_v1",
+  "model": "account_day_dollar_headroom",
+  "currency": "USD",
+  "daily_realized_loss_lock_dollars": "100.00",
+  "profit_goal_dollars": "150.00",
+  "post_goal_floor_dollars": "125.00",
+  "capacity_basis": "broker_confirmed_current_day_realized_pnl",
+  "all_open_pending_uncovered_unresolved_downside_required": true,
+  "positive_execution_reserve_required": true,
+  "commission_reserve_required": true,
+  "unleveraged_cash_and_buying_power_required": true,
+  "loss_lock_is_irreversible_for_session": true,
+  "live_drawdown_review_policy": "unverified_existing_rule_no_percentage_assumed",
+  "owner_approval": {
+    "proposal_path": "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+    "proposal_sha256": "cc9de013e880864b8d7400837a71c8742b3116a2fe7269f252cfc88bd50617cf",
+    "approval_record_path": "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    "approval_record_sha256": "d27a1cc0c79629292f1353652440c984d3c7d510bcf3e08c4c595f25da7f4aae"
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "account_binding": "ending-3103",
+  "evidence_kind": "sanitized_bounded_read_diagnostics_not_activation",
+  "execution_environment": "workspace_source_with_installer_attested_sdk_and_maintenance_interlock",
+  "not_installed_release_verification": true,
+  "privacy": {
+    "full_account_identifiers_included": false,
+    "raw_provider_messages_included": false,
+    "advanced_reject_json_included": false,
+    "account_values_positions_or_orders_included": false
+  },
+  "safety_bounds": {
+    "maintenance_interlock_held_during_direct_probes": true,
+    "broker_mutations_invoked": [],
+    "ibkr_market_data_requests_invoked": [],
+    "paid_snapshot_requests_invoked": [],
+    "notifications_sent": [],
+    "gateway_or_account_settings_changed_by_probe_agent": [],
+    "all_probe_sessions_closed": true,
+    "all_probe_locks_released": true,
+    "write_authority_granted": false
+  },
+  "observations": [
+    {
+      "observed_at_utc": "2026-09-15T00:00:11Z",
+      "provenance": "root_agent_report_of_guarded_source_provider_status",
+      "ibkr_gateway_runtime": "CONNECTED",
+      "account_callback_collection": "CONNECTED",
+      "contract_details": "BLOCKED",
+      "reported_contract_error": "LOCAL_ASSEMBLY_IBKR_RUNTIME_CONTRACT_PROBE_FAILED",
+      "whole_broker_history_verified": false,
+      "note": "Successful bounded collection at this time does not guarantee later fresh P&L delivery or cross-client execution coverage."
+    },
+    {
+      "observed_at_utc": "2026-09-15T00:01:09.036554Z",
+      "provenance": "broker_gate_audit_guarded_source_provider_status",
+      "ibkr_gateway_runtime": "CONNECTED",
+      "account_callback_collection": "BLOCKED",
+      "reported_account_error": "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_PROBE_FAILED",
+      "contract_details": "NOT_REACHED",
+      "whole_broker_history_verified": false
+    },
+    {
+      "observed_at_utc": "2026-09-15T00:02:03.104999Z",
+      "provenance": "broker_gate_audit_guarded_source_provider_status_with_allowlisted_in_memory_error_classification",
+      "ibkr_gateway_runtime": "CONNECTED",
+      "account_callback_collection": "BLOCKED",
+      "allowlisted_local_exception": "IBKR_READ_TIMEOUT:daily_realized_pnl",
+      "new_source_diagnostic_for_same_reason": "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_TIMEOUT",
+      "daily_realized_pnl_observed": false,
+      "missing_pnl_substituted_with_zero": false,
+      "contract_details": "NOT_REACHED",
+      "whole_broker_history_verified": false,
+      "code_path_inference": "The timeout branch selects daily_realized_pnl only after required end markers are present and no received execution is missing a commission callback; this does not establish cross-client or cross-date record coverage."
+    },
+    {
+      "observed_at_utc": "2026-09-15T00:03:53.630922Z",
+      "provenance": "broker_gate_audit_direct_contract_only_read_under_maintenance_interlock",
+      "symbol": "SPY",
+      "account_callback_collection": "NOT_REQUESTED",
+      "strict_instrument_lookup": "BLOCKED",
+      "allowlisted_runtime_error": "IBKR_RUNTIME_CONTRACT_NOT_REGULAR_HOURS_ELIGIBLE",
+      "regular_session_eligible": false,
+      "code_path_inference": "This specific local exception follows contractDetailsEnd and unique STK/USD/SMART contract identity normalization; metadata connectivity succeeded but strict regular-session eligibility did not.",
+      "trading_eligibility_relaxed": false,
+      "whole_broker_history_verified": false
+    }
+  ],
+  "source_fix_verification": {
+    "metadata_receipt_distinct_from_affirmative_instrument_evidence": true,
+    "strict_get_instrument_still_rejects_closed_or_malformed_hours": true,
+    "metadata_receipt_still_requires_unique_contract_and_end_marker": true,
+    "runtime_probe_uses_metadata_only_read": true,
+    "metadata_fix_live_reprobed": false,
+    "remaining_live_verification": "Rebuild/install source changes, then perform a separately authorized bounded read probe. No further probe was run before installation.",
+    "focused_tests": {
+      "test_live_ibkr_read": 23,
+      "test_live_ibkr_runtime": 22,
+      "test_live_ibkr_provider_profile": 4,
+      "test_live_ibkr_instrument_preflight": 30,
+      "test_live_local_assembly": 21,
+      "result": "PASS"
+    }
+  },
+  "coverage_limits": {
+    "completed_orders": "reqCompletedOrders(False) is a current-day completed-order request, not all historical orders.",
+    "open_orders": "reqAllOpenOrders is an all-current-open-orders snapshot, not a live cross-client subscription.",
+    "executions": "The configured nonzero read client is not the separately configured command client. Root observed the Gateway Master API client setting blank. Current official documentation restricts non-master execDetails coverage to the connected client; callback completion does not prove whole-account executions.",
+    "master_api_client_setting_changed": false,
+    "whole_broker_history_verified": false
+  },
+  "prospective_client_zero_rollout": {
+    "implementation_state": "BUILT_SUPPORT_ONLY_NOT_SELECTED_OR_AUTHENTICATED",
+    "default_source_read_client_id": 19735,
+    "default_source_command_client_id": 19736,
+    "prospective_read_client_id": 0,
+    "prospective_gateway_master_client_id": 0,
+    "attended_read_client_id": 19737,
+    "attended_id_derivation": "command_client_id + 1; independent of the service read client",
+    "source_configuration_ids_changed": false,
+    "gateway_master_configuration_changed": false,
+    "client_zero_live_probe_run": false,
+    "current_all_client_execution_coverage": "UNVERIFIED_AND_BLOCKING",
+    "code_support_is_not_visibility_evidence": true,
+    "read_interface": "Only reqAllOpenOrders is exposed; reqOpenOrders and reqAutoOpenOrders are absent. Their legacy and protobuf SDK methods are guarded before connect, including startup, to reject manual-order binding before dispatch.",
+    "offline_regression_scope": "Synthetic SDK startup and collection tests verify client-zero support and reject attempted binding calls; these tests do not prove Gateway settings or authenticated all-client visibility.",
+    "rollout_prerequisites": [
+      "Obtain explicit owner approval for the read-client and Gateway Master API client migration; prior approval disabled only Read-Only API.",
+      "Read and verify there is no existing automatic manual-order binding state or setting that would cause binding upon connection; do not silently alter it.",
+      "Keep command client positive and isolated, preserve the independently derived attended read client, and avoid reqOpenOrders or reqAutoOpenOrders binding paths.",
+      "Bind the exact reviewed client-ID configuration into a rebuilt release and fresh installation receipts; code support alone is not selection.",
+      "After authorized configuration, obtain fresh authenticated all-client execution and commission visibility evidence using non-binding reads; completed callbacks alone are insufficient.",
+      "Retain current-day versus cross-date history limits and all other existing activation gates."
+    ]
+  },
+  "primary_sources": [
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/retrieving-completed-orders/introduction",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/retrieving-completed-orders/requesting-completed-orders",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/client-id-0-and-the-master-client-id",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/requesting-currently-active-orders/all-submitted-orders",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/execution-details/request-execution-details",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/requesting-currently-active-orders/api-clients-orders",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/order-management/requesting-currently-active-orders/manually-submitted-tws-orders",
+    "https://www.interactivebrokers.com/docs/tws-api/doc/orders/modifying-orders"
+  ]
+}
