@@ -823,6 +823,33 @@ class FillProtectionTests(StoreFixture):
         self.assertIn(ProtectionAction.VERIFY_PENDING_PROTECTION, decision.actions)
         self.assertTrue(decision.pause_new_entries)
 
+    def test_warning_degraded_submitted_stop_is_never_working_protection(self) -> None:
+        # The IBKR read bridge maps either a present blocking warning or an
+        # unreadable warning field to UNKNOWN, even when IBKR says Submitted.
+        # The normalized snapshot deliberately retains no raw warning text.
+        for warning_origin in ("blocking_warning_present", "warning_unreadable"):
+            with self.subTest(warning_origin=warning_origin):
+                warning_degraded = order_snapshot(
+                    order_id=f"stop-{warning_origin}",
+                    state=BrokerOrderState.UNKNOWN,
+                    side=BrokerSide.SELL,
+                    order_type=EquityOrderType.STOP_MARKET,
+                )
+                decision = assess_protection(
+                    position=position(sellable=0, held=5),
+                    orders=(warning_degraded,),
+                    obligations=(obligation(),),
+                )
+                self.assertFalse(is_verified_working_protection(warning_degraded))
+                self.assertFalse(decision.protected)
+                self.assertEqual(decision.working_quantity, 0)
+                self.assertEqual(decision.pending_quantity, 5)
+                self.assertEqual(decision.uncovered_quantity, 5)
+                self.assertIn(
+                    ProtectionAction.VERIFY_PENDING_PROTECTION, decision.actions
+                )
+                self.assertTrue(decision.pause_new_entries)
+
     def test_missing_protection_is_created_before_rejection_requires_safe_close(self) -> None:
         rejected = order_snapshot(
             order_id="stop-rejected",

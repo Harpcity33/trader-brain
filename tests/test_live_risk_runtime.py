@@ -14,10 +14,13 @@ from titan_brain.live.policy import PolicyBundle, sha256_json
 from titan_brain.live.risk_runtime import (
     AUTONOMOUS_ENTRY_FIXED_ORDER_LEGS,
     AccountRiskSnapshot,
+    OPEN_POSITION_REMAINING_FEE_SCOPE,
+    OpenPositionRiskCalculationInputs,
     RiskExposure,
     SessionLatch,
     entry_lifecycle_fee_reserve,
     evaluate_entry,
+    minimum_remaining_position_fee_reserve,
     update_session_latch,
 )
 
@@ -150,6 +153,63 @@ class RiskRuntimeTests(unittest.TestCase):
             decision.remaining_stress_headroom,
             legacy.remaining_stress_headroom - Decimal("4.00"),
         )
+
+    def test_open_position_calculation_is_exact_but_never_entry_authority(self) -> None:
+        policy = self.policy_with_commission_reserve("1.00")
+        candidate = OpenPositionRiskCalculationInputs(
+            quantity=10,
+            current_market_value=Decimal("200"),
+            stop_allocations=(
+                ("stop-a", 4, Decimal("18")),
+                ("stop-b", 6, Decimal("19")),
+            ),
+            execution_reserve=Decimal("2"),
+            remaining_fee_reserve=Decimal("3"),
+            remaining_fee_scope=OPEN_POSITION_REMAINING_FEE_SCOPE,
+        )
+
+        self.assertEqual(candidate.planned_downside, Decimal("14"))
+        self.assertEqual(candidate.stress_downside(), Decimal("19"))
+        self.assertEqual(
+            minimum_remaining_position_fee_reserve(
+                policy, working_stop_order_count=2
+            ),
+            Decimal("3"),
+        )
+        self.assertTrue(candidate.meets_policy_fee_floor(policy))
+        self.assertFalse(candidate.authorizes_entry)
+
+    def test_open_position_calculation_rejects_invalid_scope_and_allocations(self) -> None:
+        values = dict(
+            quantity=10,
+            current_market_value="200",
+            stop_allocations=(("stop-a", 10, "18"),),
+            execution_reserve="2",
+            remaining_fee_reserve="2",
+            remaining_fee_scope=OPEN_POSITION_REMAINING_FEE_SCOPE,
+        )
+        variants = (
+            {"remaining_fee_scope": "base_commission_only"},
+            {"stop_allocations": (("stop-a", 9, "18"),)},
+            {"stop_allocations": (("stop-a", 5, "18"), ("stop-a", 5, "18"))},
+            {"stop_allocations": (("stop-a", 10, "20"),)},
+            {"stop_allocations": (["stop-a", 10, "18"],)},
+            {"execution_reserve": "0"},
+        )
+        for changes in variants:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                OpenPositionRiskCalculationInputs(**{**values, **changes})
+
+        below_floor = OpenPositionRiskCalculationInputs(
+            **{
+                **values,
+                "stop_allocations": (("stop-a", 4, "18"), ("stop-b", 6, "19")),
+            }
+        )
+        self.assertFalse(below_floor.meets_policy_fee_floor(
+            self.policy_with_commission_reserve("1.00")
+        ))
+        self.assertFalse(below_floor.authorizes_entry)
 
     def test_fee_reserve_is_in_cash_and_post_goal_headroom(self) -> None:
         policy = self.policy_with_commission_reserve("1.00")

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 from collections import deque
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -21,9 +22,11 @@ import socket
 import ssl
 import struct
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
@@ -40,6 +43,22 @@ GMAIL_KEYCHAIN_SERVICE_FIELDS = (
     "desktop_client_service", "refresh_token_service", "consent_status_service",
     "sender_service", "destination_service",
 )
+_GMAIL_OAUTH_ERROR_RESPONSE_MAX_BYTES = 64 * 1024
+_GMAIL_OAUTH_PROVIDER_ERROR_CODES = frozenset(
+    {
+        "access_denied",
+        "admin_policy_enforced",
+        "deleted_client",
+        "invalid_client",
+        "invalid_grant",
+        "invalid_request",
+        "invalid_scope",
+        "org_internal",
+        "temporarily_unavailable",
+        "unauthorized_client",
+        "unsupported_grant_type",
+    }
+)
 
 
 def gmail_desktop_loopback_uris_valid(value: object) -> bool:
@@ -48,6 +67,64 @@ def gmail_desktop_loopback_uris_valid(value: object) -> bool:
             and all(type(uri) is str and uri in {
                 "http://localhost", "http://127.0.0.1", "http://[::1]"
             } for uri in value))
+
+
+def _unique_json_object(pairs: Sequence[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def _gmail_oauth_http_failure_code(error: HTTPError) -> str:
+    """Reduce an OAuth HTTP failure to status plus an allow-listed code.
+
+    The response body, description, headers and URL are never returned or
+    retained by the replacement exception. Malformed, duplicate-key and
+    oversized bodies keep only the numeric HTTP status.
+    """
+
+    status = error.code
+    status_text = str(status) if type(status) is int and 100 <= status <= 599 else "UNKNOWN"
+    provider_code: str | None = None
+    try:
+        payload = error.read(_GMAIL_OAUTH_ERROR_RESPONSE_MAX_BYTES + 1)
+        if type(payload) is bytes and len(payload) <= _GMAIL_OAUTH_ERROR_RESPONSE_MAX_BYTES:
+            decoded = json.loads(payload, object_pairs_hook=_unique_json_object)
+            if type(decoded) is dict:
+                candidate = decoded.get("error")
+                if type(candidate) is str and candidate in _GMAIL_OAUTH_PROVIDER_ERROR_CODES:
+                    provider_code = candidate.upper()
+    except Exception:
+        provider_code = None
+    finally:
+        try:
+            error.close()
+        except Exception:
+            pass
+    suffix = provider_code or "UNCLASSIFIED"
+    return f"NOTIFICATION_GMAIL_OAUTH_HTTP_{status_text}_{suffix}"
+
+
+def _gmail_oauth_transport_failure_code(error: BaseException) -> str:
+    """Classify transport shape without stringifying untrusted exceptions."""
+
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return "NOTIFICATION_GMAIL_OAUTH_REFRESH_TIMEOUT"
+    if isinstance(error, ssl.SSLError):
+        return "NOTIFICATION_GMAIL_OAUTH_REFRESH_TLS_FAILED"
+    if isinstance(error, URLError):
+        reason = error.reason
+        if isinstance(reason, (TimeoutError, socket.timeout)):
+            return "NOTIFICATION_GMAIL_OAUTH_REFRESH_TIMEOUT"
+        if isinstance(reason, ssl.SSLError):
+            return "NOTIFICATION_GMAIL_OAUTH_REFRESH_TLS_FAILED"
+        if isinstance(reason, socket.gaierror):
+            return "NOTIFICATION_GMAIL_OAUTH_REFRESH_DNS_FAILED"
+        return "NOTIFICATION_GMAIL_OAUTH_REFRESH_NETWORK_FAILED"
+    return "NOTIFICATION_GMAIL_OAUTH_REFRESH_FAILED"
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -162,6 +239,189 @@ class MacOSKeychain:
             return self.read(item).decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CredentialUnavailable("CREDENTIAL_KEYCHAIN_ITEM_NOT_UTF8") from exc
+
+
+IBKR_GMAIL_NATIVE_ITEMS = frozenset(
+    KeychainItem("titan-full-live-ibkr-ending-3103-gmail-" + suffix, "ibkr-live-ending-3103")
+    for suffix in ("desktop-client", "refresh-token", "consent-status", "sender", "destination")
+)
+IBKR_CONTROL_NATIVE_ITEM = KeychainItem(
+    "titan-full-live-ibkr-ending-3103-control-authentication-key",
+    "ibkr-live-ending-3103",
+)
+
+
+def _native_keychain_symbol(library: Any, name: str, *, address: bool = False) -> int:
+    """Resolve public CF constants and callback structures, without copying them."""
+    if address:
+        return ctypes.addressof(ctypes.c_byte.in_dll(library, name))
+    value = ctypes.c_void_p.in_dll(library, name).value
+    if value is None:
+        raise CredentialUnavailable("CREDENTIAL_GMAIL_NATIVE_KEYCHAIN_UNAVAILABLE")
+    return value
+
+
+class _ScopedNativeMacOSKeychain(MacOSKeychain):
+    """Private read-only FFI shared by separately fixed-scope custodians.
+
+    Each SecItemCopyMatching query requests authentication-UI failure. This
+    changes no ACL or process-wide interaction setting. Legacy file-Keychain
+    behavior must also pass an attended, bounded production-reader probe before
+    a worker is enabled; setup readback alone does not establish runtime access.
+    The native call has no Python-level timeout; the inherited subprocess
+    timeout does not qualify it as universally nonblocking.
+    """
+
+    _native_items: frozenset[KeychainItem] = frozenset()
+    _native_error_prefix = "CREDENTIAL_NATIVE_KEYCHAIN"
+
+    def _error(self, suffix: str) -> CredentialUnavailable:
+        return CredentialUnavailable(f"{self._native_error_prefix}_{suffix}")
+
+    def _symbol(self, library: Any, name: str, *, address: bool = False) -> int:
+        try:
+            return _native_keychain_symbol(library, name, address=address)
+        except CredentialUnavailable:
+            raise self._error("UNAVAILABLE") from None
+
+    def _query(self, item: KeychainItem, *, return_data: bool) -> bytes:
+        if item not in self._native_items:
+            raise self._error("SCOPE_REFUSED")
+        if sys.platform != "darwin":
+            raise self._error("UNAVAILABLE")
+        try:
+            security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+            core = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+            copy = security.SecItemCopyMatching
+            copy.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+            copy.restype = ctypes.c_int32
+            string = core.CFStringCreateWithCString
+            string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+            string.restype = ctypes.c_void_p
+            dictionary = core.CFDictionaryCreate
+            dictionary.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+                                   ctypes.POINTER(ctypes.c_void_p), ctypes.c_long,
+                                   ctypes.c_void_p, ctypes.c_void_p]
+            dictionary.restype = ctypes.c_void_p
+            core.CFGetTypeID.argtypes = [ctypes.c_void_p]
+            core.CFGetTypeID.restype = ctypes.c_ulong
+            core.CFDataGetTypeID.argtypes = []
+            core.CFDataGetTypeID.restype = ctypes.c_ulong
+            core.CFDataGetLength.argtypes = [ctypes.c_void_p]
+            core.CFDataGetLength.restype = ctypes.c_long
+            core.CFDataGetBytePtr.argtypes = [ctypes.c_void_p]
+            core.CFDataGetBytePtr.restype = ctypes.c_void_p
+            release = core.CFRelease
+            release.argtypes = [ctypes.c_void_p]
+            release.restype = None
+            owned: list[int] = []
+            result = ctypes.c_void_p()
+            try:
+                service = string(None, item.service.encode("utf-8"), 0x08000100)
+                if not service:
+                    raise self._error("UNAVAILABLE")
+                owned.append(service)
+                account = string(None, item.account.encode("utf-8"), 0x08000100)
+                if not account:
+                    raise self._error("UNAVAILABLE")
+                owned.append(account)
+                sec = lambda name: self._symbol(security, name)
+                cf = lambda name: self._symbol(core, name)
+                pairs = [
+                    (sec("kSecClass"), sec("kSecClassGenericPassword")),
+                    (sec("kSecAttrService"), service),
+                    (sec("kSecAttrAccount"), account),
+                    (sec("kSecMatchLimit"), sec("kSecMatchLimitOne")),
+                    (sec("kSecUseAuthenticationUI"), sec("kSecUseAuthenticationUIFail")),
+                    (sec("kSecUseDataProtectionKeychain"), cf("kCFBooleanFalse")),
+                    (sec("kSecAttrSynchronizable"), cf("kCFBooleanFalse")),
+                ]
+                if return_data:
+                    pairs.append((sec("kSecReturnData"), cf("kCFBooleanTrue")))
+                keys = (ctypes.c_void_p * len(pairs))(*(key for key, _ in pairs))
+                values = (ctypes.c_void_p * len(pairs))(*(value for _, value in pairs))
+                query = dictionary(None, keys, values, len(pairs),
+                                   self._symbol(core, "kCFTypeDictionaryKeyCallBacks", address=True),
+                                   self._symbol(core, "kCFTypeDictionaryValueCallBacks", address=True))
+                if not query:
+                    raise self._error("UNAVAILABLE")
+                owned.append(query)
+                status = copy(query, ctypes.byref(result) if return_data else None)
+                if status == -25300:
+                    raise self._error("ITEM_MISSING")
+                if status in (-25308, -25293, -128):
+                    raise self._error("OWNER_AUTH_REQUIRED")
+                if status != 0:
+                    raise self._error("READ_FAILED")
+                if not return_data:
+                    return b""
+                if not result.value or core.CFGetTypeID(result) != core.CFDataGetTypeID():
+                    raise self._error("ITEM_INVALID")
+                length = core.CFDataGetLength(result)
+                if not 0 < length <= min(self.maximum_bytes, 65536):
+                    raise self._error("ITEM_INVALID")
+                data = core.CFDataGetBytePtr(result)
+                if not data:
+                    raise self._error("ITEM_INVALID")
+                value = ctypes.string_at(data, length)
+                if b"\x00" in value:
+                    raise self._error("ITEM_INVALID")
+                return value
+            finally:
+                # SecItemCopyMatching returns immutable CFData. Release it;
+                # writing through CFDataGetBytePtr would violate its API.
+                if result.value:
+                    release(result)
+                for reference in reversed(owned):
+                    release(reference)
+        except CredentialUnavailable:
+            raise
+        except Exception:
+            raise self._error("READ_FAILED") from None
+
+    def read(self, item: KeychainItem) -> bytes:
+        return self._query(item, return_data=True)
+
+    def read_text(self, item: KeychainItem) -> str:
+        try:
+            return self.read(item).decode("utf-8")
+        except UnicodeDecodeError:
+            raise self._error("ITEM_NOT_UTF8") from None
+
+    def metadata_status(self, item: KeychainItem) -> str:
+        try:
+            self._query(item, return_data=False)
+            return "PRESENT"
+        except CredentialUnavailable as exc:
+            return "MISSING" if exc.code == f"{self._native_error_prefix}_ITEM_MISSING" else "UNAVAILABLE"
+
+
+class GmailNativeMacOSKeychain(_ScopedNativeMacOSKeychain):
+    """Read-only custody for exactly the five enrolled IBKR Gmail items."""
+
+    _native_items = IBKR_GMAIL_NATIVE_ITEMS
+    _native_error_prefix = "CREDENTIAL_GMAIL_NATIVE_KEYCHAIN"
+
+    def __init__(self, *, items: Sequence[KeychainItem], maximum_bytes: int = 65536):
+        super().__init__(maximum_bytes=maximum_bytes)
+        if len(items) != 5 or frozenset(items) != IBKR_GMAIL_NATIVE_ITEMS:
+            raise self._error("SCOPE_REFUSED")
+
+
+class IbkrControlNativeMacOSKeychain(_ScopedNativeMacOSKeychain):
+    """Read only the exact enrolled IBKR control key using existing OS ACLs.
+
+    No setup/create API, authorization binding, signing, or runtime-readiness
+    assertion belongs to this reader. Authentication requirements fail closed.
+    """
+
+    _native_items = frozenset({IBKR_CONTROL_NATIVE_ITEM})
+    _native_error_prefix = "CREDENTIAL_IBKR_CONTROL_NATIVE_KEYCHAIN"
+
+    def __init__(self, *, item: KeychainItem):
+        super().__init__(maximum_bytes=4096)
+        if item != IBKR_CONTROL_NATIVE_ITEM:
+            raise self._error("SCOPE_REFUSED")
 
 
 def select_account_gmail_profile(
@@ -955,13 +1215,21 @@ class GmailDesktopOAuthAuthorizer:
                 "User-Agent": "titan-full-live/2",
             },
         )
+        failure_code: str | None = None
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
                 payload = response.read(1024 * 1024 + 1)
-        except Exception as exc:
-            raise NotificationDeliveryError(
-                "NOTIFICATION_GMAIL_OAUTH_REFRESH_FAILED"
-            ) from exc
+        except HTTPError as error:
+            failure_code = _gmail_oauth_http_failure_code(error)
+            payload = b""
+        except Exception as error:
+            failure_code = _gmail_oauth_transport_failure_code(error)
+            payload = b""
+        # Raise outside the provider exception handler so the replacement
+        # exception retains no URL, response body, headers or provider text in
+        # its cause/context chain.
+        if failure_code is not None:
+            raise NotificationDeliveryError(failure_code)
         if len(payload) > 1024 * 1024:
             raise NotificationDeliveryError("NOTIFICATION_GMAIL_OAUTH_RESPONSE_OVERSIZED")
         try:

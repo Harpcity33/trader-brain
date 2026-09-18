@@ -21,6 +21,11 @@ to zero.  The v4 ledger preserves the fixed baseline and flow watermark across
 restart and installer-controlled release rebinding; retained historical flow
 rows never become fresh authority by themselves.
 
+The separate ``ibkr_flex`` reader ingests authenticatable statement-period
+reporting data only. Its receipt time and period NAV must not be substituted
+for the daily schema's midnight valuation or current exhaustive flow proof;
+it deliberately cannot construct this module's verified baseline type.
+
 The account-snapshot wrapper adds the freshly collected TWS current-day value
 to the authenticated prior-day value.  A separate, identity-bound SQLite
 ledger retains the maximum observed NetLiquidation so peak equity cannot

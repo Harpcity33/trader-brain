@@ -34,8 +34,15 @@ from .provider_clients import (
 )
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+# Google Desktop client exports may retain the legacy URL as metadata. Never
+# navigate to an imported URL: OAuthAttempt always uses AUTH_ENDPOINT above.
+DESKTOP_AUTH_METADATA_ENDPOINTS = frozenset({
+    AUTH_ENDPOINT, "https://accounts.google.com/o/oauth2/auth",
+})
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 MAX_BYTES = 65536
+CALLBACK_CLEANUP_SCRIPT = 'history.replaceState(null, "", "/oauth2callback");'
+CALLBACK_CLEANUP_HASH = base64.b64encode(hashlib.sha256(CALLBACK_CLEANUP_SCRIPT.encode("ascii")).digest()).decode("ascii")
 
 
 class SetupError(RuntimeError):
@@ -105,7 +112,7 @@ class DesktopClient:
             if (not isinstance(client_id, str) or len(client_id) > 512 or not re.fullmatch(r"[a-zA-Z0-9._-]+\.apps\.googleusercontent\.com", client_id)
                     or not _opaque(client_secret)
                     or value["token_uri"] != TOKEN_ENDPOINT
-                    or value["auth_uri"] != AUTH_ENDPOINT
+                    or value["auth_uri"] not in DESKTOP_AUTH_METADATA_ENDPOINTS
                     or not gmail_desktop_loopback_uris_valid(value["redirect_uris"])
                     or "web" in parsed):
                 raise ValueError()
@@ -252,46 +259,139 @@ def exchange_and_verify(attempt: OAuthAttempt, code: str, *, request=token_reque
 
 
 class CreateOnlyMacOSKeychain(MacOSKeychain):
-    """Security.framework calls keep private values out of subprocess argv."""
+    """Owner-interactive setup only; runtime Keychain access stays unchanged.
+
+    Native reads authenticate this application normally and let macOS own the
+    access dialog's lifetime, instead of killing a security subprocess after
+    ten seconds. No access-control or interaction settings are changed.
+    """
+
+    def metadata_status(self, item: KeychainItem) -> str:
+        if not item.account:
+            return "UNAVAILABLE"
+        return super().metadata_status(item)
+
+    def read(self, item: KeychainItem) -> bytes:
+        if sys.platform != "darwin" or not item.account:
+            raise SetupError("GMAIL_SETUP_KEYCHAIN_READ_UNAVAILABLE")
+        try:
+            security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+            find = security.SecKeychainFindGenericPassword
+            find.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p,
+                             ctypes.c_uint32, ctypes.c_char_p,
+                             ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_void_p),
+                             ctypes.POINTER(ctypes.c_void_p)]
+            find.restype = ctypes.c_int32
+            free = security.SecKeychainItemFreeContent
+            free.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            free.restype = ctypes.c_int32
+            service, account = item.service.encode(), item.account.encode()
+            length, data = ctypes.c_uint32(), ctypes.c_void_p()
+            try:
+                status = find(None, len(service), service, len(account), account,
+                              ctypes.byref(length), ctypes.byref(data), None)
+                if status != 0:
+                    raise SetupError("GMAIL_SETUP_KEYCHAIN_READ_FAILED")
+                if not data.value or not 0 < length.value <= min(self.maximum_bytes, MAX_BYTES):
+                    raise SetupError("GMAIL_SETUP_KEYCHAIN_ITEM_INVALID")
+                value = ctypes.string_at(data.value, length.value)
+                if b"\x00" in value:
+                    raise SetupError("GMAIL_SETUP_KEYCHAIN_ITEM_INVALID")
+                return value
+            finally:
+                if data.value:
+                    # The SDK owns this allocation; wipe the returned data and
+                    # release it with the paired Security.framework function.
+                    ctypes.memset(data.value, 0, length.value)
+                    if free(None, data) != 0:
+                        raise SetupError("GMAIL_SETUP_KEYCHAIN_READ_FAILED")
+        except SetupError:
+            raise
+        except Exception:
+            raise SetupError("GMAIL_SETUP_KEYCHAIN_READ_FAILED") from None
 
     def add(self, item: KeychainItem, value: bytes) -> None:
-        if sys.platform != "darwin" or not value or len(value) > MAX_BYTES or b"\x00" in value:
+        if (sys.platform != "darwin" or not item.account or type(value) is not bytes
+                or not value or len(value) > MAX_BYTES or b"\x00" in value):
             raise SetupError("GMAIL_SETUP_KEYCHAIN_WRITE_UNAVAILABLE")
         if self.metadata_status(item) != "MISSING":
             raise SetupError("GMAIL_SETUP_KEYCHAIN_ITEM_ALREADY_EXISTS_OR_UNAVAILABLE")
-        security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
-        add = security.SecKeychainAddGenericPassword
-        # Apple SecKeychain.h: final parameter is SecKeychainItemRef*, optional.
-        add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p,
-                        ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32,
-                        ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-        add.restype = ctypes.c_int32
-        service, account = item.service.encode(), (item.account or "").encode()
-        secret_buffer = ctypes.create_string_buffer(value)
         try:
-            result = add(None, len(service), service, len(account), account, len(value), secret_buffer, None)
-        finally:
-            ctypes.memset(secret_buffer, 0, len(secret_buffer))
+            security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+            add = security.SecKeychainAddGenericPassword
+            # Apple SecKeychain.h: final parameter is SecKeychainItemRef*, optional.
+            add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p,
+                            ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32,
+                            ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+            add.restype = ctypes.c_int32
+            service, account = item.service.encode(), item.account.encode()
+            secret_buffer = ctypes.create_string_buffer(value)
+            try:
+                result = add(None, len(service), service, len(account), account, len(value), secret_buffer, None)
+            finally:
+                ctypes.memset(secret_buffer, 0, len(secret_buffer))
+        except Exception:
+            raise SetupError("GMAIL_SETUP_KEYCHAIN_CREATE_FAILED") from None
         if result != 0:
             raise SetupError("GMAIL_SETUP_KEYCHAIN_CREATE_FAILED")
-        if not hmac.compare_digest(self.read(item), value):
-            raise SetupError("GMAIL_SETUP_KEYCHAIN_READBACK_FAILED")
+        try:
+            matches = hmac.compare_digest(self.read(item), value)
+        except Exception:
+            raise SetupError("GMAIL_SETUP_KEYCHAIN_READBACK_FAILED_REVIEW_PARTIAL_ENROLLMENT") from None
+        if not matches:
+            raise SetupError("GMAIL_SETUP_KEYCHAIN_READBACK_FAILED_REVIEW_PARTIAL_ENROLLMENT")
+
+
+def require_enrollment_state(profile: dict, client: DesktopClient, *, keychain: CreateOnlyMacOSKeychain,
+                             authorize_recover_client_only: bool = False) -> list[KeychainItem]:
+    """Permit empty enrollment, or explicitly authorized matching-client-only recovery."""
+    if type(profile.get("credential_account")) is not str or not profile["credential_account"]:
+        raise SetupError("GMAIL_SETUP_KEYCHAIN_ACCOUNT_REQUIRED")
+    items = [KeychainItem(profile[name], profile["credential_account"]) for name in GMAIL_KEYCHAIN_SERVICE_FIELDS]
+    expected = ["PRESENT", "MISSING", "MISSING", "MISSING", "MISSING"] if authorize_recover_client_only else ["MISSING"] * 5
+    error = ("GMAIL_SETUP_RECOVERY_REQUIRES_MATCHING_CLIENT_ONLY" if authorize_recover_client_only
+             else "GMAIL_SETUP_EXISTING_ITEMS_REQUIRE_OWNER_REVIEW")
+    try:
+        if [keychain.metadata_status(item) for item in items] != expected:
+            raise SetupError(error)
+        if authorize_recover_client_only:
+            try:
+                stored = DesktopClient.parse(keychain.read(items[0]))
+                # Compare all imported fields, accepting only JSON formatting
+                # and key-order differences. Neither values nor hashes escape.
+                def canonical(value: DesktopClient) -> bytes:
+                    return json.dumps(_json_object(value.raw_json.encode("utf-8")),
+                                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+                matches = hmac.compare_digest(canonical(stored), canonical(client))
+            except Exception:
+                raise SetupError("GMAIL_SETUP_RECOVERY_CLIENT_UNVERIFIABLE") from None
+            if not matches:
+                raise SetupError("GMAIL_SETUP_RECOVERY_CLIENT_MISMATCH")
+            # Owner authentication can take time: repeat the complete metadata
+            # check after reading the client, before any consent or writes.
+            if [keychain.metadata_status(item) for item in items] != expected:
+                raise SetupError(error)
+    except SetupError:
+        raise
+    except Exception:
+        raise SetupError(error) from None
+    return items
 
 
 def save_enrollment(profile: dict, client: DesktopClient, refresh: str, *, sender: str,
-                    destination: str, consent_status: str, keychain: CreateOnlyMacOSKeychain) -> None:
+                    destination: str, consent_status: str, keychain: CreateOnlyMacOSKeychain,
+                    authorize_recover_client_only: bool = False) -> None:
     if consent_status not in {"production", "internal"}:
         raise SetupError("GMAIL_SETUP_DURABLE_PUBLISHING_STATUS_REQUIRED")
     if not _opaque(refresh):
         raise SetupError("GMAIL_SETUP_EXACT_SEND_ONLY_DURABLE_GRANT_REQUIRED")
     values = [client.raw_json, refresh, consent_status, address(sender), address(destination)]
-    items = [KeychainItem(profile[name], profile["credential_account"]) for name in GMAIL_KEYCHAIN_SERVICE_FIELDS]
-    if any(keychain.metadata_status(item) != "MISSING" for item in items):
-        raise SetupError("GMAIL_SETUP_EXISTING_ITEMS_REQUIRE_OWNER_REVIEW")
+    items = require_enrollment_state(profile, client, keychain=keychain,
+                                     authorize_recover_client_only=authorize_recover_client_only)
     # Commit consent last, after four verified writes. Failures before that
     # leave no consent; failure after the final write requires owner review
     # because credentials may be complete. No route readiness is issued here.
-    for index in (0, 1, 3, 4, 2):
+    for index in ((1, 3, 4, 2) if authorize_recover_client_only else (0, 1, 3, 4, 2)):
         keychain.add(items[index], values[index].encode("utf-8"))
 
 
@@ -334,14 +434,20 @@ def receive_callback(client: DesktopClient, sender: str, *, announce: Callable[[
                 if str(exc) in {"GMAIL_SETUP_OWNER_DENIED", "GMAIL_SETUP_CALLBACK_EXPIRED"}:
                     failures.append(str(exc))
                 self.send_response(400)
-                payload = b"Authorization not accepted. Return to Titan setup."
+                message = "Authorization not accepted. Return to Titan setup."
             else:
                 result.append(code)
                 self.send_response(200)
-                payload = b"Authorization received. Return to Titan setup; no email or trade was sent."
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+                message = "Authorization received. Return to Titan setup; no email or trade was sent."
+            # Every interpolated value is static; no request data is reflected.
+            # Remove the consumed code from the visible URL and history entry.
+            payload = ("<!doctype html><html><head><meta charset=\"utf-8\">"
+                       "<title>Titan Gmail setup</title><script>" + CALLBACK_CLEANUP_SCRIPT
+                       + "</script></head><body><p>" + message + "</p></body></html>").encode("utf-8")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'sha256-" + CALLBACK_CLEANUP_HASH + "'")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -371,6 +477,8 @@ def main(argv=None) -> int:
     parser.add_argument("--destination", required=True)
     parser.add_argument("--consent-status", choices=("production", "internal"), required=True, help="owner-verified Google publishing status; Testing is not durable")
     parser.add_argument("--authorize-keychain-create", action="store_true", help="owner authorizes create-only storage of five IBKR-scoped items")
+    parser.add_argument("--authorize-recover-client-only", action="store_true",
+                        help="owner authorizes preserving one matching desktop client and creating only four missing items after fresh Google consent")
     args = parser.parse_args(argv)
     try:
         if not args.authorize_keychain_create:
@@ -381,14 +489,15 @@ def main(argv=None) -> int:
         bindings = json.loads((args.source_root / "config/provider_bindings.json").read_text())
         _, profile = select_account_gmail_profile(bindings, policy.config)
         keychain = CreateOnlyMacOSKeychain()
-        if any(keychain.metadata_status(KeychainItem(profile[name], profile["credential_account"])) != "MISSING" for name in GMAIL_KEYCHAIN_SERVICE_FIELDS):
-            raise SetupError("GMAIL_SETUP_EXISTING_ITEMS_REQUIRE_OWNER_REVIEW")
+        require_enrollment_state(profile, client, keychain=keychain,
+                                 authorize_recover_client_only=args.authorize_recover_client_only)
         sender, destination = address(args.sender), address(args.destination)
         print("Open the following Google consent URL in your system browser (Safari/Chrome), not an embedded browser. Verify the chosen Google account. Do not share the callback URL.", flush=True)
         attempt, code = receive_callback(client, sender, announce=lambda url: print(url, flush=True))
         refresh = exchange_and_verify(attempt, code)
         save_enrollment(profile, client, refresh, sender=sender, destination=destination,
-                        consent_status=args.consent_status, keychain=keychain)
+                        consent_status=args.consent_status, keychain=keychain,
+                        authorize_recover_client_only=args.authorize_recover_client_only)
         print(json.dumps({"status": "KEYCHAIN_ENROLLMENT_COMPLETE", "scope": GMAIL_SEND_SCOPE,
                           "account_namespace": profile["credential_account"], "oauth_refresh_verified": True,
                           "publishing_status_source": "owner_attestation", "message_sent": False,

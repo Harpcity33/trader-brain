@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Titan Trade Alerts accesses, uses, stores, and shares information for its personal Gmail send-only notification integration.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; connect-src 'none'">
+  <title>Privacy policy — Titan Trade Alerts</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="index.html">Titan <span>Trade Alerts</span></a>
+    <nav aria-label="Main navigation">
+      <a href="index.html">About</a>
+      <a href="privacy.html" aria-current="page">Privacy</a>
+    </nav>
+  </header>
+  <main id="main" class="wrap policy">
+    <p class="eyebrow">Your information</p>
+    <h1>Privacy policy</h1>
+    <p class="policy-date">Effective September 14, 2026</p>
+    <p class="lead">Titan Trade Alerts is a personal, locally operated notification utility maintained by Shian Harper. This policy covers its Gmail alert integration and informational website, not unrelated brokerage services.</p>
+
+    <section aria-labelledby="access">
+      <h2 id="access"><span>01</span> Information the app handles</h2>
+      <p>The app requests only Google's <code>https://www.googleapis.com/auth/gmail.send</code> permission. That permits email sending on your behalf; it does not grant this integration permission to read inbox messages, manage drafts, delete mail, or access Contacts or Drive. <a href="https://developers.google.com/workspace/gmail/api/auth/scopes">Google's scope description</a>.</p>
+      <p>Local setup handles the owner-supplied Desktop OAuth client configuration, a short-lived authorization code, access and refresh tokens, the selected publishing-status attestation, and the approved sender and destination addresses.</p>
+      <p>For each alert, the app handles its subject and body, event identifier, and delivery records. Alert text is generated from local operational events and may include symbols, quantities, protection status, risk events, or failure reasons. Gmail returns a message identifier when it accepts a send request. This is not an inbox read or proof that the recipient saw the email.</p>
+    </section>
+    <section aria-labelledby="use">
+      <h2 id="use"><span>02</span> How information is used</h2>
+      <p>Information is used to authorize the Gmail connection, send owner-configured alerts and approved tests, refresh access, track delivery, limit duplicate processing, and investigate delivery or security problems. Gmail access does not authorize broker transactions.</p>
+      <p>Google user data is not sold, used for advertising or credit decisions, or used to train generalized AI models. It is not repurposed for unrelated features. Any new data use or permission requires an updated disclosure and appropriate consent before use.</p>
+      <p>Titan Trade Alerts will handle information received through Google APIs in accordance with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements, and the <a href="https://developers.google.com/workspace/workspace-api-user-data-developer-policy">Google Workspace user data and developer policy</a>.</p>
+    </section>
+    <section aria-labelledby="storage">
+      <h2 id="storage"><span>03</span> Local storage &amp; safeguards</h2>
+      <p>OAuth client configuration, the refresh token, sender and destination addresses, and publishing-status attestation are stored in dedicated macOS Keychain entries. Access tokens and authorization codes are handled in memory during the connection flow. The owner-downloaded client JSON is a separate local file and is restricted to the owner's Mac user.</p>
+      <p>The local trading-system database retains queued alert content, delivery status, event identifiers, timestamps, destination fingerprints, and provider receipts. Operational logs may also contain alert and error details. These records are not all stored in Keychain or encrypted by the application itself; protection of the Mac and its backups remains important.</p>
+      <p>Google requests use HTTPS. The local consent callback uses a temporary loopback listener with state and PKCE checks. These measures reduce risk but are not a guarantee against unauthorized access or a compromised device.</p>
+    </section>
+    <section aria-labelledby="sharing">
+      <h2 id="sharing"><span>04</span> Where information goes</h2>
+      <p>Google receives the authorization requests and outgoing email, including the sender, recipient, subject, body, and message headers. The approved recipient receives the alert. Their email provider, devices, and backups may retain it under their own settings and policies.</p>
+      <p>Credentials and Gmail data are not published on this website or intentionally shared with advertising services or data brokers. Human access to Google user data is limited to owner-authorized support, necessary security investigation, or legal requirements, consistent with Google's policy. The owner may inspect their own local records and messages.</p>
+    </section>
+    <section aria-labelledby="retention">
+      <h2 id="retention"><span>05</span> Retention, disconnection &amp; deletion</h2>
+      <p>There is no fixed automatic deletion schedule in the current local implementation. Credentials and operational records can remain until the owner removes them. Revoking Google access does not erase local files, database records, already-sent messages, or backups.</p>
+      <p>You can revoke the app's access through your <a href="https://myaccount.google.com/connections">Google Account connections</a>. Stop the local notification worker as well. See <a href="https://support.google.com/accounts/answer/13533235">Google's connection-management instructions</a>.</p>
+      <p>For local cleanup, remove only Titan's identified Gmail Keychain entries and downloaded client file, and arrange a scoped review of its retained alert records and backups. Do not delete a live trading database as a shortcut: it may contain records needed for safe reconciliation. This send-only integration cannot delete messages from Gmail; manage those copies in Gmail and with the recipient.</p>
+    </section>
+    <section aria-labelledby="website">
+      <h2 id="website"><span>06</span> This informational website</h2>
+      <p>These pages contain no sign-in form, advertising, tracking pixels, third-party fonts, analytics scripts, or browser-storage features. They do not connect to the trading runtime.</p>
+      <p>This website is hosted on GitHub Pages. GitHub processes website requests and logs visitors' IP addresses for security purposes, as described in the <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages">GitHub Pages documentation</a> and <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub Privacy Statement</a>. Following an external link or emailing support involves that separate provider.</p>
+    </section>
+    <section aria-labelledby="contact">
+      <h2 id="contact"><span>07</span> Contact &amp; policy changes</h2>
+      <p>For privacy questions or help with a scoped deletion request, contact Shian Harper at <a href="mailto:shian.harper@gmail.com">shian.harper@gmail.com</a>. Do not send secrets or full account identifiers.</p>
+      <p>This policy will be updated when the integration's practices change. Changes to Google-data access or use will be disclosed for review and any required renewed consent before they take effect.</p>
+    </section>
+  </main>
+  <footer class="site-footer wrap">
+    <p>Titan Trade Alerts · Personal notification utility</p>
+    <a href="index.html">About the app</a>
+  </footer>
+</body>
+</html>

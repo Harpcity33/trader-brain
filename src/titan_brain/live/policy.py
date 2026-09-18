@@ -21,6 +21,14 @@ from titan_brain.risk import RiskLimits
 from .calendar import ExchangeCalendar
 from .money import decimal_value, whole_shares
 from .provider_profile import IbkrLocalProviderProfile, ProviderProfileError
+from .session_trading_policy import (
+    MODEL as SESSION_TRADING_MODEL,
+    OWNER_AMENDMENT_PATH as _SESSION_AMENDMENT_PATH,
+    OWNER_AMENDMENT_SHA256 as _SESSION_AMENDMENT_SHA256,
+    POLICY_RELATIVE_PATH as _SESSION_LIMITS_PATH,
+    load_session_trading_policy,
+    load_session_trading_policy_from_root,
+)
 
 
 _IBKR_AUTONOMOUS_AUTHORITY_SCHEMA = (
@@ -105,6 +113,23 @@ _DAILY_STARTING_EQUITY_CONFIG_CONTRACT = {
     "daily_loss_requires_guarded_closeout": True,
     "authenticated_daily_starting_equity_required": True,
     "authenticated_daily_external_cash_flow_required": True,
+}
+_SESSION_TRADING_AMENDMENT = {
+    "amendment_path": _SESSION_AMENDMENT_PATH,
+    "amendment_sha256": _SESSION_AMENDMENT_SHA256,
+}
+_SESSION_TRADING_CONFIG_CONTRACT = {
+    "model": SESSION_TRADING_MODEL,
+    "limits_path": _SESSION_LIMITS_PATH,
+    "daily_loss_fraction": "0.10",
+    "daily_profit_aspiration_fraction": "0.15",
+    "post_goal_floor": None,
+    "positive_execution_reserve_required": True,
+    "loss_lock_is_irreversible_for_session": True,
+    "daily_loss_requires_guarded_closeout": True,
+    "authenticated_session_baseline_required": True,
+    "authenticated_session_measurement_required": True,
+    "missing_data_incident_policy": "pending_before_read_failed_or_gap_sticky",
 }
 
 
@@ -213,7 +238,7 @@ class PolicyBundle:
 
     @property
     def risk_limits(self) -> RiskLimits:
-        if self.account_day_headroom_risk:
+        if self.account_day_headroom_risk or self.session_trading_risk:
             raise ValueError("account-day headroom policy has no legacy percentage limits")
         return RiskLimits.from_mapping(self.risk_raw)
 
@@ -226,11 +251,18 @@ class PolicyBundle:
         return self.config["risk"].get("model") == DAILY_STARTING_EQUITY_MODEL
 
     @property
+    def session_trading_risk(self) -> bool:
+        """Recognize the distinct metric; never reinterpret legacy risk fields."""
+        return self.config["risk"].get("model") == SESSION_TRADING_MODEL
+
+    @property
     def account_day_headroom_risk(self) -> bool:
         return self.dollar_headroom_risk or self.daily_starting_equity_risk
 
     @property
     def daily_risk_baseline_schema(self) -> str:
+        if self.session_trading_risk:
+            raise ValueError("session-trading policy has no legacy daily-risk baseline schema")
         return (
             _IBKR_DAILY_STARTING_EQUITY_BASELINE_SCHEMA
             if self.daily_starting_equity_risk
@@ -248,6 +280,35 @@ class PolicyBundle:
             )
         )
 
+    def _session_trading_config_matches(self) -> bool:
+        risk = self.config["risk"]
+        metadata_fields = {"limits_live_provenance_verified", "limits_provenance_state"}
+        return (
+            set(risk) == set(_SESSION_TRADING_CONFIG_CONTRACT) | metadata_fields
+            and all(canonical_json(risk.get(key)) == canonical_json(value)
+                    for key, value in _SESSION_TRADING_CONFIG_CONTRACT.items())
+        )
+
+    def _session_trading_provenance_verified(self) -> bool:
+        """Verify approved policy bytes, not broker facts or runtime readiness."""
+        approval = self.config.get("owner_policy_approval")
+        amendment = self.config.get("owner_risk_policy_amendment")
+        if (not self._session_trading_config_matches()
+                or self.account_key != "ibkr-live-ending-3103"
+                or self.account_last4 != "3103"
+                or self.config["sessions"].get("timezone") != "America/New_York"
+                or not isinstance(approval, Mapping)
+                or any(approval.get(key) != value for key, value in _DOLLAR_POLICY_APPROVAL.items())
+                or not isinstance(amendment, Mapping)
+                or canonical_json(amendment) != canonical_json(_SESSION_TRADING_AMENDMENT)):
+            return False
+        try:
+            parsed = load_session_trading_policy(self.risk_raw)
+            verified = load_session_trading_policy_from_root(self.root)
+            return parsed == verified and self.risk_hash == verified.policy_sha256
+        except (OSError, ValueError, TypeError):
+            return False
+
     @property
     def risk_provenance_verified(self) -> bool:
         """Recognize exact approved risk contracts, never an approval boolean.
@@ -258,6 +319,8 @@ class PolicyBundle:
         receipts remain independently mandatory.
         """
 
+        if self.session_trading_risk:
+            return self._session_trading_provenance_verified()
         if not self.account_day_headroom_risk:
             return self.config["risk"].get("limits_live_provenance_verified") is True
         approval = self.config.get("owner_policy_approval")
@@ -314,6 +377,11 @@ class PolicyBundle:
     @property
     def activation_blockers(self) -> tuple[str, ...]:
         blockers = list(self.config["authority"].get("blockers", []))
+        if self.session_trading_risk:
+            # Recognizing immutable owner policy does not install an evidence
+            # verifier, select this model, or make legacy consumers compatible.
+            # Replace only alongside a tested, mode-specific runtime composition.
+            blockers.append("SESSION_TRADING_RUNTIME_INTEGRATION_UNAVAILABLE")
         execution = self.config["execution"]
         evidence = self.config["evidence"]
         if execution.get("broker_adapter") == "supported_production_transport":
@@ -504,7 +572,10 @@ class PolicyBundle:
                         "full-live target exit contract is incomplete or changed"
                     )
         risk = self.config["risk"]
-        if self.daily_starting_equity_risk:
+        if self.session_trading_risk:
+            if not self._session_trading_config_matches():
+                raise ValueError("session-trading risk configuration differs from the approved amendment")
+        elif self.daily_starting_equity_risk:
             if not self._daily_starting_equity_config_matches():
                 raise ValueError("daily starting-equity risk configuration differs from the approved amendment")
         else:
@@ -817,107 +888,108 @@ class PolicyBundle:
                     raise ValueError(
                         "IBKR unattended owner-policy/pricing receipt key must be distinct"
                     )
-                if (
-                    execution.get("ibkr_daily_risk_baseline_schema")
-                    != self.daily_risk_baseline_schema
-                ):
-                    raise ValueError(
-                        "IBKR unattended daily risk baseline schema is missing or invalid"
-                    )
-                baseline_relative_raw = execution.get(
-                    "ibkr_daily_risk_baseline_relative_path"
-                )
-                if type(baseline_relative_raw) is not str:
-                    raise ValueError(
-                        "IBKR unattended daily risk baseline path must be a relative JSON file"
-                    )
-                baseline_relative = Path(baseline_relative_raw)
-                if (
-                    not baseline_relative_raw
-                    or baseline_relative.is_absolute()
-                    or baseline_relative_raw != baseline_relative.as_posix()
-                    or "\\" in baseline_relative_raw
-                    or not baseline_relative.parts
-                    or any(part in {".", ".."} for part in baseline_relative.parts)
-                    or baseline_relative.parent != Path("control/ibkr")
-                    or baseline_relative.suffix != ".json"
-                    or baseline_relative in {
-                        authority_relative,
-                        policy_receipt_relative,
-                    }
-                ):
-                    raise ValueError(
-                        "IBKR unattended daily risk baseline path must be a distinct private JSON file under control/ibkr"
-                    )
-                if (
-                    execution.get("ibkr_daily_risk_baseline_key_source")
-                    != "macos_keychain"
-                ):
-                    raise ValueError(
-                        "IBKR unattended daily risk baseline key source must be macos_keychain"
-                    )
-                for field in (
-                    "ibkr_daily_risk_baseline_key_service",
-                    "ibkr_daily_risk_baseline_key_account",
-                ):
-                    value = execution.get(field)
+                if not self.session_trading_risk:
                     if (
-                        type(value) is not str
-                        or _NONSECRET_LOCATOR.fullmatch(value) is None
+                        execution.get("ibkr_daily_risk_baseline_schema")
+                        != self.daily_risk_baseline_schema
                     ):
                         raise ValueError(
-                            f"IBKR unattended {field} must be a nonsecret keychain locator"
+                            "IBKR unattended daily risk baseline schema is missing or invalid"
                         )
-                baseline_key = (
-                    execution["ibkr_daily_risk_baseline_key_service"],
-                    execution["ibkr_daily_risk_baseline_key_account"],
-                )
-                if (
-                    baseline_key
-                    in {
-                        (
-                            execution["ibkr_autonomous_authority_key_service"],
-                            execution["ibkr_autonomous_authority_key_account"],
-                        ),
-                        (
-                            execution[
-                                "ibkr_autonomous_policy_receipt_key_service"
-                            ],
-                            execution[
-                                "ibkr_autonomous_policy_receipt_key_account"
-                            ],
-                        ),
-                    }
-                    or baseline_key[1] != self.account_key
-                ):
-                    raise ValueError(
-                        "IBKR unattended daily risk baseline key must be distinct and account-bound"
+                    baseline_relative_raw = execution.get(
+                        "ibkr_daily_risk_baseline_relative_path"
                     )
-                high_water_relative_raw = execution.get(
-                    "ibkr_risk_high_water_ledger_relative_path"
-                )
-                if type(high_water_relative_raw) is not str:
-                    raise ValueError(
-                        "IBKR unattended risk high-water ledger path must be relative"
+                    if type(baseline_relative_raw) is not str:
+                        raise ValueError(
+                            "IBKR unattended daily risk baseline path must be a relative JSON file"
+                        )
+                    baseline_relative = Path(baseline_relative_raw)
+                    if (
+                        not baseline_relative_raw
+                        or baseline_relative.is_absolute()
+                        or baseline_relative_raw != baseline_relative.as_posix()
+                        or "\\" in baseline_relative_raw
+                        or not baseline_relative.parts
+                        or any(part in {".", ".."} for part in baseline_relative.parts)
+                        or baseline_relative.parent != Path("control/ibkr")
+                        or baseline_relative.suffix != ".json"
+                        or baseline_relative in {
+                            authority_relative,
+                            policy_receipt_relative,
+                        }
+                    ):
+                        raise ValueError(
+                            "IBKR unattended daily risk baseline path must be a distinct private JSON file under control/ibkr"
+                        )
+                    if (
+                        execution.get("ibkr_daily_risk_baseline_key_source")
+                        != "macos_keychain"
+                    ):
+                        raise ValueError(
+                            "IBKR unattended daily risk baseline key source must be macos_keychain"
+                        )
+                    for field in (
+                        "ibkr_daily_risk_baseline_key_service",
+                        "ibkr_daily_risk_baseline_key_account",
+                    ):
+                        value = execution.get(field)
+                        if (
+                            type(value) is not str
+                            or _NONSECRET_LOCATOR.fullmatch(value) is None
+                        ):
+                            raise ValueError(
+                                f"IBKR unattended {field} must be a nonsecret keychain locator"
+                            )
+                    baseline_key = (
+                        execution["ibkr_daily_risk_baseline_key_service"],
+                        execution["ibkr_daily_risk_baseline_key_account"],
                     )
-                high_water_relative = Path(high_water_relative_raw)
-                if (
-                    not high_water_relative_raw
-                    or high_water_relative.is_absolute()
-                    or high_water_relative_raw != high_water_relative.as_posix()
-                    or "\\" in high_water_relative_raw
-                    or not high_water_relative.parts
-                    or any(part in {".", ".."} for part in high_water_relative.parts)
-                    or high_water_relative.parent != Path("state")
-                    or high_water_relative.suffix != ".sqlite3"
-                    or high_water_relative == ledger_path
-                    or high_water_relative
-                    != IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH
-                ):
-                    raise ValueError(
-                        "IBKR unattended risk high-water ledger must use the canonical "
-                        "state/ibkr-risk-high-water.sqlite3 path"
+                    if (
+                        baseline_key
+                        in {
+                            (
+                                execution["ibkr_autonomous_authority_key_service"],
+                                execution["ibkr_autonomous_authority_key_account"],
+                            ),
+                            (
+                                execution[
+                                    "ibkr_autonomous_policy_receipt_key_service"
+                                ],
+                                execution[
+                                    "ibkr_autonomous_policy_receipt_key_account"
+                                ],
+                            ),
+                        }
+                        or baseline_key[1] != self.account_key
+                    ):
+                        raise ValueError(
+                            "IBKR unattended daily risk baseline key must be distinct and account-bound"
+                        )
+                    high_water_relative_raw = execution.get(
+                        "ibkr_risk_high_water_ledger_relative_path"
                     )
+                    if type(high_water_relative_raw) is not str:
+                        raise ValueError(
+                            "IBKR unattended risk high-water ledger path must be relative"
+                        )
+                    high_water_relative = Path(high_water_relative_raw)
+                    if (
+                        not high_water_relative_raw
+                        or high_water_relative.is_absolute()
+                        or high_water_relative_raw != high_water_relative.as_posix()
+                        or "\\" in high_water_relative_raw
+                        or not high_water_relative.parts
+                        or any(part in {".", ".."} for part in high_water_relative.parts)
+                        or high_water_relative.parent != Path("state")
+                        or high_water_relative.suffix != ".sqlite3"
+                        or high_water_relative == ledger_path
+                        or high_water_relative
+                        != IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH
+                    ):
+                        raise ValueError(
+                            "IBKR unattended risk high-water ledger must use the canonical "
+                            "state/ibkr-risk-high-water.sqlite3 path"
+                        )
                 if execution.get("ibkr_autonomous_api_name") != "official_tws_python_api":
                     raise ValueError("IBKR unattended API name is invalid")
                 if execution.get("ibkr_autonomous_api_version") != ibkr_profile.sdk_version:
@@ -1058,7 +1130,7 @@ class PolicyBundle:
         # Separate schemas prevent staged percentages from becoming hidden
         # dollar-mode limits, or a config boolean from approving altered risk.
         risk_model = risk.get("model", "percentage_overlay")
-        if risk_model in {DOLLAR_HEADROOM_MODEL, DAILY_STARTING_EQUITY_MODEL}:
+        if risk_model in {DOLLAR_HEADROOM_MODEL, DAILY_STARTING_EQUITY_MODEL, SESSION_TRADING_MODEL}:
             if not self.risk_provenance_verified:
                 raise ValueError("account-day risk provenance must match the exact approved contract")
             if (

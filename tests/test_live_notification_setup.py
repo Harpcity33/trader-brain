@@ -88,9 +88,15 @@ class NotificationSetupTests(unittest.TestCase):
         reader.metadata_status.return_value = "MISSING"
         reader.read.side_effect = AssertionError("secret read")
         reader.read_text.side_effect = AssertionError("secret read")
-        report = notification_setup_status(
-            self.policy.config, self.bindings, keychain=reader
-        )
+        # Model the pre-enrollment state explicitly; the installed-account
+        # policy may already select an authenticated route.
+        config = copy.deepcopy(self.policy.config)
+        config["notifications"]["delivery_sink"] = "local_jsonl_staging"
+        config["notifications"]["destination_bridge_configured"] = False
+        bindings = copy.deepcopy(self.bindings)
+        bindings["ibkr_gmail"]["enabled"] = False
+        bindings["ibkr_gmail"]["send_probe_authorized"] = False
+        report = notification_setup_status(config, bindings, keychain=reader)
         self.assertEqual(report["selected_profile"], "ibkr_gmail")
         self.assertTrue(report["account_namespace_matches"])
         self.assertEqual(report["configured_delivery_sink"], "local_jsonl_staging")

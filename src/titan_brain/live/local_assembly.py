@@ -25,7 +25,6 @@ from .calendar import ExchangeCalendar
 from .broker.ibkr_authority import IbkrDispatchAuthority
 from .broker.ibkr_ledger import IbkrExecutionLedger
 from .broker.ibkr_risk_evidence import (
-    IBKR_DAILY_RISK_BASELINE_SCHEMA,
     IBKR_RISK_HIGH_WATER_LEDGER_RELATIVE_PATH,
     DailyIbkrRiskBaselineAuthenticator,
     IbkrDailyRiskBindingProvider,
@@ -56,12 +55,15 @@ from .massive_adapter import (
     PreparedStructure,
     UrllibMassiveRestTransport,
 )
-from .notifications import GmailProviderBinding
+from .notifications import GmailProviderBinding, NotificationDeliveryError
 from .pipeline import POST_SIZING_HARD_GATE_FACTS, REQUIRED_HARD_GATE_FACTS
 from .provider_clients import (
     CredentialUnavailable,
+    GMAIL_KEYCHAIN_SERVICE_FIELDS,
     GMAIL_SEND_SCOPE,
     GmailDesktopOAuthAuthorizer,
+    GmailNativeMacOSKeychain,
+    IbkrControlNativeMacOSKeychain,
     KeychainItem,
     KeychainMassiveAuthorizer,
     MacOSKeychain,
@@ -121,10 +123,63 @@ def _hash(value: object) -> str:
 
 
 def _safe_error(error: BaseException) -> str:
-    if isinstance(error, (CredentialUnavailable, LocalAssemblyError)):
-        return str(error)
+    expected_code = (
+        (CredentialUnavailable, r"CREDENTIAL_[A-Z0-9_]{1,96}"),
+        (LocalAssemblyError, r"LOCAL_ASSEMBLY_[A-Z0-9_]{1,96}"),
+        (NotificationDeliveryError, r"NOTIFICATION_[A-Z0-9_]{1,96}"),
+    )
+    for error_type, pattern in expected_code:
+        if isinstance(error, error_type):
+            code = getattr(error, "code", None)
+            if type(code) is str and re.fullmatch(pattern, code):
+                return code
+            break
     normalized = re.sub(r"[^A-Z0-9]+", "_", type(error).__name__.upper()).strip("_")
     return f"LOCAL_ASSEMBLY_PROVIDER_{normalized or 'ERROR'}"[:128]
+
+
+def _gmail_failure_action(error: BaseException) -> str:
+    """Give safe category-specific recovery guidance without provider text."""
+
+    code = _safe_error(error)
+    if isinstance(error, CredentialUnavailable):
+        return "inspect the exact account-scoped Gmail Keychain custody without overwriting it"
+    if isinstance(error, NotificationDeliveryError):
+        if re.fullmatch(
+            r"NOTIFICATION_GMAIL_OAUTH_HTTP_[0-9]{3}_INVALID_GRANT", code
+        ):
+            return "owner must renew Gmail consent and replace the revoked or expired refresh grant"
+        if re.fullmatch(
+            r"NOTIFICATION_GMAIL_OAUTH_HTTP_[0-9]{3}_INVALID_CLIENT", code
+        ):
+            return "repair the approved Gmail desktop OAuth client and retry without replacing the refresh grant"
+        if re.fullmatch(
+            r"NOTIFICATION_GMAIL_OAUTH_HTTP_[0-9]{3}_DELETED_CLIENT", code
+        ):
+            return "restore the approved Gmail OAuth client or replace it before renewing owner consent"
+        status_match = re.fullmatch(
+            r"NOTIFICATION_GMAIL_OAUTH_HTTP_([0-9]{3})_[A-Z0-9_]+", code
+        )
+        status = int(status_match.group(1)) if status_match is not None else None
+        if (
+            re.fullmatch(
+                r"NOTIFICATION_GMAIL_OAUTH_HTTP_[0-9]{3}_TEMPORARILY_UNAVAILABLE",
+                code,
+            )
+            or status == 429
+            or (status is not None and 500 <= status <= 599)
+        ):
+            return "preserve Gmail credentials and retry after the provider recovers"
+        if code in {
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_TIMEOUT",
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_TLS_FAILED",
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_DNS_FAILED",
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_NETWORK_FAILED",
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_FAILED",
+        }:
+            return "preserve Gmail credentials and retry after local network or TLS recovery"
+        return "preserve Gmail credentials and investigate the sanitized OAuth failure category"
+    return "inspect the sanitized Gmail provider failure before changing credentials"
 
 
 @dataclass(frozen=True)
@@ -530,7 +585,8 @@ class LocalProviderAssembly:
         self.release_root = Path(release_root).expanduser().resolve()
         self.install_root = Path(install_root).expanduser().resolve()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-        self.keychain = keychain or MacOSKeychain()
+        self._keychain_injected = keychain is not None
+        self.keychain = keychain if self._keychain_injected else MacOSKeychain()
         self.profile = self._load_json(
             self.release_root / "config/provider_bindings.json",
             expected_schema=PROVIDER_PROFILE_SCHEMA,
@@ -644,7 +700,10 @@ class LocalProviderAssembly:
                 "LOCAL_ASSEMBLY_IBKR_MANAGED_CONTROL_PROFILE_INVALID"
             ) from None
         try:
-            key = bytes(self.keychain.read(item))
+            control_keychain = self.keychain
+            if not self._keychain_injected:
+                control_keychain = IbkrControlNativeMacOSKeychain(item=item)
+            key = bytes(control_keychain.read(item))
         except Exception:
             raise LocalAssemblyError(
                 "LOCAL_ASSEMBLY_IBKR_MANAGED_CONTROL_KEY_UNAVAILABLE"
@@ -719,7 +778,22 @@ class LocalProviderAssembly:
                 components = runtime.components
             except Exception:
                 components = runtime.connect_reads()
-        except Exception:
+        except Exception as exc:
+            # Preserve only known, constant bootstrap diagnoses. Never render
+            # arbitrary exception text (which can contain account/credential
+            # data), or describe a socket/authentication failure as a P&L read.
+            from .broker.ibkr_runtime import IbkrRuntimeError
+
+            if isinstance(exc, IbkrRuntimeError) and exc.code in {
+                "IBKR_RUNTIME_READ_CONNECTION_NOT_ESTABLISHED",
+                "IBKR_RUNTIME_READ_CONNECTION_LOST",
+                "IBKR_RUNTIME_READ_CONNECTION_CLOSED",
+                "IBKR_RUNTIME_READ_EVENT_LOOP_EXITED",
+                "IBKR_RUNTIME_ACCOUNT_DISCOVERY_TIMEOUT",
+                "IBKR_RUNTIME_ACCOUNT_DISCOVERY_FAILED",
+                "IBKR_RUNTIME_READ_BOOTSTRAP_FAILED",
+            }:
+                raise LocalAssemblyError("LOCAL_ASSEMBLY_" + exc.code) from None
             raise LocalAssemblyError("LOCAL_ASSEMBLY_IBKR_READ_CONNECTION_FAILED") from None
         read_bridge = getattr(components, "read_bridge", None)
         instruments = getattr(components, "instrument_provider", None)
@@ -909,7 +983,7 @@ class LocalProviderAssembly:
                 )
                 if (
                     execution.get("ibkr_daily_risk_baseline_schema")
-                    != IBKR_DAILY_RISK_BASELINE_SCHEMA
+                    != policy.daily_risk_baseline_schema
                     or execution.get("ibkr_daily_risk_baseline_key_source")
                     != "macos_keychain"
                     or baseline_relative.is_absolute()
@@ -1284,16 +1358,21 @@ class LocalProviderAssembly:
             raise LocalAssemblyError("LOCAL_ASSEMBLY_GMAIL_NOT_CONFIGURED")
         if tuple(config.get("scopes", ())) != (GMAIL_SEND_SCOPE,):
             raise LocalAssemblyError("LOCAL_ASSEMBLY_GMAIL_SCOPE_INVALID")
+        gmail_keychain = self.keychain
+        if not self._keychain_injected and _profile_key == "ibkr_gmail":
+            gmail_keychain = GmailNativeMacOSKeychain(
+                items=tuple(self._item(config, field) for field in GMAIL_KEYCHAIN_SERVICE_FIELDS)
+            )
         authorizer = GmailDesktopOAuthAuthorizer(
-            self.keychain,
+            gmail_keychain,
             client_item=self._item(config, "desktop_client_service"),
             refresh_token_item=self._item(config, "refresh_token_service"),
             consent_status_item=self._item(config, "consent_status_service"),
         )
-        destination = self.keychain.read_text(
+        destination = gmail_keychain.read_text(
             self._item(config, "destination_service")
         ).strip()
-        sender = self.keychain.read_text(self._item(config, "sender_service")).strip()
+        sender = gmail_keychain.read_text(self._item(config, "sender_service")).strip()
         if not destination or not sender or any("\n" in value or "\r" in value for value in (destination, sender)):
             raise LocalAssemblyError("LOCAL_ASSEMBLY_GMAIL_ADDRESS_INVALID")
         self._gmail = GmailProviderBinding(
@@ -1842,6 +1921,28 @@ class LocalProviderAssembly:
                 )
             ]
         except Exception as exc:
+            safe_error = _safe_error(exc)
+            action_required = (
+                "install the attested official SDK and open the approved local TWS/Gateway read lane"
+            )
+            if safe_error in {
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_CONNECTION_NOT_ESTABLISHED",
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_CONNECTION_LOST",
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_CONNECTION_CLOSED",
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_READ_EVENT_LOOP_EXITED",
+            }:
+                action_required = (
+                    "restore the existing TWS/Gateway login and approved local API listener; "
+                    "account, P&L and contract reads were not reached"
+                )
+            elif safe_error in {
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_ACCOUNT_DISCOVERY_TIMEOUT",
+                "LOCAL_ASSEMBLY_IBKR_RUNTIME_ACCOUNT_DISCOVERY_FAILED",
+            }:
+                action_required = (
+                    "complete Gateway authentication and verify exact managed-account discovery; "
+                    "P&L and contract reads were not reached"
+                )
             return [
                 ProviderConnection(
                     component="ibkr_gateway_read_and_contracts",
@@ -1857,10 +1958,8 @@ class LocalProviderAssembly:
                         if probe_network
                         else "installed_runtime_without_socket_probe"
                     ),
-                    error_code=_safe_error(exc),
-                    action_required=(
-                        "install the attested official SDK and open the approved local TWS/Gateway read lane"
-                    ),
+                    error_code=safe_error,
+                    action_required=action_required,
                     account_or_destination_binding=f"ending-{profile.account_last4}",
                 )
             ]
@@ -2102,7 +2201,8 @@ class LocalProviderAssembly:
                             check_kind=check_kind,
                             error_code=None,
                             action_required=(
-                                "owner-authorized destination delivery test still required; no message was sent"
+                                "this credential probe does not inspect prior delivery or owner acknowledgement; "
+                                "verify the durable outbox and current release-bound delivery gate; no message was sent"
                             ),
                             account_or_destination_binding=_hash(
                                 {
@@ -2125,7 +2225,7 @@ class LocalProviderAssembly:
                             last_successful_check=None,
                             check_kind="oauth_refresh_without_send" if probe_network else "credential_presence",
                             error_code=_safe_error(exc),
-                            action_required="repair the owner-approved Gmail desktop OAuth Keychain items",
+                            action_required=_gmail_failure_action(exc),
                         )
                     )
         return {

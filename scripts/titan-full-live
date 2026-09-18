@@ -35,11 +35,22 @@ _AUTONOMOUS_COMPOSITION_COMMANDS = frozenset(
 
 _NOTIFICATION_ONLY_COMMANDS = frozenset(
     {
+        "notification-confirm-receipt",
         "notification-setup-status",
         "notification-test",
         "notification-worker",
     }
 )
+
+_FLEX_REPORTING_COMMANDS = frozenset(
+    {
+        "flex-enroll",
+        "flex-probe",
+        "flex-setup-status",
+    }
+)
+
+_CONTROL_SETUP_COMMANDS = frozenset({"ibkr-control-enroll"})
 
 _CONTROL_ONLY_COMMANDS = frozenset(
     {
@@ -49,6 +60,19 @@ _CONTROL_ONLY_COMMANDS = frozenset(
         "status",
     }
 )
+
+
+def _requires_installed_broker_sdk(arguments: list[str]) -> bool:
+    """Keep independent reporting/control commands outside the TWS SDK path."""
+
+    if not arguments:
+        return True
+    return arguments[0] not in (
+        _CONTROL_ONLY_COMMANDS
+        | _CONTROL_SETUP_COMMANDS
+        | _FLEX_REPORTING_COMMANDS
+        | _NOTIFICATION_ONLY_COMMANDS
+    )
 
 
 def _release_bound_command_inputs(
@@ -183,9 +207,7 @@ def main() -> int:
             )
 
             profile = IbkrLocalProviderProfile.from_config(policy.config)
-            if profile is not None and (
-                not sys.argv[1:] or sys.argv[1] not in _CONTROL_ONLY_COMMANDS
-            ):
+            if profile is not None and _requires_installed_broker_sdk(sys.argv[1:]):
                 activate_installed_sdk(install_root, profile)
     # Import only from the immutable release after the source root has been
     # fixed. Every command receives a graph from the same reviewed assembly;

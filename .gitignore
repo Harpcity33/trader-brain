@@ -7,3 +7,44 @@ dist/
 build/
 *.egg-info/
 
+# Local-only credentials, environments, broker state and report captures.
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+!.env.template
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.pem
+*.key
+*.p12
+*.pfx
+client_secret*.json
+credentials*.json
+token.json
+tokens.json
+/credentials/
+/secrets/
+/private/
+/runtime/
+/raw-reports/
+/dependencies/
+/work/
+
+# Generated handoff and release packages stay outside source control.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bundle

@@ -1,0 +1,28 @@
+{
+  "schema_version": "titan_session_trading_pre_trade_balance_2026-09-18_v1",
+  "model": "session_trading_pnl_against_pre_trade_balance",
+  "currency": "USD",
+  "session_timezone": "America/New_York",
+  "denominator_basis": "fixed_flat_pre_entry_net_liquidation_value",
+  "performance_basis": "stock_execution_cash_flows_minus_reported_fees_plus_residual_long_bid_value",
+  "daily_loss_fraction": "0.10",
+  "daily_profit_aspiration_fraction": "0.15",
+  "post_goal_floor": null,
+  "intraday_baseline_reset_allowed": false,
+  "external_cash_flows_in_performance": false,
+  "includes_open_pnl": true,
+  "includes_incurred_fees": true,
+  "daily_loss_action": "irreversible_entry_lock_and_guarded_closeout",
+  "profit_goal_action": "aspirational_only_no_forced_trade_or_profit_floor",
+  "maximum_entry_risk_capacity": "max_zero_min_fixed_loss_budget_and_remaining_session_headroom",
+  "all_open_pending_uncovered_unresolved_downside_required": true,
+  "positive_execution_reserve_required": true,
+  "commission_reserve_required": true,
+  "unleveraged_cash_and_buying_power_required": true,
+  "loss_lock_is_irreversible_for_session": true,
+  "missing_data_incident_policy": "pending_before_read_failed_or_gap_sticky",
+  "owner_risk_amendment": {
+    "amendment_path": "validation/full-live/2026-09-18/OWNER_SESSION_TRADING_PNL_AMENDMENT_2026-09-18.md",
+    "amendment_sha256": "da60ce0060764aa4cffdb04c1de04e4af89ffeb914b2ef479d3c90f2e1db1577"
+  }
+}

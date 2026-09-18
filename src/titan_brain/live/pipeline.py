@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta, timezone
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal, ROUND_FLOOR, localcontext
 from enum import Enum
 import hashlib
 import json
@@ -60,6 +60,7 @@ from .risk_runtime import (
     AccountRiskSnapshot,
     RiskDecision,
     RiskExposure,
+    SessionAccountRiskSnapshot,
     SessionLatch,
     dollar_headroom_capacity,
     daily_starting_equity_capacity,
@@ -67,6 +68,7 @@ from .risk_runtime import (
     evaluate_entry,
 )
 from .state import LiveStateStore
+from .session_trading_policy import SessionTradingState, evaluate_session_state
 
 
 ZERO = Decimal("0")
@@ -605,13 +607,16 @@ def build_account_risk_snapshot(
 ) -> tuple[AccountRiskSnapshot | None, tuple[str, ...]]:
     """Merge exact broker risk facts with every durable possible exposure.
 
-    ``exclude_plan_id`` is used only for an exact idempotent replay so that its
-    own reservation is not charged twice.  Its broker order remains recognized
-    as locally owned; any different plan continues to see the exposure.
+    ``exclude_plan_id`` is used only for an exact, demonstrably unfilled
+    idempotent replay so that its pending reservation is not charged twice.
+    Unknown or filled state is never excluded. Its broker order remains
+    recognized as locally owned; any different plan continues to see it.
     """
 
     current = _aware_utc(now, "now")
     failures: list[str] = []
+    if policy.session_trading_risk:
+        return None, ("SESSION_RISK_SNAPSHOT_PATH_REQUIRED",)
     masked = f"••••{policy.account_last4}"
     if broker_snapshot.account_masked != masked:
         failures.append("ACCOUNT_POLICY_MISMATCH")
@@ -627,10 +632,18 @@ def build_account_risk_snapshot(
     if policy.daily_starting_equity_risk and any(
         position.quantity != 0 for position in broker_snapshot.equity_positions
     ):
-        # The connected position reader has average cost, not an authenticated
-        # mark-to-stop remaining-risk valuation matched to current account NLV.
-        # Protection/exits bypass this new-entry-only pipeline.
-        failures.append("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED")
+        # The connected position valuation diagnostic provides a receipt time,
+        # not a provider valuation time or a valuation from the same epoch as
+        # account NLV. It also cannot prove an all-in remaining-fee upper bound.
+        # A shaped calculation input must never lift this entry-only blocker.
+        failures.extend(
+            (
+                "OPEN_POSITION_SOURCE_VALUATION_TIME_UNAVAILABLE",
+                "OPEN_POSITION_COMMON_NLV_EPOCH_UNAVAILABLE",
+                "OPEN_POSITION_REMAINING_FEE_BOUND_UNAVAILABLE",
+                "DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED",
+            )
+        )
         return None, _unique(failures)
     if broker_snapshot.option_position_count:
         failures.append("OPTION_POSITION_PRESENT_OUTSIDE_EQUITY_SCOPE")
@@ -654,6 +667,48 @@ def build_account_risk_snapshot(
     if risk_age < -1 or risk_age > maximum_age:
         failures.append("AUTHORITATIVE_ACCOUNT_RISK_EVIDENCE_STALE")
 
+    exposures, exposure_failures = _build_account_risk_exposures(
+        policy=policy, state=state, broker_snapshot=broker_snapshot,
+        prices=prices, exclude_plan_id=exclude_plan_id,
+    )
+    failures.extend(exposure_failures)
+    if exposures is None:
+        return None, _unique(failures)
+    result = AccountRiskSnapshot.build(
+        account_last4=policy.account_last4,
+        observed_at=risk_as_of,
+        usable_equity=broker_snapshot.funds.total_value,
+        total_equity=broker_snapshot.funds.total_value,
+        daily_starting_equity=broker_snapshot.daily_starting_equity,
+        daily_external_cash_flow=broker_snapshot.daily_external_cash_flow,
+        unleveraged_buying_power=broker_snapshot.funds.unleveraged_buying_power,
+        cash=broker_snapshot.funds.cash,
+        daily_realized_pnl=broker_snapshot.daily_realized_pnl,
+        weekly_realized_pnl=broker_snapshot.weekly_realized_pnl,
+        peak_equity=broker_snapshot.peak_equity,
+        exposures=exposures,
+        account_active=broker_snapshot.account_state.lower() == "active",
+        restricted=broker_snapshot.account_state.lower() != "active",
+        standard_orders_reconciled=broker_snapshot.standard_equity_orders_complete,
+        option_orders_reconciled=(broker_snapshot.option_orders_complete and broker_snapshot.option_positions_complete),
+        advanced_orders_reconciled=broker_snapshot.advanced_orders_complete,
+        positions_reconciled=broker_snapshot.standard_equity_positions_complete,
+    )
+    return result, _unique(failures)
+
+
+def _build_account_risk_exposures(
+    *, policy: PolicyBundle, state: LiveStateStore,
+    broker_snapshot: AccountSnapshot, prices: Mapping[str, Decimal] | None,
+    exclude_plan_id: str | None,
+) -> tuple[tuple[RiskExposure, ...] | None, tuple[str, ...]]:
+    """Shared durable exposure accounting, never measurement authentication.
+
+    Both measurement paths must account for identical reservations, external
+    orders, positions and unresolved safety intents. Legacy P&L requirements
+    remain in the legacy caller, not invented as inputs to session arithmetic.
+    """
+    failures: list[str] = []
     account_key = policy.account_key
     prices = dict(prices or {})
     broker_positions = {
@@ -735,9 +790,8 @@ def build_account_risk_snapshot(
         for row in active_reservations
     }
     exposures: list[RiskExposure] = []
+    has_open_reservation = False
     for row in active_reservations:
-        if exclude_plan_id is not None and row["plan_id"] == exclude_plan_id:
-            continue
         order_rows = state.rows(
             "SELECT * FROM broker_orders WHERE intent_id=?", (row["intent_id"],)
         )
@@ -751,7 +805,18 @@ def build_account_risk_snapshot(
         )
         possible_unknown = intent_state in {"SUBMITTING", "UNKNOWN"} or order_state == "UNKNOWN"
         is_open = filled > 0 or str(row["symbol"]) in broker_positions
+        has_open_reservation = has_open_reservation or is_open
+        # Partial fills do not resolve an ambiguous remaining entry. Preserve
+        # UNKNOWN precedence for every policy, independently of the daily-mode
+        # prohibition on unvalued open risk below.
         category = "unknown" if possible_unknown else ("open" if is_open else "pending")
+        if (
+            exclude_plan_id is not None
+            and row["plan_id"] == exclude_plan_id
+            and category == "pending"
+            and not is_open
+        ):
+            continue
         protected = True
         if category == "open":
             obligations = state.rows(
@@ -856,35 +921,98 @@ def build_account_risk_snapshot(
     # A newer flat broker snapshot cannot release a filled durable reservation
     # by itself. Final dispatch also consumes this builder without calling
     # evaluate_entry, so retain the same remaining-risk gate here.
-    if policy.daily_starting_equity_risk and any(
-        exposure.category in {"open", "manual"} for exposure in exposures
+    if policy.daily_starting_equity_risk and (
+        has_open_reservation
+        or any(exposure.category in {"open", "manual"} for exposure in exposures)
     ):
         failures.append("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED")
         return None, _unique(failures)
 
-    result = AccountRiskSnapshot.build(
-        account_last4=policy.account_last4,
-        observed_at=risk_as_of,
-        usable_equity=broker_snapshot.funds.total_value,
-        total_equity=broker_snapshot.funds.total_value,
-        daily_starting_equity=broker_snapshot.daily_starting_equity,
-        daily_external_cash_flow=broker_snapshot.daily_external_cash_flow,
-        unleveraged_buying_power=broker_snapshot.funds.unleveraged_buying_power,
-        cash=broker_snapshot.funds.cash,
-        daily_realized_pnl=broker_snapshot.daily_realized_pnl,
-        weekly_realized_pnl=broker_snapshot.weekly_realized_pnl,
-        peak_equity=broker_snapshot.peak_equity,
-        exposures=tuple(exposures),
-        account_active=broker_snapshot.account_state.lower() == "active",
-        restricted=broker_snapshot.account_state.lower() != "active",
-        standard_orders_reconciled=broker_snapshot.standard_equity_orders_complete,
-        option_orders_reconciled=(
-            broker_snapshot.option_orders_complete
-            and broker_snapshot.option_positions_complete
-        ),
-        advanced_orders_reconciled=broker_snapshot.advanced_orders_complete,
-        positions_reconciled=broker_snapshot.standard_equity_positions_complete,
-    )
+    return tuple(exposures), _unique(failures)
+
+
+def build_session_account_risk_snapshot(
+    *, policy: PolicyBundle, state: LiveStateStore,
+    broker_snapshot: AccountSnapshot, session_state: SessionTradingState,
+    account_binding_sha256: str, now: datetime,
+    prices: Mapping[str, Decimal] | None = None, exclude_plan_id: str | None = None,
+) -> tuple[SessionAccountRiskSnapshot | None, tuple[str, ...]]:
+    """Build distinct session constraints without inventing legacy risk facts.
+
+    This consumes already reconciled exposure and session inputs, not an
+    authentication shortcut. The production source/seal/activation path must
+    independently verify them; this builder cannot issue order authority.
+    Until current-bid/stop remaining-risk evidence is connected, open inventory
+    fails here rather than borrowing original-entry risk from the legacy path.
+    """
+    current = _aware_utc(now, "now")
+    failures: list[str] = []
+    if not policy.session_trading_risk:
+        return None, ("SESSION_RISK_POLICY_REQUIRED",)
+    if type(session_state) is not SessionTradingState:
+        return None, ("SESSION_RISK_STATE_REQUIRED",)
+    if (session_state.baseline.policy_sha256 != policy.risk_hash
+            or session_state.baseline.account_binding_sha256 != account_binding_sha256
+            or account_binding_sha256 != policy.config["execution"].get("production_account_binding_fingerprint")):
+        return None, ("SESSION_RISK_BINDING_MISMATCH",)
+    if broker_snapshot.account_masked != f"••••{policy.account_last4}":
+        failures.append("ACCOUNT_POLICY_MISMATCH")
+    if broker_snapshot.account_type != str(policy.config["account"]["allowed_type"]):
+        failures.append("ACCOUNT_TYPE_POLICY_MISMATCH")
+    if not broker_snapshot.auth_point_in_time:
+        failures.append("BROKER_AUTH_POINT_IN_TIME_UNPROVEN")
+    if broker_snapshot.funds.currency != "USD":
+        failures.append("SESSION_USD_FUNDS_REQUIRED")
+    if broker_snapshot.option_position_count or broker_snapshot.option_order_count:
+        failures.append("OPTION_EXPOSURE_PRESENT_OUTSIDE_EQUITY_SCOPE")
+    if broker_snapshot.advanced_order_count:
+        failures.append("SESSION_ADVANCED_ORDER_RECONCILIATION_REQUIRED")
+    if any(position.quantity != 0 for position in broker_snapshot.equity_positions):
+        failures.append("SESSION_OPEN_RISK_REVALUATION_REQUIRED")
+    if not all((broker_snapshot.standard_equity_orders_complete,
+                broker_snapshot.standard_equity_positions_complete,
+                broker_snapshot.option_orders_complete,
+                broker_snapshot.option_positions_complete,
+                broker_snapshot.advanced_orders_complete)):
+        failures.append("WHOLE_BROKER_RECONCILIATION_INCOMPLETE")
+    maximum_age = int(policy.config["evidence"]["broker_snapshot_max_age_seconds"])
+    if any(not 0 <= (current - stamp).total_seconds() <= maximum_age
+           for stamp in (broker_snapshot.observed_at, broker_snapshot.received_at)):
+        failures.append("BROKER_RISK_SNAPSHOT_STALE")
+    decision = evaluate_session_state(session_state, now=current)
+    failures.extend(decision.entry_blockers)
+    if failures:
+        return None, _unique(failures)
+    # Monetary conversion and reservation assembly must be exact before the
+    # evaluator sees them; its own context cannot undo earlier rounding.
+    with localcontext() as context:
+        context.prec = 80
+        exposures, exposure_failures = _build_account_risk_exposures(
+            policy=policy, state=state, broker_snapshot=broker_snapshot,
+            prices=prices, exclude_plan_id=exclude_plan_id,
+        )
+    failures.extend(exposure_failures)
+    if exposures is None:
+        return None, _unique(failures)
+    if any(row.category in {"open", "manual"} for row in exposures):
+        return None, _unique((*failures, "SESSION_OPEN_RISK_REVALUATION_REQUIRED"))
+    measurement = session_state.last_measurement
+    assert measurement is not None  # evaluate_session_state rejected missing
+    try:
+        result = SessionAccountRiskSnapshot.build(
+            account_last4=policy.account_last4, account_binding_sha256=account_binding_sha256,
+            observed_at=min(broker_snapshot.observed_at, measurement.as_of),
+            usable_equity=broker_snapshot.funds.total_value,
+            unleveraged_buying_power=broker_snapshot.funds.unleveraged_buying_power,
+            cash=broker_snapshot.funds.cash, exposures=exposures,
+            account_active=broker_snapshot.account_state.lower() == "active",
+            restricted=broker_snapshot.account_state.lower() != "active",
+            standard_orders_reconciled=True, option_orders_reconciled=True,
+            advanced_orders_reconciled=True, positions_reconciled=True,
+            session_state=session_state,
+        )
+    except (TypeError, ValueError):
+        return None, _unique((*failures, "SESSION_RISK_INPUT_INVALID"))
     return result, _unique(failures)
 
 

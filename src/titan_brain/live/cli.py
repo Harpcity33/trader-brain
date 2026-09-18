@@ -50,6 +50,7 @@ from .eod_live import build_eod_evidence, write_eod_evidence
 from .latency import LatencyRecorder, LiveStateLatencyAdapter
 from .lifecycle_actions import ProductionLifecycleActions
 from .massive_adapter import LocalMassiveReadOnlySource
+from .market_data import MarketSessionState
 from .models import EngineMode
 from .money import to_cents
 from .notification_worker import (
@@ -58,7 +59,9 @@ from .notification_worker import (
     run_notification_worker,
 )
 from .notifications import (
+    DeliveryAssurance,
     DeliveryReceipt,
+    LiveStateOutboxAdapter,
     Notification,
     NotificationRoute,
     notification_payload_hash,
@@ -94,7 +97,18 @@ from .service import (
     build_local_outbox,
     persist_account_snapshot,
 )
-from .state import LiveStateStore, object_hash
+from .state import (
+    NOTIFICATION_TEST_REASON,
+    NOTIFICATION_TEST_SCHEMA,
+    NOTIFICATION_TEST_STATE,
+    LiveStateStore,
+    notification_owner_confirmation_phrase,
+    notification_test_body,
+    notification_test_event_key,
+    notification_test_subject,
+    notification_test_visible_token,
+    object_hash,
+)
 from .writer_lock import (
     AccountWriterLock,
     attended_coordinator_lock_key,
@@ -1003,13 +1017,347 @@ def _fresh_snapshot_matches_durable(snapshot: Any, durable: Mapping[str, Any]) -
     )
 
 
+def _notification_test_payload(
+    *,
+    event_id: str,
+    account_key: str,
+    runtime_id: str,
+    release_manifest_hash: str,
+    config_hash: str,
+    policy_hash: str,
+    route_id: str,
+) -> dict[str, str]:
+    """Build the only payload eligible for an owner receipt acknowledgement."""
+
+    identity = str(event_id).strip()
+    if (
+        not identity
+        or len(identity) > 128
+        or any(
+            not (character.isalnum() or character in "._:-")
+            for character in identity
+        )
+    ):
+        raise CommandBlocked(
+            "notification test event ID must use 1-128 letters, digits, '.', '_', ':', or '-'"
+        )
+    payload = {
+        "schema_version": NOTIFICATION_TEST_SCHEMA,
+        "event_id": identity,
+        "state": NOTIFICATION_TEST_STATE,
+        "symbol": "ACCOUNT",
+        "reason": NOTIFICATION_TEST_REASON,
+        "account_key": str(account_key),
+        "runtime_id": str(runtime_id),
+        "release_manifest_hash": str(release_manifest_hash),
+        "config_hash": str(config_hash),
+        "policy_hash": str(policy_hash),
+        "delivery_route_id": str(route_id),
+    }
+    payload["visible_test_token"] = notification_test_visible_token(payload)
+    return payload
+
+
+def _notification_test_notification(payload: Mapping[str, Any]) -> Notification:
+    visible_test_token = str(payload.get("visible_test_token", ""))
+    event_id = str(payload.get("event_id", ""))
+    return Notification(
+        dedupe_key=notification_test_event_key(payload),
+        event_type="READINESS",
+        severity="info",
+        subject=notification_test_subject(visible_test_token),
+        body=notification_test_body(visible_test_token, event_id),
+        payload=dict(payload),
+    )
+
+
+def _notification_owner_receipt_evidence(
+    store: LiveStateStore,
+    *,
+    manifest: Mapping[str, Any],
+    policy: PolicyBundle,
+    route: NotificationRoute,
+    message_id: str,
+    now: datetime,
+) -> dict[str, Any]:
+    """Validate one exact TEST delivery and return its owner challenge."""
+
+    message = str(message_id).strip()
+    if (
+        not message
+        or len(message) > 128
+        or any(
+            not (character.isalnum() or character in "._:-")
+            for character in message
+        )
+    ):
+        raise CommandBlocked("notification message ID is invalid")
+    if now.tzinfo is None:
+        raise ValueError("notification confirmation clock must be timezone-aware")
+    current = now.astimezone(timezone.utc)
+    runtime = store.runtime_status()
+    if runtime is None:
+        raise CommandBlocked("runtime identity is missing")
+    _assert_runtime_bindings(runtime, manifest=manifest, policy=policy)
+    if route.required_assurance is not DeliveryAssurance.OWNER_CONFIRMED:
+        raise CommandBlocked(
+            "signed notification route does not require explicit owner confirmation"
+        )
+    chain_ok, _chain_length, _chain_head = store.verify_event_chain()
+    if not chain_ok:
+        raise CommandBlocked("notification audit chain is invalid")
+
+    rows = store.rows(
+        "SELECT * FROM notification_outbox WHERE message_id=?",
+        (message,),
+    )
+    if len(rows) != 1:
+        raise CommandBlocked("notification test message was not found")
+    row = rows[0]
+    if (
+        str(row["account_key"]) != _policy_account_key(policy)
+        or str(row["template"]) != "READINESS"
+        or str(row["state"]) != "DELIVERED"
+        or row["delivery_receipt"] is None
+    ):
+        raise CommandBlocked(
+            "notification message is not a delivered readiness TEST"
+        )
+    try:
+        wrapper = json.loads(str(row["payload_json"]))
+        if (
+            not isinstance(wrapper, Mapping)
+            or set(wrapper) != {"severity", "subject", "body", "payload"}
+            or not isinstance(wrapper.get("payload"), Mapping)
+        ):
+            raise ValueError("notification wrapper fields are invalid")
+        event_id = str(wrapper["payload"]["event_id"])
+        expected_payload = _notification_test_payload(
+            event_id=event_id,
+            account_key=_policy_account_key(policy),
+            runtime_id=policy.runtime_id,
+            release_manifest_hash=str(manifest["release_manifest_hash"]),
+            config_hash=policy.config_hash,
+            policy_hash=policy.policy_hash,
+            route_id=route.route_id,
+        )
+        expected_notification = _notification_test_notification(expected_payload)
+        receipt = DeliveryReceipt.from_json(str(row["delivery_receipt"]))
+        delivered_at = _iso(
+            str(row["delivered_at"]), "notification.delivered_at"
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CommandBlocked("notification TEST evidence is invalid") from exc
+    expected_payload_hash = notification_payload_hash(expected_notification)
+    if (
+        dict(wrapper["payload"]) != expected_payload
+        or str(wrapper["severity"]) != expected_notification.severity
+        or str(wrapper["subject"]) != expected_notification.subject
+        or str(wrapper["body"]) != expected_notification.body
+        or str(row["event_key"]) != expected_notification.dedupe_key
+        or str(row["delivery_route_id"] or "") != route.route_id
+        or str(row["delivery_payload_hash"] or "") != expected_payload_hash
+        or receipt.payload_hash != expected_payload_hash
+        or abs((receipt.accepted_at - delivered_at).total_seconds()) > 30
+        or not receipt_satisfies_route(
+            receipt,
+            route,
+            event_key=expected_notification.dedupe_key,
+            payload_hash=expected_payload_hash,
+            minimum_assurance=DeliveryAssurance.PROVIDER_ACCEPTED,
+        )
+    ):
+        raise CommandBlocked(
+            "notification TEST does not match the signed route and payload"
+        )
+
+    if receipt.assurance is DeliveryAssurance.OWNER_CONFIRMED:
+        if receipt.owner_confirmed_at is None:
+            raise CommandBlocked("owner-confirmed notification receipt is invalid")
+        provider_receipt = replace(
+            receipt,
+            assurance=DeliveryAssurance.PROVIDER_ACCEPTED,
+            owner_confirmed_at=None,
+        )
+    elif receipt.assurance is DeliveryAssurance.PROVIDER_ACCEPTED:
+        provider_receipt = receipt
+    else:
+        raise CommandBlocked(
+            "local staging is not provider delivery or owner receipt proof"
+        )
+    provider_receipt_hash = provider_receipt.receipt_hash
+    current_receipt_hash = receipt.receipt_hash
+    if (
+        str(row["delivery_assurance"] or "") != receipt.assurance.value
+        or str(row["delivery_receipt_hash"] or "") != current_receipt_hash
+    ):
+        raise CommandBlocked("notification receipt columns are inconsistent")
+
+    audit_rows = store.rows(
+        "SELECT event_type,occurred_at,payload_json FROM audit_events "
+        "WHERE entity_type='notification' AND entity_id=? "
+        "AND event_type IN ('NOTIFICATION_DELIVERED','NOTIFICATION_OWNER_CONFIRMED') "
+        "ORDER BY sequence",
+        (message,),
+    )
+    delivered_events = [
+        event for event in audit_rows if event["event_type"] == "NOTIFICATION_DELIVERED"
+    ]
+    confirmation_events = [
+        event
+        for event in audit_rows
+        if event["event_type"] == "NOTIFICATION_OWNER_CONFIRMED"
+    ]
+    try:
+        delivered_payload = json.loads(str(delivered_events[0]["payload_json"]))
+        delivered_event_at = _iso(
+            str(delivered_events[0]["occurred_at"]),
+            "notification delivery event time",
+        )
+    except (IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise CommandBlocked(
+            "provider-accepted delivery audit evidence is missing"
+        ) from exc
+    if (
+        len(delivered_events) != 1
+        or delivered_event_at != delivered_at
+        or delivered_payload
+        != {
+            "error": None,
+            "route_id": route.route_id,
+            "assurance": DeliveryAssurance.PROVIDER_ACCEPTED.value,
+            "receipt_hash": provider_receipt_hash,
+        }
+    ):
+        raise CommandBlocked(
+            "provider-accepted delivery audit evidence is invalid"
+        )
+
+    phrase = notification_owner_confirmation_phrase(
+        visible_test_token=expected_payload["visible_test_token"],
+        account_key=_policy_account_key(policy),
+        release_manifest_hash=str(manifest["release_manifest_hash"]),
+        route_id=route.route_id,
+        message_id=message,
+        provider_receipt_hash=provider_receipt_hash,
+    )
+    if receipt.assurance is DeliveryAssurance.PROVIDER_ACCEPTED:
+        if confirmation_events:
+            raise CommandBlocked(
+                "notification owner-confirmation audit state is inconsistent"
+            )
+    else:
+        try:
+            confirmation_payload = json.loads(
+                str(confirmation_events[0]["payload_json"])
+            )
+            confirmation_event_at = _iso(
+                str(confirmation_events[0]["occurred_at"]),
+                "notification owner confirmation event time",
+            )
+        except (IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise CommandBlocked(
+                "owner-confirmation audit evidence is missing"
+            ) from exc
+        expected_confirmation_payload = {
+            "schema_version": (
+                "titan_notification_owner_confirmation_2026-09-14_v1"
+            ),
+            "runtime_id": policy.runtime_id,
+            "release_manifest_hash": str(manifest["release_manifest_hash"]),
+            "config_hash": policy.config_hash,
+            "policy_hash": policy.policy_hash,
+            "event_key": expected_notification.dedupe_key,
+            "route_id": route.route_id,
+            "payload_hash": expected_payload_hash,
+            "provider_receipt_hash": provider_receipt_hash,
+            "owner_receipt_hash": current_receipt_hash,
+            "owner_confirmation_sha256": hashlib.sha256(
+                phrase.encode("utf-8")
+            ).hexdigest(),
+        }
+        if (
+            len(confirmation_events) != 1
+            or confirmation_event_at != receipt.owner_confirmed_at
+            or confirmation_payload != expected_confirmation_payload
+        ):
+            raise CommandBlocked("owner-confirmation audit evidence is invalid")
+
+    age_seconds = (current - receipt.accepted_at).total_seconds()
+    if age_seconds < -_PROBE_CLOCK_JUMP_TOLERANCE_SECONDS:
+        raise CommandBlocked("notification provider receipt is future-dated")
+    return {
+        "message_id": message,
+        "event_id": event_id,
+        "visible_test_token": expected_payload["visible_test_token"],
+        "account_key": _policy_account_key(policy),
+        "runtime_id": policy.runtime_id,
+        "release_manifest_hash": str(manifest["release_manifest_hash"]),
+        "config_hash": policy.config_hash,
+        "policy_hash": policy.policy_hash,
+        "provider": route.provider,
+        "delivery_route_id": route.route_id,
+        "delivery_payload_hash": expected_payload_hash,
+        "provider_receipt_hash": provider_receipt_hash,
+        "current_receipt_hash": current_receipt_hash,
+        "provider_accepted_at": receipt.accepted_at,
+        "owner_confirmed_at": receipt.owner_confirmed_at,
+        "assurance": receipt.assurance.value,
+        "fresh_for_readiness": 0 <= age_seconds <= _NOTIFICATION_RECEIPT_MAX_AGE_SECONDS,
+        "confirmation_phrase": phrase,
+    }
+
+
 def _verified_notification_receipt(
     store: LiveStateStore,
     *,
     account_key: str,
     route: NotificationRoute,
+    manifest: Mapping[str, Any] | None = None,
+    policy: PolicyBundle | None = None,
+    now: datetime | None = None,
 ) -> tuple[str, datetime] | None:
     """Return only an exact current-route, event/payload-bound receipt."""
+
+    if route.required_assurance is DeliveryAssurance.OWNER_CONFIRMED:
+        # Owner confirmation is a distinct human act, not a stronger-looking
+        # provider receipt.  Only the new release-bound TEST contract plus its
+        # unique immutable confirmation event can satisfy this route.
+        if manifest is None or policy is None or now is None:
+            return None
+        try:
+            candidates = store.rows(
+                "SELECT message_id FROM notification_outbox "
+                "WHERE account_key=? AND template='READINESS' "
+                "AND state='DELIVERED' AND delivery_route_id=? "
+                "AND delivery_assurance='OWNER_CONFIRMED' "
+                "ORDER BY delivered_at DESC LIMIT 20",
+                (account_key, route.route_id),
+            )
+        except (RuntimeError, sqlite3.Error, ValueError):
+            return None
+        for candidate in candidates:
+            try:
+                evidence = _notification_owner_receipt_evidence(
+                    store,
+                    manifest=manifest,
+                    policy=policy,
+                    route=route,
+                    message_id=str(candidate["message_id"]),
+                    now=now,
+                )
+            except (CommandBlocked, RuntimeError, sqlite3.Error, ValueError):
+                continue
+            if (
+                evidence["assurance"]
+                == DeliveryAssurance.OWNER_CONFIRMED.value
+                and evidence["owner_confirmed_at"] is not None
+            ):
+                return (
+                    str(evidence["current_receipt_hash"]),
+                    evidence["provider_accepted_at"],
+                )
+        return None
 
     delivered = store.rows(
         "SELECT n.message_id,n.event_key,n.template,n.payload_json,n.delivered_at,"
@@ -1662,6 +2010,9 @@ def _machine_readiness(
             store,
             account_key=_policy_account_key(policy),
             route=notification_route,
+            manifest=manifest,
+            policy=policy,
+            now=current,
         )
         if verified_receipt is not None:
             notification_receipt_hash, notification_delivered_at = verified_receipt
@@ -2167,6 +2518,8 @@ def _doctor(
     if policy is not None:
         market_config = policy.config["market_data"]
         try:
+            market_checked_at = _now()
+            calendar_lane = policy.calendar.lane(market_checked_at)
             market_source = composition.market_source(policy.config["discovery"])
             if market_source is None:
                 if policy.config["discovery"].get("pipeline_configured") is True:
@@ -2184,17 +2537,33 @@ def _doctor(
                     candidate_max_age_seconds=int(
                         market_config["candidate_max_age_seconds"]
                     ),
+                    session_state=lambda current: (
+                        MarketSessionState.ENTRY_ELIGIBLE
+                        if policy.calendar.lane(current) == "regular_entry"
+                        else MarketSessionState.WAITING_FOR_SESSION
+                    ),
                 )
-            feed = market_source.health(now=_now())
+            feed = market_source.health(now=market_checked_at)
             blockers.extend(feed.blockers)
+            feed_session = getattr(feed, "session_state", None)
             market_report = {
                 "adapter": market_config["adapter"],
                 "database_path": feed.database_path,
+                "calendar_lane": calendar_lane,
                 "producer_fresh": feed.producer_fresh,
                 "latest_quote_at": feed.latest_quote_at,
                 "latest_completed_bar_at": feed.latest_completed_bar_at,
                 "component_states": dict(feed.component_states),
                 "blockers": list(feed.blockers),
+                "session_state": (
+                    feed_session.value
+                    if isinstance(feed_session, MarketSessionState)
+                    else None
+                ),
+                "entry_evidence_ready": getattr(
+                    feed, "entry_evidence_ready", None
+                ),
+                "entry_blockers": list(getattr(feed, "entry_blockers", ())),
                 "source_is_execution_authority": False,
             }
         except Exception as exc:
@@ -2351,6 +2720,101 @@ def command_local_profile_status(args: argparse.Namespace) -> int:
     _print(report)
     sdk = report.get("sdk")
     return 0 if isinstance(sdk, Mapping) and sdk.get("status") == "ATTESTED" else 2
+
+
+def _emit_flex_setup_report(report: object) -> int:
+    """Print only a normalized reporting-only Flex setup result."""
+
+    if (
+        not isinstance(report, Mapping)
+        or type(report.get("ok")) is not bool
+        or report.get("reporting_only") is not True
+    ):
+        raise CommandBlocked("IBKR_FLEX_SETUP_REPORT_INVALID")
+    _print(dict(report))
+    return 0 if report["ok"] else 2
+
+
+def command_flex_setup_status(args: argparse.Namespace) -> int:
+    """Inspect signed Flex reporting prerequisites without credential reads."""
+
+    layout = InstallLayout(args.install_root)
+    _manifest, policy = layout.load_release()
+    from .ibkr_flex_setup import setup_status
+
+    return _emit_flex_setup_report(setup_status(policy))
+
+
+def command_flex_enroll(args: argparse.Namespace) -> int:
+    """Delegate interactive secret enrollment to the private setup module."""
+
+    layout = InstallLayout(args.install_root)
+    _manifest, policy = layout.load_release()
+    from .ibkr_flex_setup import enroll
+
+    return _emit_flex_setup_report(enroll(policy))
+
+
+def command_flex_probe(args: argparse.Namespace) -> int:
+    """Run one reporting-only completed-date probe through the setup module."""
+
+    try:
+        report_date = date.fromisoformat(str(args.date))
+    except (TypeError, ValueError):
+        raise CommandBlocked("IBKR_FLEX_REPORT_DATE_INVALID") from None
+    layout = InstallLayout(args.install_root)
+    _manifest, policy = layout.load_release()
+    from .ibkr_flex_setup import probe
+
+    return _emit_flex_setup_report(
+        probe(policy, report_date=report_date, install_root=layout.root)
+    )
+
+
+def command_ibkr_control_enroll(args: argparse.Namespace) -> int:
+    """Enroll only local managed-control key custody for the signed account."""
+
+    layout = InstallLayout(args.install_root)
+    _manifest, policy = layout.load_release()
+    from .ibkr_control_setup import enroll
+
+    try:
+        provider_bindings = json.loads(
+            (layout.release_root / "config/provider_bindings.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        raise CommandBlocked("IBKR_CONTROL_SETUP_PROFILE_INVALID") from None
+    report = enroll(policy, provider_bindings)
+    if (
+        type(report) is not dict
+        or set(report) != {
+            "ok", "code", "setup_only", "native_readback_verified",
+            "runtime_reader_access_verified", "write_authority_granted",
+            "activation_performed",
+        }
+        or type(report.get("ok")) is not bool
+        or type(report.get("native_readback_verified")) is not bool
+        or report.get("setup_only") is not True
+        or report.get("runtime_reader_access_verified") is not False
+        or report.get("write_authority_granted") is not False
+        or report.get("activation_performed") is not False
+        or type(report.get("code")) is not str
+        or report.get("code") not in {
+            "IBKR_CONTROL_SETUP_ENROLLED",
+            "IBKR_CONTROL_SETUP_PROFILE_INVALID",
+            "IBKR_CONTROL_SETUP_OWNER_TERMINAL_REQUIRED",
+            "IBKR_CONTROL_SETUP_EXISTING_OR_UNAVAILABLE_CUSTODY",
+            "IBKR_CONTROL_SETUP_OWNER_CANCELED",
+            "IBKR_CONTROL_SETUP_ENROLLMENT_FAILED_REVIEW_CUSTODY",
+        }
+        or report["ok"] != (report["code"] == "IBKR_CONTROL_SETUP_ENROLLED")
+        or report["native_readback_verified"] != report["ok"]
+    ):
+        raise CommandBlocked("IBKR_CONTROL_SETUP_REPORT_INVALID")
+    _print(report)
+    return 0 if report["ok"] else 2
 
 
 def command_notification_setup_status(args: argparse.Namespace) -> int:
@@ -3136,14 +3600,27 @@ def command_notification_test(args: argparse.Namespace) -> int:
         policy.config["notifications"],
         local_jsonl_path=layout.notification_path,
     )
+    if policy.config["notifications"].get("delivery_sink") == "local_jsonl_staging":
+        route = sink.route
+    else:
+        try:
+            route = notification_route_from_config(policy.config["notifications"])
+        except (TypeError, ValueError) as exc:
+            raise CommandBlocked(
+                "signed notification provider route is not configured"
+            ) from exc
+    if sink.route != route:
+        raise CommandBlocked("notification sink does not match the signed route")
     with _maintenance_interlock(
         layout, policy, owner_id="notification-readiness-test"
     ) as lock:
         with _open_state(layout) as store:
             runtime = store.runtime_status()
+            if runtime is None:
+                raise CommandBlocked("runtime identity is missing")
+            _assert_runtime_bindings(runtime, manifest=manifest, policy=policy)
             if (
-                runtime is None
-                or runtime["mode"] != EngineMode.PAUSED.value
+                runtime["mode"] != EngineMode.PAUSED.value
                 or bool(runtime["authority_enabled"])
             ):
                 raise CommandBlocked(
@@ -3157,15 +3634,19 @@ def command_notification_test(args: argparse.Namespace) -> int:
                 recover_stale=True,
             )
             try:
-                publisher = build_enqueue_only_outbox(store, _policy_account_key(policy))
-                message_id = publisher.enqueue(
-                    "READINESS",
-                    {
-                        "event_id": args.event_id,
-                        "state": "notification_test",
-                        "symbol": "ACCOUNT",
-                        "reason": "owner requested destination verification",
-                    },
+                payload = _notification_test_payload(
+                    event_id=args.event_id,
+                    account_key=_policy_account_key(policy),
+                    runtime_id=policy.runtime_id,
+                    release_manifest_hash=str(manifest["release_manifest_hash"]),
+                    config_hash=policy.config_hash,
+                    policy_hash=policy.policy_hash,
+                    route_id=route.route_id,
+                )
+                message_id = LiveStateOutboxAdapter(
+                    store, _policy_account_key(policy)
+                ).enqueue_notification(
+                    _notification_test_notification(payload),
                     now,
                 )
             finally:
@@ -3178,16 +3659,165 @@ def command_notification_test(args: argparse.Namespace) -> int:
         {
             "message_id": message_id,
             "queued": True,
+            "test_only": True,
+            "event_id": payload["event_id"],
+            "visible_test_token": payload["visible_test_token"],
+            "subject": notification_test_subject(payload["visible_test_token"]),
+            "no_trading_action": True,
             "delivery_attempted_by_command": False,
-            "provider": sink.route.provider,
-            "delivery_route_id": sink.route.route_id,
-            "required_assurance": sink.route.required_assurance.value,
-            "provider_destination": sink.route.provider != "local_jsonl",
+            "provider": route.provider,
+            "delivery_route_id": route.route_id,
+            "required_assurance": route.required_assurance.value,
+            "provider_destination": route.provider != "local_jsonl",
             "readiness_effect": (
                 "independent_worker_must_deliver_and_readiness_will_revalidate_receipt"
-                if sink.route.provider != "local_jsonl"
+                if route.provider != "local_jsonl"
                 else "local_staging_never_satisfies_destination_readiness"
             ),
+        }
+    )
+    return 0
+
+
+def command_notification_confirm_receipt(args: argparse.Namespace) -> int:
+    """Show or consume one exact human owner-receipt challenge."""
+
+    layout = InstallLayout(args.install_root)
+    manifest, policy = layout.load_release()
+    try:
+        route = notification_route_from_config(policy.config["notifications"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CommandBlocked(
+            "signed notification owner-confirmation route is invalid"
+        ) from exc
+
+    with _open_state(layout) as store:
+        evidence = _notification_owner_receipt_evidence(
+            store,
+            manifest=manifest,
+            policy=policy,
+            route=route,
+            message_id=args.message_id,
+            now=_now(),
+        )
+    status = {
+        "schema_version": (
+            "titan_notification_owner_confirmation_challenge_2026-09-14_v1"
+        ),
+        "message_id": evidence["message_id"],
+        "event_id": evidence["event_id"],
+        "visible_test_token": evidence["visible_test_token"],
+        "test_only": True,
+        "no_trading_action": True,
+        "account_key": evidence["account_key"],
+        "release_manifest_hash": evidence["release_manifest_hash"],
+        "config_hash": evidence["config_hash"],
+        "policy_hash": evidence["policy_hash"],
+        "provider": evidence["provider"],
+        "delivery_route_id": evidence["delivery_route_id"],
+        "delivery_payload_hash": evidence["delivery_payload_hash"],
+        "provider_receipt_hash": evidence["provider_receipt_hash"],
+        "provider_accepted_at": evidence["provider_accepted_at"],
+        "assurance": evidence["assurance"],
+        "owner_confirmed_at": evidence["owner_confirmed_at"],
+        "fresh_for_readiness": evidence["fresh_for_readiness"],
+        "provider_acceptance_is_owner_confirmation": False,
+    }
+    if args.confirm is None:
+        if evidence["assurance"] == DeliveryAssurance.OWNER_CONFIRMED.value:
+            _print({**status, "owner_confirmed": True})
+            return 0
+        _print(
+            {
+                **status,
+                "owner_confirmed": False,
+                "confirmation_required": (
+                    "After actually receiving and inspecting the TEST email, "
+                    "re-run this command with --confirm set to the exact phrase."
+                ),
+                "confirmation_phrase": evidence["confirmation_phrase"],
+            }
+        )
+        return 2
+
+    if str(args.confirm) != evidence["confirmation_phrase"]:
+        raise CommandBlocked(
+            "exact notification owner-confirmation phrase does not match"
+        )
+    if evidence["assurance"] == DeliveryAssurance.OWNER_CONFIRMED.value:
+        _print({**status, "owner_confirmed": True, "already_confirmed": True})
+        return 0
+    if not evidence["fresh_for_readiness"]:
+        raise CommandBlocked(
+            "provider-accepted notification TEST is too old; enqueue a new TEST"
+        )
+
+    with _maintenance_interlock(
+        layout, policy, owner_id="notification-owner-confirmation"
+    ) as lock:
+        with _open_state(layout) as store:
+            now = _now()
+            evidence = _notification_owner_receipt_evidence(
+                store,
+                manifest=manifest,
+                policy=policy,
+                route=route,
+                message_id=args.message_id,
+                now=now,
+            )
+            if (
+                evidence["assurance"]
+                != DeliveryAssurance.PROVIDER_ACCEPTED.value
+            ):
+                raise CommandBlocked(
+                    "notification TEST is no longer awaiting owner confirmation"
+                )
+            if not evidence["fresh_for_readiness"]:
+                raise CommandBlocked(
+                    "provider-accepted notification TEST is too old; enqueue a new TEST"
+                )
+            store.acquire_writer_lease(
+                account_key=_policy_account_key(policy),
+                owner_id=lock.owner_id,
+                acquired_at=now,
+                recover_stale=True,
+            )
+            try:
+                result = store.confirm_notification_owner_receipt(
+                    str(args.message_id),
+                    account_key=_policy_account_key(policy),
+                    runtime_id=policy.runtime_id,
+                    release_manifest_hash=str(manifest["release_manifest_hash"]),
+                    config_hash=policy.config_hash,
+                    policy_hash=policy.policy_hash,
+                    route_id=route.route_id,
+                    provider_receipt_hash=str(evidence["provider_receipt_hash"]),
+                    confirmed_at=now,
+                    confirmation_phrase=str(args.confirm),
+                )
+                confirmed = _notification_owner_receipt_evidence(
+                    store,
+                    manifest=manifest,
+                    policy=policy,
+                    route=route,
+                    message_id=args.message_id,
+                    now=now,
+                )
+            finally:
+                store.release_writer_lease(
+                    account_key=_policy_account_key(policy),
+                    owner_id=lock.owner_id,
+                    released_at=_now(),
+                )
+    _print(
+        {
+            **status,
+            "assurance": confirmed["assurance"],
+            "owner_confirmed_at": confirmed["owner_confirmed_at"],
+            "owner_receipt_hash": result["owner_receipt_hash"],
+            "owner_confirmed": True,
+            "immutable_audit_event": "NOTIFICATION_OWNER_CONFIRMED",
+            "provider_acceptance_was_not_treated_as_owner_confirmation": True,
         }
     )
     return 0
@@ -3315,6 +3945,27 @@ def build_parser() -> argparse.ArgumentParser:
         "show the signed local IBKR endpoint and SDK attestation without network access",
         command_local_profile_status,
     )
+    command(
+        "flex-setup-status",
+        "show signed IBKR Flex reporting setup prerequisites",
+        command_flex_setup_status,
+    )
+    command(
+        "flex-enroll",
+        "interactively enroll the existing IBKR Flex reporting token",
+        command_flex_enroll,
+    )
+    flex_probe = command(
+        "flex-probe",
+        "probe one completed IBKR Flex reporting date",
+        command_flex_probe,
+    )
+    flex_probe.add_argument("--date", required=True)
+    command(
+        "ibkr-control-enroll",
+        "create a missing account-scoped managed-control key without issuing authority",
+        command_ibkr_control_enroll,
+    )
     attended_review = command(
         "attended-review",
         "persist one exact expiring regular-hours IBKR order review",
@@ -3408,6 +4059,13 @@ def build_parser() -> argparse.ArgumentParser:
         command_notification_test,
     )
     notification.add_argument("--event-id", required=True)
+    notification_confirmation = command(
+        "notification-confirm-receipt",
+        "inspect or explicitly confirm receipt of one exact delivered TEST",
+        command_notification_confirm_receipt,
+    )
+    notification_confirmation.add_argument("--message-id", required=True)
+    notification_confirmation.add_argument("--confirm")
     notification_worker = command(
         "notification-worker",
         "run the independent durable notification delivery worker",

@@ -18,6 +18,7 @@ from .broker.base import (
     PositionSnapshot,
     TimeInForce,
 )
+from .broker.ibkr_protection_evidence import is_eligible_presubmitted_stop
 from .models import (
     BrokerOrderState,
     IntentKind,
@@ -142,8 +143,9 @@ def _remaining(order: OrderSnapshot) -> int:
 def is_verified_working_protection(order: OrderSnapshot) -> bool:
     """Return true only for a broker-confirmed regular-hours GTC stop-market.
 
-    PENDING/QUEUED/UNCONFIRMED submissions intentionally return false.  An API
-    submission acknowledgement is not evidence that protection is working.
+    PENDING/UNCONFIRMED and generic QUEUED submissions return false. IBKR's
+    accepted simulated PreSubmitted stop is recognized only with joined,
+    current, standalone callback evidence. No acknowledgement alone qualifies.
     """
 
     return all(
@@ -152,7 +154,7 @@ def is_verified_working_protection(order: OrderSnapshot) -> bool:
             order.order_type is EquityOrderType.STOP_MARKET,
             order.market_hours is MarketHours.REGULAR,
             order.time_in_force is TimeInForce.GTC,
-            order.state in _VERIFIED_WORKING,
+            order.state in _VERIFIED_WORKING or is_eligible_presubmitted_stop(order),
             _remaining(order) > 0,
         )
     )
@@ -396,6 +398,7 @@ def assess_protection(
         for order in active_sells
         if order.order_type is EquityOrderType.STOP_MARKET
         and order.state in _PENDING_PROTECTION
+        and not is_verified_working_protection(order)
     )
     pending = sum(_remaining(order) for order in pending_orders)
     pending_cancel = tuple(

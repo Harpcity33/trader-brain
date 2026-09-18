@@ -122,6 +122,37 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
         self.assertEqual(records[amendment["amendment_path"]]["sha256"], amendment["amendment_sha256"])
         self.assertEqual(config["execution"]["per_mutation_user_confirmation_required"], True)
 
+    def test_flex_reporting_code_and_non_authorizing_setup_are_packaged(self) -> None:
+        result = self.build(config_path="config/full_live_ibkr.json")
+        manifest = load_release_manifest(result["manifest"], verify_files_root=self.source_root)
+        paths = {item["path"] for item in manifest["files"]}
+        setup = "validation/full-live/2026-09-15/IBKR_FLEX_DAILY_EVIDENCE_SETUP_2026-09-15.md"
+        self.assertIn("src/titan_brain/live/broker/ibkr_flex.py", paths)
+        self.assertIn(setup, paths)
+        self.assertIn(setup, installer._FIXED_RELEASE_PATHS)
+        self.assertEqual(manifest["default_mode"], "PAUSED")
+        config = json.loads((self.source_root / "config/full_live_ibkr.json").read_text())
+        self.assertNotEqual(config["owner_policy_approval"]["approval_record_path"], setup)
+        self.assertNotEqual(config["owner_risk_policy_amendment"]["amendment_path"], setup)
+
+    def test_session_measurement_amendment_and_probe_are_packaged_without_selection(self) -> None:
+        result = self.build(config_path="config/full_live_ibkr.json")
+        manifest = load_release_manifest(result["manifest"], verify_files_root=self.source_root)
+        records = {item["path"]: item for item in manifest["files"]}
+        limits_path = "config/risk_limits_ibkr_session_trading.json"
+        proposed = json.loads((self.source_root / limits_path).read_text())
+        amendment = proposed["owner_risk_amendment"]
+        self.assertEqual(records[amendment["amendment_path"]]["sha256"], amendment["amendment_sha256"])
+        self.assertIn(amendment["amendment_path"], installer._FIXED_RELEASE_PATHS)
+        self.assertIn("scripts/titan-session-inputs-probe", records)
+        self.assertIn("scripts/titan-session-inputs-probe", installer._FIXED_RELEASE_PATHS)
+        for module in ("session_trading_calculation.py", "session_trading_store.py", "session_trading_rehearsal.py"):
+            self.assertIn("src/titan_brain/live/" + module, records)
+        config = json.loads((self.source_root / "config/full_live_ibkr.json").read_text())
+        self.assertNotEqual(config["risk"]["limits_path"], limits_path)
+        self.assertEqual(manifest["default_mode"], "PAUSED")
+        self.assertFalse(config["execution"]["local_mutation_interlock_enabled"])
+
     def test_committed_daily_percentage_amendment_tampering_blocks_release(self) -> None:
         path = self.source_root / "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md"
         path.write_text(path.read_text() + "\nUnapproved alteration.\n")
@@ -336,8 +367,31 @@ class FullLiveReleaseTests(GitReleaseFixture, unittest.TestCase):
             "managed-closeout",
             "deactivate",
             "notification-worker",
+            "flex-setup-status",
+            "flex-enroll",
+            "flex-probe",
         ):
             self.assertIn(command, completed.stdout)
+
+    def test_flex_reporting_commands_do_not_load_the_tws_sdk(self) -> None:
+        namespace = runpy.run_path(
+            str(ROOT / "scripts/titan-full-live"),
+            run_name="titan_full_live_flex_launcher_test",
+        )
+        flex_commands = namespace["_FLEX_REPORTING_COMMANDS"]
+        requires_sdk = namespace["_requires_installed_broker_sdk"]
+        self.assertEqual(
+            flex_commands,
+            frozenset({"flex-enroll", "flex-probe", "flex-setup-status"}),
+        )
+        for command in flex_commands:
+            self.assertFalse(requires_sdk([command, "--install-root", "/unused"]))
+        self.assertTrue(
+            requires_sdk(["provider-status", "--install-root", "/unused"])
+        )
+        self.assertTrue(
+            requires_sdk(["attended-review", "--install-root", "/unused"])
+        )
 
     def test_launcher_recognizes_attended_command_only_in_command_position(self) -> None:
         namespace = runpy.run_path(

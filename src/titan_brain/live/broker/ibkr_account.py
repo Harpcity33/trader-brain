@@ -66,6 +66,10 @@ class IbkrStableAccountSnapshotReader:
         return self._coverage
 
     def __call__(self) -> AccountSnapshot:
+        # Coverage describes only the latest successful double collection.
+        # Retire it before touching the broker so a newer failed/moving read
+        # cannot leave an older success discoverable as current evidence.
+        self._coverage = None
         first, first_pages, first_evidence = self._collect()
         second, second_pages, second_evidence = self._collect()
         if (
@@ -104,6 +108,7 @@ class IbkrStableAccountSnapshotReader:
             not isinstance(evidence, CollectedObservation)
             or evidence.request_started_at < started - _CLOCK_SKEW
             or evidence.request_completed_at > completed + _CLOCK_SKEW
+            or evidence.order_event_watermark is None
             or evidence.snapshot.account_masked != self.account_masked
             or evidence.snapshot.equity_orders
             or evidence.snapshot.option_order_count
@@ -124,6 +129,7 @@ class IbkrStableAccountSnapshotReader:
                 or page.page_index != 0
                 or page.page_complete is not True
                 or page.next_cursor is not None
+                or page.provider_watermark != evidence.order_event_watermark
             ):
                 raise RuntimeError("IBKR_STABLE_ACCOUNT_ORDER_FAMILY_INCOMPLETE")
             pages[family] = page
@@ -222,7 +228,7 @@ class IbkrStableAccountSnapshotReader:
         pages: dict[OrderFamily, OrderFamilyPage], observed_at: datetime
     ) -> OrderCoverageContract:
         return OrderCoverageContract(
-            contract_version="ibkr-open-plus-current-day-completed-v1",
+            contract_version="ibkr-open-plus-current-day-completed-v2",
             evidence_observed_at=observed_at,
             families=tuple(
                 OrderFamilyCoverage(

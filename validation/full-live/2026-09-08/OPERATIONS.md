@@ -36,8 +36,13 @@ immutable original approval remains in the release, together with the
 hash-bound September 14 daily-starting-equity amendment. The Robinhood legacy
 policy and legacy regression fixtures are not silently rewritten.
 
-For each America/New_York account day, authenticate and freeze account equity
+The current implementation requires, for each America/New_York account day,
+authenticating and freezing account equity
 (IBKR NetLiquidation, not buying power or cash alone) effective at 00:00.
+The owner approved daily starting balance and the percentages, not a distinct
+midnight-feed contract. Midnight and synchronized five-second flow coverage
+are implementation requirements still lacking a supported source; do not
+mistake this paragraph for an additional owner approval or IBKR guarantee.
 Daily performance is current total equity minus net external deposits and
 withdrawals minus that fixed starting equity. This includes unrealized P&L
 and incurred fees through account equity. The +15% target is aspirational,
@@ -48,12 +53,16 @@ or broker failures can produce a larger actual loss.
 
 The new baseline schema is
 `titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1`.
-The authenticated external-cash-flow receipt must match the exact current
+Under the currently installed model, the authenticated external-cash-flow receipt must match the exact current
 account valuation and timestamp, with at most five seconds of age. A current
 balance must never be substituted for missing midnight equity; zero cash flow
 must never be assumed. Legacy realized-P&L baseline receipts cannot authorize
 the new model. The local HMAC verification and receipt binding are built, but
 an authentic provider-backed baseline/flow issuer must still be provisioned.
+The September 15 Flex reporting reader can retrieve and parse a configured
+exact-account historical report, but cannot issue that live authority. Its
+setup and single proposed measurement-boundary amendment are in
+`validation/full-live/2026-09-15/IBKR_FLEX_DAILY_EVIDENCE_SETUP_2026-09-15.md`.
 Schema-v4 risk-ledger migration retains the frozen baseline, flow watermark,
 and prior irreversible risk observations across restart and PAUSED upgrades;
 copying evidence does not refresh its age.
@@ -68,6 +77,13 @@ with `DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED` while any open/manual
 exposure or unreleased filled reservation remains, even if its original stop
 is working. Reconciliation, protection, and exits remain available through
 their existing guarded paths. Do not delete reservations to evade this gate.
+The September 15 diagnostic shape-checks candidate mark-to-stop calculation
+inputs and distinguishes the configured fee floor from a proven all-in fee
+bound. It does not authenticate positions, working stops, durable ownership,
+source timestamps or a common account-valuation epoch. Both ordinary
+evaluation and the final-dispatch snapshot path retain the open-risk blocker
+until an authentic source is integrated; a valid calculation does not grant
+authority.
 
 Premarket stays analysis-only (07:00–09:00 every 30 minutes); regular-session
 heartbeats remain every minute from 09:30 through 15:59. Entry begins no
@@ -224,6 +240,38 @@ an actually received route-bound test must then be verified. Metadata presence
 alone does not satisfy any of those proofs. Do not send a connector-only test
 and describe it as an independent-worker test.
 
+### Create-only IBKR managed-control key enrollment
+
+After installing a reviewed release containing `ibkr-control-enroll`, the
+owner can run that command with `--install-root` in a real terminal. It
+validates the installed release and its existing exact account-scoped
+`ibkr_control` locator, then generates 256 random bits in memory and stores
+the hex-encoded value through native macOS Keychain create-only custody.
+There is no secret, locator override, or force argument. It does not load the
+broker SDK, connect to IBKR, issue a control request, sign an authorization,
+alter policy, or activate trading.
+
+An existing or unavailable item is left untouched. A failed or canceled
+creation/readback must not be retried automatically: an item may already
+have been created and requires owner review. macOS owns any access prompt;
+do not create a fake terminal or change Keychain ACLs to evade it.
+
+Successful native readback is local setup only. The separate production
+runtime reader still needs to prove access, and genuine provider authority
+plus the matching production authorization binding remain mandatory.
+
+The default IBKR managed-control reader now uses native `SecItemCopyMatching`
+from the runtime Python process for that single exact enrolled item. It
+requests authentication-UI failure, preserves existing OS access controls,
+and never falls back to an interactive setup read or a `security` subprocess.
+Gmail retains its separate five-item scope, and injected test custodians are
+unchanged. Apple's file-Keychain compatibility shim has distinct behavior;
+the native call has no Python-level timeout. Use an externally bounded,
+status-only read check before relying on access. Successful access now is not
+proof of access after restart or of trading readiness. See Apple's
+[Mac Keychain implementations](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+and [authentication-UI failure semantics](https://developer.apple.com/documentation/security/ksecuseauthenticationuifail).
+
 ### Exact local provider assembly and remaining prerequisites
 
 The staged coordinator and independent notification worker invoke Python as
@@ -282,21 +330,29 @@ $INSTALL_ROOT/control/ibkr/daily-risk-baseline.json
 
 The file must be a non-symlink regular file owned by the local user, have mode
 `0400` or `0600`, and carry schema
-`titan_ibkr_daily_risk_baseline_2026-09-14_v1`. Its HMAC key is a third,
+`titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1` for the selected
+daily-starting-equity percentage policy. The earlier realized-P&L baseline
+schema cannot authorize this model. Its HMAC key is a third,
 distinct account-scoped Keychain item selected by the signed policy; it may not
 reuse the provider-authority or owner-policy/pricing key. The receipt binds the
 exact release-manifest, config, policy, risk, account, and account-fingerprint
 identities plus the current and prior exchange-calendar trading dates. Its
 evidence must be USD, exact-account and broker-authoritative, and must include
-week-to-date realized P&L through the prior trading day, prior high-water
-equity, an immutable provider receipt hash, provider source, and provider
-observation time.
+the frozen daily starting whole-account equity and its effective time, plus
+the current valuation-aligned exhaustive external-cash-flow amount, source
+receipt hashes, provider identities, and effective/complete-through times.
+Use the current verifier in `ibkr_risk_evidence.py`, not the superseded
+week-to-date realized-P&L receipt layout. The current midnight/five-second
+requirements are implementation-specific; no available IBKR feed has yet
+been established to meet them. See the September 14 daily-provider contract
+review before implementing an issuer or changing the measurement boundary.
 
 No release command creates or signs this provider fact. A trusted existing
 control plane must derive it from authenticated IBKR account records and place
 the exact signed file before readiness. The runtime authenticates it before
-opening the command session and again on every broker snapshot, combines it
-only with fresh current-day `reqPnL.realizedPnL`, and advances the separately
+opening the command session and again on every broker snapshot, evaluates
+current whole-account equity less external cash flows against that frozen
+starting equity, and advances the separately
 bound monotone ledger at
 `$INSTALL_ROOT/state/ibkr-risk-high-water.sqlite3`. The calendar-backed binding
 rotates at each trading date without a daemon restart; a missing, stale,
@@ -360,8 +416,27 @@ window. The supported sequence is:
    more than 15 seconds old, its last cycle to have zero failures, the account
    outbox to have zero pending or claimed rows, and the exact structured
    provider receipt to be no more than 300 seconds old. The checked-in September
-   8 configuration intentionally uses local staging and therefore cannot pass
-   this gate.
+   8 Robinhood configuration uses local staging and cannot pass this gate.
+   The September 14 IBKR configuration now selects the authenticated Gmail
+   route; configuration and OAuth success still do not prove delivery.
+
+   For an IBKR route requiring `OWNER_CONFIRMED`, inspect the delivered test
+   with the supported read-only acknowledgement command:
+
+   ```sh
+   "$PYTHON" "$LAUNCHER" notification-confirm-receipt \
+     --install-root "$INSTALL_ROOT" --message-id "EXACT_QUEUED_MESSAGE_ID"
+   ```
+
+   Each TEST email displays its event ID and a unique, release/route-bound
+   verification code in its subject/body. Only after the owner actually
+   receives and inspects that exact TEST email and verifies its code,
+   re-run with `--confirm` and the exact phrase returned by the command. General
+   authorization to set up Gmail or autonomous trading is not receipt evidence.
+   The acknowledgement is account/release/route/message/provider-receipt bound,
+   requires a fresh accepted test and an unarmed PAUSED runtime, and appends a
+   separate audit event. It does not send another message, touch Keychain,
+   contact the broker, change financial policy, or activate trading.
 4. Retire both same-account Codex automations through the Codex automation
    control plane, and wait for both to report `PAUSED` or `DISABLED` with zero
    running executions:

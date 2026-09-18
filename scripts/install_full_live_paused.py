@@ -118,12 +118,15 @@ _FIXED_RELEASE_PATHS = frozenset(
         "CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md",
         _INSTALLER_RELATIVE_PATH,
         "scripts/titan-full-live",
+        "scripts/titan-session-inputs-probe",
         "deployment/com.harpcity.trader-brain-full-live.plist.in",
         "deployment/com.harpcity.trader-brain-full-live-notifications.plist.in",
         "validation/full-live/2026-09-08/OPERATIONS.md",
         "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
         "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
         "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
+        "validation/full-live/2026-09-15/IBKR_FLEX_DAILY_EVIDENCE_SETUP_2026-09-15.md",
+        "validation/full-live/2026-09-18/OWNER_SESSION_TRADING_PNL_AMENDMENT_2026-09-18.md",
     }
 )
 _REQUIRED_RUNTIME_MODULES = frozenset(

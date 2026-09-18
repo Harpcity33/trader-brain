@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from io import BytesIO
 import json
 from pathlib import Path
+import socket
+import ssl
 import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs
 
 from titan_brain.live.composition import RuntimeComposition
@@ -16,6 +20,9 @@ from titan_brain.live.broker.ibkr_instrument import IbkrInstrumentProvider
 from titan_brain.live.broker.ibkr_read import IbkrWholeAccountReadBridge
 from titan_brain.live.discovery_composition import (
     SUPPORTED_IBKR_DISCOVERY_COMPOSITION_ID,
+)
+from titan_brain.live.ibkr_autonomous_authority import (
+    IbkrAutonomousAuthorityBindings,
 )
 from titan_brain.live.local_assembly import (
     DeterministicLocalQualityReader,
@@ -31,6 +38,7 @@ from titan_brain.live.massive_adapter import (
     PreparedStructure,
 )
 from titan_brain.live.notifications import NotificationDeliveryError
+from titan_brain.live.policy import PolicyBundle
 from titan_brain.live.provider_clients import (
     CredentialUnavailable,
     GMAIL_SEND_SCOPE,
@@ -194,6 +202,31 @@ class FakeIbkrRuntime:
 
 
 class LocalProviderClientTests(unittest.TestCase):
+    @staticmethod
+    def _gmail_authorizer(opener):
+        client = {
+            "installed": {
+                "client_id": "client-id.apps.googleusercontent.com",
+                "client_secret": "client-secret",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": ["http://localhost"],
+            }
+        }
+        return GmailDesktopOAuthAuthorizer(
+            FakeKeychain(
+                {
+                    "client": json.dumps(client),
+                    "refresh": "refresh-secret",
+                    "consent": "production",
+                }
+            ),
+            client_item=KeychainItem("client"),
+            refresh_token_item=KeychainItem("refresh"),
+            consent_status_item=KeychainItem("consent"),
+            opener=opener,
+            clock=lambda: NOW,
+        )
+
     def test_keychain_loader_never_includes_secret_or_stderr_in_failure(self):
         item = KeychainItem("titan-test", "owner")
         completed = subprocess.CompletedProcess(
@@ -390,8 +423,135 @@ class LocalProviderClientTests(unittest.TestCase):
         ):
             auth.authorize({})
 
+    def test_gmail_http_refresh_failure_retains_only_status_and_allowlisted_error(self):
+        private = "private-account-token-and-provider-description"
+        cases = (
+            (
+                400,
+                json.dumps(
+                    {"error": "invalid_grant", "error_description": private}
+                ).encode(),
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_400_INVALID_GRANT",
+            ),
+            (
+                401,
+                json.dumps(
+                    {"error": "invalid_client", "error_description": private}
+                ).encode(),
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_401_INVALID_CLIENT",
+            ),
+            (
+                400,
+                json.dumps({"error": private, "access_token": private}).encode(),
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_400_UNCLASSIFIED",
+            ),
+            (
+                400,
+                (
+                    b'{"error":"invalid_grant","error":"' + private.encode()
+                    + b'","error_description":"' + private.encode() + b'"}'
+                ),
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_400_UNCLASSIFIED",
+            ),
+            (
+                503,
+                (private.encode() + b"x" * (64 * 1024)),
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_503_UNCLASSIFIED",
+            ),
+        )
+        for status, payload, expected in cases:
+            with self.subTest(status=status, expected=expected):
+                def opener(_request, *, timeout, payload=payload, status=status):
+                    self.assertEqual(timeout, 10.0)
+                    raise HTTPError(
+                        f"https://{private}.invalid/token",
+                        status,
+                        private,
+                        {"X-Private": private},
+                        BytesIO(payload),
+                    )
+
+                auth = self._gmail_authorizer(opener)
+                with self.assertRaises(NotificationDeliveryError) as caught:
+                    auth.probe_refresh()
+                self.assertEqual(caught.exception.code, expected)
+                self.assertIsNone(caught.exception.__cause__)
+                self.assertIsNone(caught.exception.__context__)
+                self.assertNotIn(private, repr(caught.exception))
+                self.assertNotIn(private, repr(caught.exception.__dict__))
+
+    def test_gmail_transport_refresh_failure_retains_no_exception_text(self):
+        private = "private-host-account-and-provider-error"
+        cases = (
+            (
+                URLError(socket.timeout(private)),
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_TIMEOUT",
+            ),
+            (
+                URLError(ssl.SSLError(private)),
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_TLS_FAILED",
+            ),
+            (
+                URLError(socket.gaierror(-2, private)),
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_DNS_FAILED",
+            ),
+            (
+                URLError(private),
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_NETWORK_FAILED",
+            ),
+            (
+                RuntimeError(private),
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_FAILED",
+            ),
+        )
+        for failure, expected in cases:
+            with self.subTest(expected=expected):
+                def opener(_request, *, timeout, failure=failure):
+                    self.assertEqual(timeout, 10.0)
+                    raise failure
+
+                auth = self._gmail_authorizer(opener)
+                with self.assertRaises(NotificationDeliveryError) as caught:
+                    auth.probe_refresh()
+                self.assertEqual(caught.exception.code, expected)
+                self.assertIsNone(caught.exception.__cause__)
+                self.assertIsNone(caught.exception.__context__)
+                self.assertNotIn(private, repr(caught.exception))
+
 
 class LocalAssemblyTests(unittest.TestCase):
+    @staticmethod
+    def _gmail_failure_report(failure):
+        root = Path(__file__).resolve().parents[1]
+        assembly = LocalProviderAssembly(
+            release_root=root,
+            install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW,
+            full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: FakeIbkrRuntime(),
+        )
+        assembly.profile["ibkr_gmail"]["enabled"] = True
+        assembly.full_live["notifications"].update(
+            {"delivery_sink": "gmail_api", "destination_bridge_configured": True}
+        )
+        binding = SimpleNamespace(
+            authorization_binding_id="a" * 64,
+            destination="owner@example.invalid",
+            authorizer=SimpleNamespace(probe_refresh=Mock(side_effect=failure)),
+        )
+        try:
+            with patch.object(
+                assembly,
+                "massive_source",
+                side_effect=CredentialUnavailable("CREDENTIAL_TEST_UNAVAILABLE"),
+            ), patch.object(
+                assembly, "_ibkr_connections", return_value=[]
+            ), patch.object(assembly, "gmail_binding", return_value=binding):
+                return assembly.connection_report(probe_network=True)
+        finally:
+            assembly.close()
+
     def test_stock_launcher_assembly_is_safe_when_live_providers_are_disabled(self):
         root = Path(__file__).resolve().parents[1]
         assembly = LocalProviderAssembly(
@@ -402,6 +562,96 @@ class LocalAssemblyTests(unittest.TestCase):
         )
         self.assertIsInstance(assembly.runtime_composition(), RuntimeComposition)
         assembly.close()
+
+    def test_unattended_assembly_selects_daily_policy_baseline_schema(self):
+        root = Path(__file__).resolve().parents[1]
+        policy = PolicyBundle.load(
+            root, config_relative="config/full_live_ibkr.json"
+        )
+        self.assertTrue(policy.daily_starting_equity_risk)
+        with tempfile.TemporaryDirectory() as directory:
+            install_root = Path(directory)
+            (install_root / "state").mkdir()
+            (install_root / "control/ibkr").mkdir(parents=True)
+            assembly = LocalProviderAssembly(
+                release_root=root,
+                install_root=install_root,
+                keychain=FakeKeychain({}),
+                clock=lambda: NOW,
+                full_live_config_name="full_live_ibkr.json",
+            )
+            execution = assembly.full_live["execution"]
+            execution.update(
+                {
+                    "execution_authority_mode": "unattended",
+                    "broker_adapter": "supported_production_transport",
+                    "supported_unattended_mutation": True,
+                    "per_mutation_user_confirmation_required": False,
+                    "local_mutation_interlock_enabled": True,
+                    "production_transport_id": "ibkr-tws-api-10.50.2-v1",
+                    "production_authorization_binding_id": "1" * 64,
+                    "production_account_binding_fingerprint": "2" * 64,
+                    "ibkr_provider_contract_id": "3" * 64,
+                    "ibkr_ledger_relative_path": "state/ibkr-execution.sqlite3",
+                    "ibkr_existing_order_reserve_dollars": "0.25",
+                    "ibkr_daily_risk_baseline_relative_path": (
+                        "control/ibkr/daily-risk-baseline.json"
+                    ),
+                    "ibkr_daily_risk_baseline_key_source": "macos_keychain",
+                    "ibkr_daily_risk_baseline_key_service": "daily-risk-test",
+                    "ibkr_daily_risk_baseline_key_account": (
+                        "ibkr-live-ending-3103"
+                    ),
+                    "ibkr_risk_high_water_ledger_relative_path": (
+                        "state/ibkr-risk-high-water.sqlite3"
+                    ),
+                }
+            )
+            lock = object()
+            assembly._ibkr_command_inputs = SimpleNamespace(
+                authority_mode="unattended",
+                mutation_interlock=SimpleNamespace(lock=lock),
+                service_writer_lock=lock,
+                owned_resource=None,
+                autonomous_authority_bindings=IbkrAutonomousAuthorityBindings(
+                    release_manifest_hash="4" * 64,
+                    config_hash=policy.config_hash,
+                    policy_binding_id=policy.policy_hash,
+                    account_key=policy.account_key,
+                    account_masked="****3103",
+                    account_binding_fingerprint="2" * 64,
+                    authorization_binding_id="1" * 64,
+                    provider_contract_id="3" * 64,
+                    transport_id="ibkr-tws-api-10.50.2-v1",
+                    api_name="official_tws_python_api",
+                    api_version="10.50.2",
+                    environment="live",
+                    client_id=19736,
+                ),
+            )
+            with patch.object(
+                PolicyBundle, "load", return_value=policy
+            ), patch.object(
+                assembly, "ibkr_runtime", return_value=object()
+            ), patch.object(
+                assembly,
+                "ibkr_read_components",
+                return_value=SimpleNamespace(account_snapshot_reader=lambda: None),
+            ), patch(
+                "titan_brain.live.local_assembly.DailyIbkrRiskBaselineAuthenticator",
+                side_effect=RuntimeError("later risk-evidence construction"),
+            ) as authenticator_type:
+                with self.assertRaisesRegex(
+                    LocalAssemblyError,
+                    "LOCAL_ASSEMBLY_IBKR_RISK_EVIDENCE_UNAVAILABLE",
+                ):
+                    assembly.ibkr_production_transport()
+            authenticator_type.assert_called_once()
+            self.assertEqual(
+                authenticator_type.call_args.kwargs["required_schema"],
+                policy.daily_risk_baseline_schema,
+            )
+            assembly.close()
 
     def test_notification_composition_never_constructs_broker_or_market_data(self):
         root = Path(__file__).resolve().parents[1]
@@ -657,6 +907,15 @@ class LocalAssemblyTests(unittest.TestCase):
             full_live_config_name="full_live_ibkr.json",
             ibkr_runtime_factory=factory,
         )
+        assembly.profile["ibkr_gmail"].update(
+            {"enabled": False, "send_probe_authorized": False}
+        )
+        assembly.full_live["notifications"].update(
+            {
+                "delivery_sink": "local_jsonl_staging",
+                "destination_bridge_configured": False,
+            }
+        )
         self.assertEqual(assembly.ibkr_profile().account_last4, "3103")
         composition = assembly.runtime_composition()
         self.assertIsInstance(composition, RuntimeComposition)
@@ -734,6 +993,15 @@ class LocalAssemblyTests(unittest.TestCase):
             full_live_config_name="full_live_ibkr.json",
             ibkr_runtime_factory=lambda **_kwargs: runtime,
         )
+        assembly.profile["ibkr_gmail"].update(
+            {"enabled": False, "send_probe_authorized": False}
+        )
+        assembly.full_live["notifications"].update(
+            {
+                "delivery_sink": "local_jsonl_staging",
+                "destination_bridge_configured": False,
+            }
+        )
         report = assembly.connection_report(probe_network=False)
         components = {item["component"] for item in report["connections"]}
         self.assertIn("gmail_notification", components)
@@ -760,6 +1028,159 @@ class LocalAssemblyTests(unittest.TestCase):
             if item["component"] == "gmail_notification"
         ), "NOT_CONFIGURED")
         assembly.close()
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_gmail_credential_probe_does_not_claim_prior_delivery_is_missing(self, _validate_sdk):
+        root = Path(__file__).resolve().parents[1]
+        assembly = LocalProviderAssembly(
+            release_root=root, install_root=root,
+            keychain=FakeKeychain({"titan-massive-api": "private-massive-key"}),
+            clock=lambda: NOW, full_live_config_name="full_live_ibkr.json",
+            ibkr_runtime_factory=lambda **_kwargs: FakeIbkrRuntime(),
+        )
+        assembly.profile["ibkr_gmail"]["enabled"] = True
+        assembly.full_live["notifications"].update(
+            {"delivery_sink": "gmail_api", "destination_bridge_configured": True})
+        binding = SimpleNamespace(authorization_binding_id="a" * 64,
+                                  destination="owner@example.invalid")
+        with patch.object(assembly, "gmail_binding", return_value=binding):
+            report = assembly.connection_report(probe_network=False)
+        notification = next(item for item in report["connections"]
+                            if item["component"] == "gmail_notification")
+        self.assertEqual(notification["status"], "AVAILABLE_UNPROBED", notification)
+        self.assertFalse(notification["authenticated"])
+        self.assertIn("does not inspect prior delivery", notification["action_required"])
+        self.assertIn("current release-bound delivery gate", notification["action_required"])
+        self.assertNotIn("test still required", notification["action_required"])
+        assembly.close()
+
+    def test_gmail_refresh_category_survives_normal_provider_status_reporting(self):
+        cases = (
+            (
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_400_INVALID_GRANT",
+                "renew Gmail consent",
+            ),
+            (
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_401_INVALID_CLIENT",
+                "repair the approved Gmail desktop OAuth client",
+            ),
+            (
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_503_UNCLASSIFIED",
+                "preserve Gmail credentials and retry after the provider recovers",
+            ),
+            (
+                "NOTIFICATION_GMAIL_OAUTH_REFRESH_TIMEOUT",
+                "preserve Gmail credentials and retry after local network or TLS recovery",
+            ),
+            (
+                "NOTIFICATION_GMAIL_OAUTH_HTTP_400_UNCLASSIFIED",
+                "preserve Gmail credentials and investigate the sanitized OAuth failure category",
+            ),
+        )
+        for code, action in cases:
+            with self.subTest(code=code):
+                report = self._gmail_failure_report(NotificationDeliveryError(code))
+                notification = next(
+                    item
+                    for item in report["connections"]
+                    if item["component"] == "gmail_notification"
+                )
+                self.assertEqual(notification["status"], "BLOCKED")
+                self.assertFalse(notification["authenticated"])
+                self.assertEqual(notification["error_code"], code)
+                self.assertIn(action, notification["action_required"])
+                if code.endswith("_INVALID_CLIENT"):
+                    self.assertIn(
+                        "without replacing the refresh grant",
+                        notification["action_required"],
+                    )
+                    self.assertNotIn("renew owner consent", notification["action_required"])
+                self.assertEqual(report["notification_messages_sent"], [])
+                self.assertEqual(report["broker_mutations_invoked"], [])
+
+    def test_gmail_provider_report_rejects_mutated_or_malicious_error_codes(self):
+        private = "private-provider-body-url-token-and-account"
+        failure = NotificationDeliveryError(
+            "NOTIFICATION_GMAIL_OAUTH_REFRESH_FAILED"
+        )
+        failure.code = private
+        failure.args = (private,)
+        report = self._gmail_failure_report(failure)
+        serialized = json.dumps(report, sort_keys=True)
+        notification = next(
+            item
+            for item in report["connections"]
+            if item["component"] == "gmail_notification"
+        )
+        self.assertEqual(
+            notification["error_code"],
+            "LOCAL_ASSEMBLY_PROVIDER_NOTIFICATIONDELIVERYERROR",
+        )
+        self.assertIn("investigate the sanitized", notification["action_required"])
+        self.assertNotIn(private, serialized)
+        self.assertEqual(report["notification_messages_sent"], [])
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_bootstrap_failure_is_not_reported_as_pnl_timeout(self, _validate_sdk):
+        from titan_brain.live.broker.ibkr_runtime import IbkrRuntimeError
+
+        root = Path(__file__).resolve().parents[1]
+        for code, action in (
+            ("IBKR_RUNTIME_READ_CONNECTION_NOT_ESTABLISHED", "API listener"),
+            ("IBKR_RUNTIME_READ_CONNECTION_LOST", "API listener"),
+            ("IBKR_RUNTIME_ACCOUNT_DISCOVERY_TIMEOUT", "managed-account discovery"),
+            ("IBKR_RUNTIME_ACCOUNT_DISCOVERY_FAILED", "managed-account discovery"),
+        ):
+            with self.subTest(code=code):
+                runtime = FakeIbkrRuntime()
+                runtime.connect_reads = Mock(side_effect=IbkrRuntimeError(code))
+                runtime.probe_reads = Mock(side_effect=AssertionError("must not probe"))
+                assembly = LocalProviderAssembly(
+                    release_root=root,
+                    install_root=root,
+                    keychain=FakeKeychain({}),
+                    clock=lambda: NOW,
+                    full_live_config_name="full_live_ibkr.json",
+                    ibkr_runtime_factory=lambda **_kwargs: runtime,
+                )
+                result = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0].status, "BLOCKED")
+                self.assertFalse(result[0].authenticated)
+                self.assertIsNone(result[0].last_successful_check)
+                self.assertEqual(result[0].error_code, "LOCAL_ASSEMBLY_" + code)
+                self.assertIn(action, result[0].action_required)
+                self.assertIn("not reached", result[0].action_required)
+                runtime.probe_reads.assert_not_called()
+                assembly.close()
+
+    @patch("titan_brain.live.local_assembly.validate_installed_sdk")
+    def test_ibkr_bootstrap_error_does_not_disclose_provider_text(self, _validate_sdk):
+        from titan_brain.live.broker.ibkr_runtime import IbkrRuntimeError
+
+        root = Path(__file__).resolve().parents[1]
+        # A familiar prefix or uppercase-only string does not make arbitrary
+        # provider text an approved diagnostic. Only exact constant codes pass.
+        for error in (
+            RuntimeError("IBKR_RUNTIME_READ_CONNECTION_LOST private-token U1234567"),
+            IbkrRuntimeError("IBKR_RUNTIME_PRIVATE_TOKEN_U1234567"),
+        ):
+            with self.subTest(error_type=type(error).__name__):
+                runtime = FakeIbkrRuntime()
+                runtime.connect_reads = Mock(side_effect=error)
+                assembly = LocalProviderAssembly(
+                    release_root=root,
+                    install_root=root,
+                    keychain=FakeKeychain({}),
+                    clock=lambda: NOW,
+                    full_live_config_name="full_live_ibkr.json",
+                    ibkr_runtime_factory=lambda **_kwargs: runtime,
+                )
+                result = assembly._ibkr_connections(probe_network=True, checked_at=NOW)
+                self.assertEqual(result[0].error_code, "LOCAL_ASSEMBLY_IBKR_READ_CONNECTION_FAILED")
+                self.assertNotIn("1234567", json.dumps(result[0].public_dict()))
+                self.assertNotIn("private", json.dumps(result[0].public_dict()).lower())
+                assembly.close()
 
     @patch("titan_brain.live.local_assembly.validate_installed_sdk")
     def test_ibkr_provider_status_preserves_sanitized_probe_error_code(

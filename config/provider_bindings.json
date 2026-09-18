@@ -46,7 +46,7 @@
   },
   "ibkr_gmail": {
     "implementation_id": "titan.gmail_api.desktop_oauth.keychain_refresh.v1",
-    "enabled": false,
+    "enabled": true,
     "credential_backend": "macos_keychain",
     "desktop_client_service": "titan-full-live-ibkr-ending-3103-gmail-desktop-client",
     "refresh_token_service": "titan-full-live-ibkr-ending-3103-gmail-refresh-token",
@@ -57,7 +57,7 @@
     "account_key": "ibkr-live-ending-3103",
     "scopes": ["https://www.googleapis.com/auth/gmail.send"],
     "durable_consent_status_required": ["production", "internal"],
-    "send_probe_authorized": false
+    "send_probe_authorized": true
   },
   "control": {
     "credential_backend": "macos_keychain",

@@ -12,6 +12,7 @@ from unittest.mock import patch
 from titan_brain.live.pipeline import FullLiveEntryPipeline
 from titan_brain.live.policy import PolicyBundle
 from titan_brain.live.risk_runtime import (
+    OPEN_POSITION_REMAINING_FEE_SCOPE, OpenPositionRiskCalculationInputs,
     SessionLatch, RiskExposure, daily_starting_equity_capacity,
     daily_starting_equity_performance, evaluate_entry, update_session_latch,
 )
@@ -162,6 +163,35 @@ class DailyStartingEquityRuntimeTests(unittest.TestCase):
         # Allowing another trade from current NLV would understate the floor risk.
         result = self.decision(daily_starting_equity="1000", total_equity="1020",
                                daily_realized_pnl="-80", exposures=(open_position,))
+        self.assertFalse(result.allowed)
+        self.assertIn("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED", result.failures)
+
+    def test_complete_candidate_calculation_still_cannot_self_authorize_entry(self):
+        candidate = OpenPositionRiskCalculationInputs(
+            quantity=10,
+            current_market_value="200",
+            stop_allocations=(("working-stop", 10, "18"),),
+            execution_reserve="1",
+            remaining_fee_reserve="2",
+            remaining_fee_scope=OPEN_POSITION_REMAINING_FEE_SCOPE,
+        )
+        open_position = RiskExposure.build(
+            reference="open",
+            category="open",
+            planned_risk=candidate.planned_downside,
+            execution_reserve="1",
+            fee_reserve=candidate.remaining_fee_reserve,
+            stress_risk=candidate.stress_downside(),
+            notional="0",
+            protected=True,
+        )
+
+        self.assertFalse(candidate.authorizes_entry)
+        result = self.decision(
+            daily_starting_equity="1000",
+            total_equity="1020",
+            exposures=(open_position,),
+        )
         self.assertFalse(result.allowed)
         self.assertIn("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED", result.failures)
 

@@ -1,5 +1,15 @@
 # Trader Brain / Titan Momentum
 
+## Kiro completion handoff — September 18, 2026
+
+Start with [KIRO_HANDOFF.md](KIRO_HANDOFF.md) for the current owner-approved
+session-P&L model, implemented repairs, remaining acceptance criteria, offline
+test commands, and local-only deployment prerequisites. The installed account
+is **PAUSED**; the new session model is **not production-ready or activated**.
+The historical component overview below does not override that current status.
+This private repository is a source handoff, not a transfer of credentials,
+broker reports, runtime databases, SDK binaries, or trading authority.
+
 This repository contains the September 8 full-live production implementation
 and the earlier research, risk, scoring, paper, and attended-option components.
 The new runtime is a persistent, single-writer equity lifecycle:

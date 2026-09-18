@@ -47,6 +47,121 @@ from .models import (
 
 SCHEMA_VERSION = 3
 ZERO_HASH = "0" * 64
+NOTIFICATION_TEST_SCHEMA = "titan_notification_delivery_test_2026-09-14_v1"
+NOTIFICATION_TEST_STATE = "notification_test"
+NOTIFICATION_TEST_REASON = (
+    "TEST ONLY - owner-requested notification delivery verification; "
+    "no trading action"
+)
+NOTIFICATION_TEST_SUBJECT = "Titan TEST ONLY - Notification Delivery Verification"
+NOTIFICATION_TEST_BODY = (
+    "TEST ONLY - verifies owner receipt of the configured notification route. "
+    "This is not a trading instruction and performs no trading action."
+)
+_NOTIFICATION_VISIBLE_TOKEN = re.compile(r"[0-9A-F]{16}")
+
+
+def _lower_sha256(value: object, field: str) -> str:
+    normalized = str(value)
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        raise ValueError(f"{field} must be lowercase SHA-256")
+    return normalized
+
+
+def _notification_json_hash(value: Mapping[str, Any]) -> str:
+    """Match the notification policy's ASCII-safe canonical JSON hashing."""
+
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def notification_test_event_key(payload: Mapping[str, Any]) -> str:
+    """Return the release/route-bound identity of one explicit delivery test."""
+
+    return f"READINESS:notification-test:{object_hash(payload)}"
+
+
+def notification_test_visible_token(payload: Mapping[str, Any]) -> str:
+    """Return the human-visible token bound to an exact logical TEST."""
+
+    binding = dict(payload)
+    binding.pop("visible_test_token", None)
+    return object_hash(
+        {
+            "schema_version": "titan_notification_visible_test_token_v1",
+            "binding": binding,
+        }
+    )[:16].upper()
+
+
+def notification_test_subject(visible_test_token: str) -> str:
+    token = str(visible_test_token)
+    if not _NOTIFICATION_VISIBLE_TOKEN.fullmatch(token):
+        raise ValueError("notification TEST visible token is invalid")
+    return f"{NOTIFICATION_TEST_SUBJECT} [{token}]"
+
+
+def notification_test_body(visible_test_token: str, event_id: str) -> str:
+    token = str(visible_test_token)
+    if not _NOTIFICATION_VISIBLE_TOKEN.fullmatch(token):
+        raise ValueError("notification TEST visible token is invalid")
+    identity = str(event_id)
+    if (
+        not identity
+        or len(identity) > 128
+        or any(
+            not (character.isalnum() or character in "._:-")
+            for character in identity
+        )
+    ):
+        raise ValueError("notification TEST event ID is invalid")
+    return (
+        f"{NOTIFICATION_TEST_BODY} Test ID: {identity}. "
+        f"Verification code: {token}."
+    )
+
+
+def notification_owner_confirmation_phrase(
+    *,
+    visible_test_token: str,
+    account_key: str,
+    release_manifest_hash: str,
+    route_id: str,
+    message_id: str,
+    provider_receipt_hash: str,
+) -> str:
+    """Build the exact acknowledgement an owner must deliberately enter."""
+
+    account = str(account_key).strip()
+    message = str(message_id).strip()
+    if not account or not message or len(account) > 128 or len(message) > 128:
+        raise ValueError("notification confirmation identity is invalid")
+    if any(not (character.isalnum() or character in "._:-") for character in account):
+        raise ValueError("notification confirmation account is invalid")
+    if any(not (character.isalnum() or character in "._:-") for character in message):
+        raise ValueError("notification confirmation message is invalid")
+    token = str(visible_test_token)
+    if not _NOTIFICATION_VISIBLE_TOKEN.fullmatch(token):
+        raise ValueError("notification TEST visible token is invalid")
+    release_hash = _lower_sha256(
+        release_manifest_hash, "release_manifest_hash"
+    )
+    delivery_route = _lower_sha256(route_id, "route_id")
+    receipt_hash = _lower_sha256(
+        provider_receipt_hash, "provider_receipt_hash"
+    )
+    return (
+        "I CONFIRM RECEIPT OF TITAN NOTIFICATION TEST "
+        f"{token} {account} {release_hash} {delivery_route} {message} {receipt_hash}"
+    )
 
 
 class LiveStateError(RuntimeError):
@@ -3164,6 +3279,13 @@ class LiveStateStore:
             if delivered and any(item is not None for item in receipt_fields):
                 if not all(item is not None for item in receipt_fields):
                     raise ValueError("structured notification receipt fields are all required")
+                if delivery_assurance not in {
+                    "LOCAL_STAGED",
+                    "PROVIDER_ACCEPTED",
+                }:
+                    raise ValueError(
+                        "initial delivery cannot claim owner confirmation"
+                    )
                 for field, value in (
                     ("delivery_route_id", delivery_route_id),
                     ("delivery_receipt_hash", delivery_receipt_hash),
@@ -3210,6 +3332,341 @@ class LiveStateStore:
                     "receipt_hash": delivery_receipt_hash if delivered else None,
                 },
             )
+
+    def confirm_notification_owner_receipt(
+        self,
+        message_id: str,
+        *,
+        account_key: str,
+        runtime_id: str,
+        release_manifest_hash: str,
+        config_hash: str,
+        policy_hash: str,
+        route_id: str,
+        provider_receipt_hash: str,
+        confirmed_at: datetime,
+        confirmation_phrase: str,
+    ) -> Mapping[str, str]:
+        """Atomically upgrade one exact provider-accepted TEST receipt.
+
+        Provider acceptance is deliberately insufficient.  This transition
+        requires a separate, exact phrase supplied by the owner and persists
+        its own append-only audit event.  The state boundary revalidates the
+        release, account, route, test payload, provider receipt, and delivery
+        event so a convenience caller cannot acknowledge a different message.
+        """
+
+        message = str(message_id).strip()
+        account = str(account_key).strip()
+        runtime = str(runtime_id).strip()
+        if (
+            not runtime
+            or len(runtime) > 128
+            or any(
+                not (character.isalnum() or character in "._:-")
+                for character in runtime
+            )
+        ):
+            raise ValueError("notification confirmation runtime is invalid")
+        release_hash = _lower_sha256(
+            release_manifest_hash, "release_manifest_hash"
+        )
+        configured_hash = _lower_sha256(config_hash, "config_hash")
+        signed_policy_hash = _lower_sha256(policy_hash, "policy_hash")
+        delivery_route = _lower_sha256(route_id, "route_id")
+        accepted_receipt_hash = _lower_sha256(
+            provider_receipt_hash, "provider_receipt_hash"
+        )
+        confirmed = _iso(confirmed_at)
+
+        with self.transaction() as connection:
+            runtime_row = connection.execute(
+                "SELECT * FROM runtime_identity WHERE singleton=1"
+            ).fetchone()
+            if runtime_row is None:
+                raise StateConflict("notification confirmation runtime is missing")
+            for field, expected in (
+                ("runtime_id", runtime),
+                ("account_key", account),
+                ("release_manifest_hash", release_hash),
+                ("config_hash", configured_hash),
+                ("policy_hash", signed_policy_hash),
+            ):
+                if str(runtime_row[field]) != expected:
+                    raise StateConflict(
+                        f"notification confirmation runtime mismatch: {field}"
+                    )
+            if (
+                str(runtime_row["mode"]) != "PAUSED"
+                or bool(runtime_row["authority_enabled"])
+            ):
+                raise StateConflict(
+                    "notification owner confirmation requires an unarmed PAUSED runtime"
+                )
+
+            row = connection.execute(
+                "SELECT * FROM notification_outbox WHERE message_id=?",
+                (message,),
+            ).fetchone()
+            if row is None:
+                raise LiveStateError(f"unknown notification {message!r}")
+            if (
+                str(row["account_key"]) != account
+                or str(row["template"]) != "READINESS"
+                or str(row["state"]) != OutboxState.DELIVERED.value
+                or str(row["delivery_route_id"] or "") != delivery_route
+                or str(row["delivery_assurance"] or "")
+                != "PROVIDER_ACCEPTED"
+                or str(row["delivery_receipt_hash"] or "")
+                != accepted_receipt_hash
+            ):
+                raise StateConflict(
+                    "notification is not the exact provider-accepted test receipt"
+                )
+
+            try:
+                wrapper = json.loads(str(row["payload_json"]))
+                receipt = json.loads(str(row["delivery_receipt"]))
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise StateConflict(
+                    "notification test or receipt JSON is invalid"
+                ) from exc
+            if (
+                not isinstance(wrapper, Mapping)
+                or set(wrapper) != {"severity", "subject", "body", "payload"}
+                or wrapper.get("severity") != "info"
+                or not isinstance(wrapper.get("payload"), Mapping)
+            ):
+                raise StateConflict("notification is not a clearly labelled TEST")
+            payload = dict(wrapper["payload"])
+            required_test_fields = {
+                "schema_version",
+                "event_id",
+                "state",
+                "symbol",
+                "reason",
+                "account_key",
+                "runtime_id",
+                "release_manifest_hash",
+                "config_hash",
+                "policy_hash",
+                "delivery_route_id",
+                "visible_test_token",
+            }
+            event_id = str(payload.get("event_id", ""))
+            visible_test_token = str(payload.get("visible_test_token", ""))
+            if (
+                set(payload) != required_test_fields
+                or payload.get("schema_version") != NOTIFICATION_TEST_SCHEMA
+                or payload.get("state") != NOTIFICATION_TEST_STATE
+                or payload.get("symbol") != "ACCOUNT"
+                or payload.get("reason") != NOTIFICATION_TEST_REASON
+                or payload.get("account_key") != account
+                or payload.get("runtime_id") != runtime
+                or payload.get("release_manifest_hash") != release_hash
+                or payload.get("config_hash") != configured_hash
+                or payload.get("policy_hash") != signed_policy_hash
+                or payload.get("delivery_route_id") != delivery_route
+                or visible_test_token != notification_test_visible_token(payload)
+                or wrapper.get("subject")
+                != notification_test_subject(visible_test_token)
+                or wrapper.get("body")
+                != notification_test_body(visible_test_token, event_id)
+                or not event_id
+                or len(event_id) > 128
+                or any(
+                    not (character.isalnum() or character in "._:-")
+                    for character in event_id
+                )
+                or str(row["event_key"]) != notification_test_event_key(payload)
+            ):
+                raise StateConflict(
+                    "notification test is not bound to the exact runtime and route"
+                )
+            expected_phrase = notification_owner_confirmation_phrase(
+                visible_test_token=visible_test_token,
+                account_key=account,
+                release_manifest_hash=release_hash,
+                route_id=delivery_route,
+                message_id=message,
+                provider_receipt_hash=accepted_receipt_hash,
+            )
+            if str(confirmation_phrase) != expected_phrase:
+                raise StateConflict(
+                    "exact notification owner-confirmation phrase does not match"
+                )
+            expected_payload_hash = _notification_json_hash(
+                {
+                    "dedupe_key": str(row["event_key"]),
+                    "event_type": "READINESS",
+                    "severity": "info",
+                    "subject": notification_test_subject(visible_test_token),
+                    "body": notification_test_body(visible_test_token, event_id),
+                    "payload": payload,
+                }
+            )
+            if str(row["delivery_payload_hash"] or "") != expected_payload_hash:
+                raise StateConflict(
+                    "notification delivery payload hash does not match the TEST"
+                )
+
+            receipt_fields = {
+                "schema_version",
+                "route_id",
+                "provider",
+                "destination_fingerprint",
+                "route_version",
+                "event_key",
+                "payload_hash",
+                "provider_receipt_id",
+                "accepted_at",
+                "assurance",
+                "owner_confirmed_at",
+            }
+            if not isinstance(receipt, Mapping) or set(receipt) != receipt_fields:
+                raise StateConflict("provider receipt fields are invalid")
+            try:
+                accepted_at = datetime.fromisoformat(str(receipt["accepted_at"]))
+                delivered_at = datetime.fromisoformat(str(row["delivered_at"]))
+            except (TypeError, ValueError) as exc:
+                raise StateConflict(
+                    "provider receipt chronology is invalid"
+                ) from exc
+            if accepted_at.tzinfo is None or delivered_at.tzinfo is None:
+                raise StateConflict("provider receipt chronology is invalid")
+            accepted_at = accepted_at.astimezone(timezone.utc)
+            delivered_at = delivered_at.astimezone(timezone.utc)
+            confirmation_time = confirmed_at.astimezone(timezone.utc)
+            provider = str(receipt.get("provider", ""))
+            destination = str(receipt.get("destination_fingerprint", ""))
+            route_version = str(receipt.get("route_version", ""))
+            provider_receipt_id = str(receipt.get("provider_receipt_id", ""))
+            if (
+                receipt.get("schema_version")
+                != "titan_notification_delivery_receipt_v1"
+                or receipt.get("route_id") != delivery_route
+                or receipt.get("event_key") != str(row["event_key"])
+                or receipt.get("payload_hash")
+                != expected_payload_hash
+                or receipt.get("assurance") != "PROVIDER_ACCEPTED"
+                or receipt.get("owner_confirmed_at") is not None
+                or provider == "local_jsonl"
+                or not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", provider)
+                or not re.fullmatch(r"[0-9a-f]{64}", destination)
+                or not route_version
+                or len(route_version) > 128
+                or any(character.isspace() for character in route_version)
+                or not provider_receipt_id.strip()
+                or len(provider_receipt_id) > 512
+                or _notification_json_hash(
+                    {
+                        "provider": provider,
+                        "destination_fingerprint": destination,
+                        "route_version": route_version,
+                    }
+                )
+                != delivery_route
+                or str(receipt["accepted_at"])
+                != accepted_at.isoformat()
+                or _notification_json_hash(receipt) != accepted_receipt_hash
+                or abs((accepted_at - delivered_at).total_seconds()) > 30
+                or confirmation_time < max(accepted_at, delivered_at)
+                or (confirmation_time - accepted_at).total_seconds()
+                > 300
+            ):
+                raise StateConflict(
+                    "provider receipt does not prove a fresh exact delivery"
+                )
+
+            delivery_events = connection.execute(
+                "SELECT occurred_at,payload_json FROM audit_events "
+                "WHERE entity_type='notification' AND entity_id=? "
+                "AND event_type='NOTIFICATION_DELIVERED'",
+                (message,),
+            ).fetchall()
+            try:
+                delivery_payload = json.loads(str(delivery_events[0]["payload_json"]))
+                delivery_event_at = datetime.fromisoformat(
+                    str(delivery_events[0]["occurred_at"])
+                )
+            except (IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise StateConflict(
+                    "provider-accepted delivery audit evidence is missing"
+                ) from exc
+            if (
+                delivery_event_at.tzinfo is None
+                or delivery_event_at.astimezone(timezone.utc) != delivered_at
+                or len(delivery_events) != 1
+                or delivery_payload
+                != {
+                    "error": None,
+                    "route_id": delivery_route,
+                    "assurance": "PROVIDER_ACCEPTED",
+                    "receipt_hash": accepted_receipt_hash,
+                }
+            ):
+                raise StateConflict(
+                    "provider-accepted delivery audit evidence is invalid"
+                )
+
+            owner_receipt = dict(receipt)
+            owner_receipt["assurance"] = "OWNER_CONFIRMED"
+            owner_receipt["owner_confirmed_at"] = confirmed
+            owner_receipt_json = canonical_json(owner_receipt)
+            owner_receipt_hash = _notification_json_hash(owner_receipt)
+            updated = connection.execute(
+                """UPDATE notification_outbox
+                      SET delivery_receipt=?, delivery_assurance=?,
+                          delivery_receipt_hash=?
+                    WHERE message_id=? AND account_key=? AND state='DELIVERED'
+                      AND delivery_route_id=?
+                      AND delivery_assurance='PROVIDER_ACCEPTED'
+                      AND delivery_receipt_hash=?""",
+                (
+                    owner_receipt_json,
+                    "OWNER_CONFIRMED",
+                    owner_receipt_hash,
+                    message,
+                    account,
+                    delivery_route,
+                    accepted_receipt_hash,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StateConflict(
+                    "notification receipt changed before owner confirmation"
+                )
+            self._append_event(
+                connection,
+                stream=account,
+                event_type="NOTIFICATION_OWNER_CONFIRMED",
+                entity_type="notification",
+                entity_id=message,
+                occurred_at=confirmed_at,
+                payload={
+                    "schema_version": (
+                        "titan_notification_owner_confirmation_2026-09-14_v1"
+                    ),
+                    "runtime_id": runtime,
+                    "release_manifest_hash": release_hash,
+                    "config_hash": configured_hash,
+                    "policy_hash": signed_policy_hash,
+                    "event_key": str(row["event_key"]),
+                    "route_id": delivery_route,
+                    "payload_hash": str(row["delivery_payload_hash"]),
+                    "provider_receipt_hash": accepted_receipt_hash,
+                    "owner_receipt_hash": owner_receipt_hash,
+                    "owner_confirmation_sha256": hashlib.sha256(
+                        expected_phrase.encode("utf-8")
+                    ).hexdigest(),
+                },
+            )
+            return {
+                "message_id": message,
+                "provider_receipt_hash": accepted_receipt_hash,
+                "owner_receipt_hash": owner_receipt_hash,
+                "owner_confirmed_at": confirmed,
+            }
 
     def claim_due_outbox(
         self,
@@ -3523,10 +3980,20 @@ class LiveStateStore:
 __all__ = [
     "LiveStateError",
     "LiveStateStore",
+    "NOTIFICATION_TEST_BODY",
+    "NOTIFICATION_TEST_REASON",
+    "NOTIFICATION_TEST_SCHEMA",
+    "NOTIFICATION_TEST_STATE",
+    "NOTIFICATION_TEST_SUBJECT",
     "OutOfOrderEvent",
     "SCHEMA_VERSION",
     "StateConflict",
     "UnsupportedSchema",
     "canonical_json",
+    "notification_owner_confirmation_phrase",
+    "notification_test_body",
+    "notification_test_event_key",
+    "notification_test_subject",
+    "notification_test_visible_token",
     "object_hash",
 ]

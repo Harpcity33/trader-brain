@@ -143,7 +143,7 @@ class PolicyCalendarTests(unittest.TestCase):
                 "IBKR_LOCAL_GATEWAY_TRANSPORT_STAGED_ONLY",
                 "LOCAL_MUTATION_INTERLOCK_NOT_ENABLED",
                 "AUTHENTICATED_DAILY_STARTING_EQUITY_AND_CASH_FLOW_EVIDENCE_REQUIRED",
-                "NOTIFICATION_DESTINATION_BRIDGE_NOT_CONFIGURED",
+                "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
                 "LIVE_DISCOVERY_PIPELINE_NOT_CONFIGURED",
             }.issubset(policy.activation_blockers)
         )
@@ -184,12 +184,25 @@ class PolicyCalendarTests(unittest.TestCase):
         self.assertEqual(entry_lifecycle_fee_reserve(policy, quantity=1), Decimal("3"))
         self.assertEqual(entry_lifecycle_fee_reserve(policy, quantity=10), Decimal("12"))
 
-    def test_ibkr_gmail_choice_does_not_invent_a_destination_or_route_receipt(self) -> None:
+    def test_ibkr_authenticated_gmail_binding_does_not_attest_delivery_or_activation(self) -> None:
         policy = PolicyBundle.load(ROOT, config_relative="config/full_live_ibkr.json")
         notifications = policy.config["notifications"]
         self.assertEqual(notifications["intended_delivery_sink"], "gmail_api")
-        self.assertEqual(notifications["delivery_sink"], "local_jsonl_staging")
-        self.assertFalse(notifications["destination_bridge_configured"])
+        self.assertEqual(notifications["delivery_sink"], "gmail_api")
+        self.assertTrue(notifications["destination_bridge_configured"])
+        self.assertEqual(notifications["required_assurance"], "OWNER_CONFIRMED")
+        self.assertEqual(notifications["timeout_seconds"], 10)
+        self.assertEqual(
+            notifications["destination_fingerprint"],
+            "79b18a332f22b118678e4ca252f25108d4661cfa4feb91cea5e9ae0cf43e4da4",
+        )
+        self.assertEqual(
+            notifications["authorization_binding_id"],
+            "b7dcb3191222a85ad0d2cfccef9c777c6de74376187828a7ce4a52df31e711bc",
+        )
+        self.assertEqual(notifications["route_version"], "ibkr-gmail-3103-2026-09-14-v1")
+        self.assertIn("NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN", policy.activation_blockers)
+        self.assertFalse(policy.live_entries_configured)
         self.assertTrue(notifications["owner_destination_consent_required"])
         self.assertTrue(notifications["route_bound_visible_test_required"])
         self.assertTrue(notifications["pause_new_entries_on_delivery_failure"])
@@ -197,8 +210,8 @@ class PolicyCalendarTests(unittest.TestCase):
             notifications["continue_reconciliation_protection_exits_and_closeout"]
         )
         for absent in (
-            "destination", "destination_fingerprint", "authorization_binding_id",
-            "route_version", "access_token", "refresh_token",
+            "destination", "sender_address", "access_token", "refresh_token",
+            "delivery_receipt", "owner_confirmed_at",
         ):
             self.assertNotIn(absent, notifications)
 

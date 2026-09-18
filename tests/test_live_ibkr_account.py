@@ -57,6 +57,8 @@ class FakeWholeAccountReads(IbkrWholeAccountReadBridge):
         self.snapshots = list(snapshots)
         self.index = -1
         self.collection_id = ""
+        self.observation_watermark = "stable-watermark"
+        self.page_watermark = "stable-watermark"
 
     def get_account_base(self, exact_account_id):
         if exact_account_id != ACCOUNT:
@@ -69,7 +71,7 @@ class FakeWholeAccountReads(IbkrWholeAccountReadBridge):
             collection_id=self.collection_id,
             request_started_at=NOW + timedelta(milliseconds=self.index * 10),
             request_completed_at=NOW + timedelta(milliseconds=self.index * 10 + 1),
-            order_event_watermark="stable-watermark",
+            order_event_watermark=self.observation_watermark,
         )
 
     def list_order_family_page(self, exact_account_id, family, cursor):
@@ -88,7 +90,7 @@ class FakeWholeAccountReads(IbkrWholeAccountReadBridge):
             next_cursor=None,
             page_index=0,
             page_complete=True,
-            provider_watermark="stable-watermark",
+            provider_watermark=self.page_watermark,
         )
 
 
@@ -104,6 +106,10 @@ class IbkrStableAccountSnapshotReaderTests(unittest.TestCase):
         snapshot = reader()
         self.assertFalse(snapshot.whole_broker_reconciled)
         self.assertEqual(reads.index, 1)
+        self.assertEqual(
+            reader.coverage.contract_version,
+            "ibkr-open-plus-current-day-completed-v2",
+        )
         self.assertFalse(reader.coverage.proves_whole_account_order_coverage)
         self.assertEqual(
             reader.coverage.client_ref_recovery_source,
@@ -117,6 +123,52 @@ class IbkrStableAccountSnapshotReaderTests(unittest.TestCase):
         self.assertTrue(
             all(item.includes_working_orders_across_dates for item in reader.coverage.families)
         )
+        self.assertTrue(all(item.broker_authoritative for item in reader.coverage.families))
+        self.assertTrue(all(item.all_pages_consumed for item in reader.coverage.families))
+
+    def test_bounded_roster_requires_one_exact_watermark_across_every_family(self):
+        for observation, page in (
+            (None, "stable-watermark"),
+            ("stable-watermark", None),
+            ("stable-watermark", "different-watermark"),
+        ):
+            with self.subTest(observation=observation, page=page):
+                reads = FakeWholeAccountReads((base_snapshot(), base_snapshot()))
+                reads.observation_watermark = observation
+                reads.page_watermark = page
+                reader = IbkrStableAccountSnapshotReader(
+                    reads=reads,
+                    exact_account_id=ACCOUNT,
+                    account_masked=MASK,
+                    clock=lambda: NOW,
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError, "ORDER_FAMILY_INCOMPLETE|BASE_INVALID"
+                ):
+                    reader()
+                with self.assertRaisesRegex(RuntimeError, "COVERAGE_UNAVAILABLE"):
+                    _ = reader.coverage
+
+    def test_new_failed_read_retires_prior_successful_coverage(self):
+        reads = FakeWholeAccountReads((base_snapshot(), base_snapshot()))
+        reader = IbkrStableAccountSnapshotReader(
+            reads=reads,
+            exact_account_id=ACCOUNT,
+            account_masked=MASK,
+            clock=lambda: NOW,
+        )
+        reader()
+        self.assertEqual(
+            reader.coverage.contract_version,
+            "ibkr-open-plus-current-day-completed-v2",
+        )
+
+        reads.index = -1
+        reads.page_watermark = "newer-invalid-watermark"
+        with self.assertRaisesRegex(RuntimeError, "ORDER_FAMILY_INCOMPLETE"):
+            reader()
+        with self.assertRaisesRegex(RuntimeError, "COVERAGE_UNAVAILABLE"):
+            _ = reader.coverage
 
     def test_material_motion_fails_closed(self):
         reader = IbkrStableAccountSnapshotReader(

@@ -15,7 +15,7 @@ always returned as ``not_seen_yet``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
@@ -45,6 +45,13 @@ from .base import (
 )
 from .production import CollectedObservation, OrderFamilyPage
 from .ibkr_position_valuation import PositionValuationContract, PositionValuationError
+from .ibkr_protection_evidence import (
+    IbkrOrderStatusFact,
+    IbkrProtectionEvidence,
+    capture_ibkr_order_status_fact,
+    capture_ibkr_protection_evidence,
+    protection_evidence_facts,
+)
 
 
 _UUID = re.compile(
@@ -53,6 +60,12 @@ _UUID = re.compile(
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 _INFO_CODES = frozenset({1101, 1102, 2104, 2106, 2107, 2108, 2158})
 _SESSION_ERROR_CODES = frozenset({502, 503, 504, 1100, 1300})
+_PNL_ATTEMPT_LIMIT = 2
+_FINITE_READ_ENDS = frozenset({
+    "account_summary", "positions", "open_orders", "completed_orders", "executions",
+})
+_SESSION_READ_ENDS = (_FINITE_READ_ENDS - {"account_summary"}) | {"account_updates_multi"}
+_MAX_WARNING_TEXT_LENGTH = 4096
 IBKR_API_READ_ONLY_MESSAGE = "The API interface is currently in Read-Only mode."
 _READ_ONLY_ERROR = re.compile(
     r"(?:Error validating request[.:]\s*-?'[A-Za-z0-9_]{1,8}'\s*:\s*cause\s*-\s*)?"
@@ -112,6 +125,14 @@ class IbkrReadRequester(Protocol):
     def cancelPnL(self, reqId: int) -> None: ...
 
 
+@runtime_checkable
+class IbkrAccountUpdatesRequester(Protocol):
+    """Separate account-scoped value feed; not the capped summary feed."""
+
+    def reqAccountUpdatesMulti(self, reqId: int, account: str, modelCode: str, ledgerAndNLV: bool) -> None: ...
+    def cancelAccountUpdatesMulti(self, reqId: int) -> None: ...
+
+
 @dataclass(frozen=True)
 class SanitizedIbkrError:
     """Nonsecret error evidence; broker text and advanced JSON are discarded."""
@@ -123,13 +144,81 @@ class SanitizedIbkrError:
     reason: str = "UNSPECIFIED"
 
 
+@dataclass(frozen=True)
+class IbkrFiniteReadDiagnostic:
+    """Status of finite callbacks, never a production snapshot or risk receipt."""
+
+    observed_at: datetime
+    completed_reads: tuple[str, ...]
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "observed_at": self.observed_at,
+            "completed_reads": self.completed_reads,
+            "finite_data_normalized": True,
+            "diagnostic_only": True,
+            "daily_pnl_status": "not_requested",
+            "strict_account_read_complete": False,
+            "daily_starting_equity_ready": False,
+            "whole_broker_history_verified": False,
+            "write_authority_granted": False,
+        }
+
+
+@dataclass(frozen=True)
+class IbkrReadChannelDiagnostic:
+    """Local receipt timing only; contains no account or financial values.
+
+    Dispatch outcome describes the last attempt. First callback receipt is
+    collection-wide and can therefore precede a P&L retry's dispatch.
+    """
+
+    channel: str
+    request_attempts: int
+    first_dispatch_started_ms: int | None
+    last_dispatch_started_ms: int | None
+    last_dispatch_returned_ms: int | None
+    first_callback_ms: int | None
+    end_callback_ms: int | None
+    observation: str
+
+    def public_dict(self) -> dict[str, object]:
+        return dict(vars(self))
+
+
+@dataclass(frozen=True)
+class IbkrReadCollectionDiagnostic:
+    channels: tuple[IbkrReadChannelDiagnostic, ...]
+    elapsed_ms: int
+    normalization_completed: bool
+    commission_reports_missing: bool
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "channels": tuple(item.public_dict() for item in self.channels),
+            "elapsed_ms": self.elapsed_ms,
+            "normalization_completed": self.normalization_completed,
+            "commission_reports_missing": self.commission_reports_missing,
+            "timing_basis": "local_monotonic_receipt_not_broker_source_time",
+            "dispatch_return_is_broker_acknowledgement": False,
+            "provider_cause_verified": False,
+            "diagnostic_only": True,
+            "strict_account_read_complete": False,
+            "write_authority_granted": False,
+            "daily_starting_equity_ready": False,
+        }
+
+
 @dataclass
 class _RawOrder:
     contract: object
     order: object
-    order_state: object
+    status: str
+    completed_time: str
+    blocking_warning_present: bool
     received_at: datetime
     source: str
+    protection_evidence: IbkrProtectionEvidence | None = None
 
 
 @dataclass
@@ -146,14 +235,28 @@ class _Collection:
     execution_request_id: int
     pnl_request_id: int
     started_at: datetime
+    account_values_channel: str = "account_summary"
+    diagnostic_nonce: int = 0
+    diagnostic_token: object | None = field(default=None, repr=False)
+    started_monotonic: float = field(default_factory=lambda: time.monotonic())
+    channel_attempts: dict[str, int] = field(default_factory=dict)
+    channel_timings: dict[tuple[str, str], int] = field(default_factory=dict)
     ends: set[str] = field(default_factory=set)
     summary: dict[str, tuple[str, str]] = field(default_factory=dict)
+    summary_received_at: dict[str, datetime] = field(default_factory=dict)
     positions: list[tuple[object, Decimal, Decimal, datetime]] = field(default_factory=list)
     orders: dict[str, _RawOrder] = field(default_factory=dict)
     order_statuses: dict[tuple[int, int], tuple[str, datetime]] = field(default_factory=dict)
+    protection_statuses: dict[tuple[int, int], IbkrOrderStatusFact | None] = field(default_factory=dict)
+    protection_status_conflicts: set[tuple[int, int]] = field(default_factory=set)
+    protection_order_conflicts: set[str] = field(default_factory=set)
     executions: dict[str, _RawExecution] = field(default_factory=dict)
     commissions: dict[str, tuple[Decimal, str, datetime]] = field(default_factory=dict)
+    commission_conflict_observed: bool = False
     daily_realized_pnl: tuple[Decimal, datetime] | None = None
+    pnl_request_ids: list[int] = field(default_factory=list)
+    cancelled_pnl_request_ids: set[int] = field(default_factory=set)
+    unavailable_pnl_request_ids: set[int] = field(default_factory=set)
     error: SanitizedIbkrError | None = None
 
 
@@ -164,6 +267,127 @@ class _CompletedCollection:
     pages: dict[OrderFamily, OrderFamilyPage]
     all_equity_orders: tuple[OrderSnapshot, ...]
     valuation_contracts: tuple[PositionValuationContract, ...] | None = None
+
+
+@dataclass(frozen=True)
+class IbkrFiniteSessionExposure:
+    """One non-atomic finite read, never legacy risk or whole-account authority.
+
+    Pages describe the callback families requested in this collection, not
+    exhaustive all-client history. The base deliberately keeps its orders
+    unassembled and every legacy risk value/provenance unavailable. Local
+    receipt timestamps and a local collection hash are not provider versions.
+    """
+
+    facts: "IbkrFiniteSessionFacts" = field(repr=False)
+    observation: CollectedObservation = field(repr=False)
+    order_family_pages: tuple[OrderFamilyPage, ...] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        from .ibkr_session_inputs import (
+            IbkrFiniteSessionFacts, SessionExecutionFact, SessionOrderFact, SessionPositionFact,
+        )
+
+        def invalid() -> None:
+            raise BrokerContractViolation("IBKR_SESSION_EXPOSURE_INVALID")
+
+        if (type(self.facts) is not IbkrFiniteSessionFacts
+                or type(self.observation) is not CollectedObservation
+                or type(self.order_family_pages) is not tuple):
+            invalid()
+        facts, observation = self.facts, self.observation
+        snapshot = observation.snapshot
+        for values, kind in ((facts.positions, SessionPositionFact), (facts.executions, SessionExecutionFact), (facts.orders, SessionOrderFact)):
+            if type(values) is not tuple or any(type(item) is not kind for item in values):
+                invalid()
+        if (type(snapshot) is not AccountSnapshot
+                or observation.collection_id != facts.collection_id
+                or observation.request_started_at != facts.collection_started_at
+                or observation.request_completed_at != facts.collection_completed_at
+                or snapshot.observed_at != facts.collection_completed_at
+                or snapshot.received_at != facts.collection_completed_at
+                or facts.account_values_source != "IBKR_ACCOUNT_UPDATES_MULTI_V1"
+                or facts.completed_reads != tuple(sorted(_SESSION_READ_ENDS))
+                or facts.net_liquidation_currency != "USD"
+                or facts.cash_currency != "USD"
+                or snapshot.funds.currency != "USD"
+                or snapshot.funds.total_value != facts.net_liquidation
+                or snapshot.funds.cash != facts.cash_value
+                or snapshot.equity_orders
+                or snapshot.option_order_count != 0 or snapshot.advanced_order_count != 0
+                or snapshot.auth_point_in_time is not True
+                or snapshot.standard_equity_positions_complete is not True
+                or snapshot.option_positions_complete is not True):
+            invalid()
+        absent = (
+            "daily_realized_pnl", "weekly_realized_pnl", "peak_equity",
+            "risk_evidence_source", "risk_evidence_as_of", "risk_baseline_identity_hash",
+            "risk_baseline_receipt_hash", "risk_high_water_identity_hash",
+            "risk_high_water_lineage_hash", "risk_high_water_receipt_hash",
+            "daily_starting_equity", "daily_external_cash_flow",
+            "daily_starting_equity_as_of", "daily_external_cash_flow_as_of",
+            "daily_external_cash_flow_receipt_hash", "daily_starting_equity_receipt_hash",
+        )
+        false = (
+            "standard_equity_orders_complete", "option_orders_complete", "advanced_orders_complete",
+            "daily_realized_pnl_complete", "weekly_realized_pnl_complete", "peak_equity_complete",
+            "risk_evidence_authoritative", "daily_realized_pnl_ready", "daily_starting_equity_ready",
+            "entry_risk_evidence_ready", "authenticated_entry_risk_evidence_ready",
+        )
+        if (any(getattr(snapshot, name) is not None for name in absent)
+                or any(getattr(snapshot, name) is not False for name in false)):
+            invalid()
+        pages = self.order_family_pages
+        if (len(pages) != len(OrderFamily)
+                or any(type(page) is not OrderFamilyPage for page in pages)
+                or tuple(page.family for page in pages) != tuple(OrderFamily)):
+            invalid()
+        for page in pages:
+            if (page.collection_id != facts.collection_id or page.snapshot_token is not None
+                    or page.account_masked != snapshot.account_masked
+                    or page.observed_at != facts.collection_completed_at
+                    or page.received_at != facts.collection_completed_at
+                    or page.provider_watermark != observation.order_event_watermark
+                    or page.page_id != hashlib.sha256(f"{facts.collection_id}:{page.family.value}".encode("ascii")).hexdigest()
+                    or page.page_index != 0 or page.page_complete is not True
+                    or page.next_cursor is not None
+                    or page.active_order_count != sum(item.family == page.family.value and not item.terminal_observed for item in facts.orders)):
+                invalid()
+        expected_orders = {
+            (item.family, item.order_identity) for item in facts.orders
+            if item.family != OrderFamily.OPTION.value
+        }
+        actual_orders = {(page.family.value, order.broker_order_id) for page in pages for order in page.orders}
+        if (actual_orders != expected_orders
+                or len(actual_orders) != sum(len(page.orders) for page in pages)
+                or len({item.order_identity for item in facts.orders}) != len(facts.orders)):
+            invalid()
+        expected_positions = sorted((item.symbol, item.quantity) for item in facts.positions if item.security_type == "STK")
+        if (sorted((item.symbol, item.quantity) for item in snapshot.equity_positions) != expected_positions
+                or snapshot.option_position_count != sum(item.security_type in {"OPT", "FOP"} for item in facts.positions)):
+            invalid()
+        by_execution = {item.exec_id: item for item in facts.executions}
+        for page in pages:
+            for order in page.orders:
+                for fill in order.fills:
+                    fact = by_execution.get(fill.fill_id)
+                    if (fact is None or fill.quantity != fact.quantity or fill.price != fact.price
+                            or fill.provider_commission != fact.commission
+                            or fill.provider_commission_currency != fact.commission_currency
+                            or fill.executed_at != fact.source_executed_at):
+                        invalid()
+
+    @property
+    def timing_basis(self) -> str:
+        return "local_receipt_not_atomic_broker_valuation"
+
+    @property
+    def diagnostic_only(self) -> bool:
+        return True
+
+    @property
+    def live_authority(self) -> bool:
+        return False
 
 
 class _GenerationCallbacks:
@@ -188,6 +412,12 @@ class _GenerationCallbacks:
 
     def accountSummaryEnd(self, reqId: int) -> None:
         self._bridge._end(self._generation, "account_summary", reqId)
+
+    def accountUpdateMulti(self, reqId: int, account: str, modelCode: str, key: str, value: str, currency: str) -> None:
+        self._bridge._account_update_multi(self._generation, reqId, account, modelCode, key, value, currency)
+
+    def accountUpdateMultiEnd(self, reqId: int) -> None:
+        self._bridge._end(self._generation, "account_updates_multi", reqId)
 
     def position(self, account: str, contract: object, position: object, avgCost: float) -> None:
         self._bridge._position(
@@ -234,9 +464,11 @@ class _GenerationCallbacks:
         whyHeld: str,
         mktCapPrice: float = 0.0,
     ) -> None:
-        del filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, whyHeld, mktCapPrice
+        del avgFillPrice, lastFillPrice, mktCapPrice
         self._bridge._order_status(
-            self._generation, clientId, orderId, status
+            self._generation, clientId, orderId, status,
+            filled=filled, remaining=remaining, perm_id=permId,
+            parent_id=parentId, why_held=whyHeld,
         )
 
     def execDetails(self, reqId: int, contract: object, execution: object) -> None:
@@ -319,9 +551,13 @@ class IbkrWholeAccountReadBridge:
         self._authenticated_generation: int | None = None
         self._active: _Collection | None = None
         self._last: _CompletedCollection | None = None
+        self._last_read_diagnostic: IbkrReadCollectionDiagnostic | None = None
+        self._last_read_diagnostic_token: object | None = None
+        self._diagnostic_nonce = 0
         self._next_request_id = 1_000_000
         self._collection_nonce = 0
         self._errors: list[SanitizedIbkrError] = []
+        self._session_cleanup_failed = False
         # IBKR openOrder/orderStatus callbacks do not expose a provider update
         # timestamp. Preserve the first receipt for an unchanged broker fact so
         # the transport's required double collection can prove stability. A
@@ -338,6 +574,19 @@ class IbkrWholeAccountReadBridge:
         with self._condition:
             return tuple(self._errors)
 
+    @property
+    def last_read_diagnostic(self) -> IbkrReadCollectionDiagnostic | None:
+        """Last attempt's immutable status, never an account snapshot receipt."""
+        with self._condition:
+            return self._last_read_diagnostic
+
+    def read_diagnostic_for(self, token: object) -> IbkrReadCollectionDiagnostic | None:
+        """Return only this caller's attempt, never a newer concurrent read."""
+        with self._condition:
+            if token is None or token is not self._last_read_diagnostic_token:
+                return None
+            return self._last_read_diagnostic
+
     def position_valuation_inputs(self, collection_id: str):
         """Retain real contract IDs for an explicit read-only valuation probe.
 
@@ -346,7 +595,11 @@ class IbkrWholeAccountReadBridge:
         """
         with self._condition:
             completed = self._last
-            if completed is None or completed.collection_id != collection_id:
+            if (
+                completed is None
+                or completed.collection_id != collection_id
+                or self._authenticated_generation != self._generation
+            ):
                 raise BrokerContractViolation("IBKR_POSITION_VALUATION_COLLECTION_CHANGED")
             if completed.valuation_contracts is None:
                 raise BrokerContractViolation("IBKR_POSITION_VALUATION_CONTRACT_SCOPE_UNPROVEN")
@@ -366,6 +619,8 @@ class IbkrWholeAccountReadBridge:
                 (
                     "reqAccountSummary",
                     "cancelAccountSummary",
+                    *(("reqAccountUpdatesMulti", "cancelAccountUpdatesMulti")
+                      if isinstance(self._requester, IbkrAccountUpdatesRequester) else ()),
                     "reqPositions",
                     "cancelPositions",
                     "reqAllOpenOrders",
@@ -399,48 +654,78 @@ class IbkrWholeAccountReadBridge:
                 )
             self._generation = generation
             self._authenticated_generation = None
+            self._session_cleanup_failed = False
             self._last = None
+            self._last_read_diagnostic = None
+            self._last_read_diagnostic_token = None
             self._condition.notify_all()
         return _GenerationCallbacks(self, generation)
 
-    def get_account_base(self, exact_account_id: str) -> CollectedObservation:
+    def get_account_base(
+        self, exact_account_id: str, *, diagnostic_token: object | None = None
+    ) -> CollectedObservation:
         self._assert_account(exact_account_id)
         with self._condition:
+            self._last_read_diagnostic = None
+            self._last_read_diagnostic_token = None
             if self._authenticated_generation != self._generation:
                 raise BrokerCapabilityError("IBKR_READ_NOT_AUTHENTICATED")
             if self._active is not None:
                 raise BrokerCapabilityError("IBKR_READ_COLLECTION_ALREADY_ACTIVE")
+            # A new attempt supersedes the prior bounded collection.  Retire
+            # its pages/reference lookup/valuation inputs before dispatch so a
+            # failed refresh cannot leave older evidence discoverable as the
+            # latest broker result.
+            self._last = None
             summary_id = self._allocate_request_id()
             execution_id = self._allocate_request_id()
             pnl_id = self._allocate_request_id()
+            self._diagnostic_nonce += 1
             collection = _Collection(
                 generation=self._generation,
                 summary_request_id=summary_id,
                 execution_request_id=execution_id,
                 pnl_request_id=pnl_id,
                 started_at=self._now(),
+                diagnostic_nonce=self._diagnostic_nonce,
+                diagnostic_token=diagnostic_token,
+                pnl_request_ids=[pnl_id],
             )
             self._active = collection
+            # Bound the complete broker collection, including synchronous SDK
+            # request dispatch, retry cancellation/dispatch, and the final
+            # callback freeze.  Dispatch latency must not silently create a
+            # fresh timeout window after work has already begun.
+            deadline = time.monotonic() + self._timeout
 
         try:
-            self._issue_requests(collection)
-            self._wait_for_collection(collection)
+            self._issue_requests(collection, deadline)
+            self._wait_for_collection(collection, deadline)
             # Freeze exactly at the completed callback boundary. Late ambient
             # orderStatus/commission events belong to the next collection.
             with self._condition:
-                if self._active is not collection:
-                    raise BrokerCapabilityError("IBKR_READ_COLLECTION_GENERATION_LOST")
+                # _wait_for_collection necessarily releases the condition when
+                # it returns.  Revalidate every failure-bearing fact after
+                # reacquiring it, before clearing _active or normalizing.  A
+                # late UNSET/nonfinite/moved P&L callback, authentication loss,
+                # or connection close at this boundary must invalidate the
+                # collection instead of allowing an earlier value to escape.
+                self._assert_collection_current(collection)
+                if time.monotonic() >= deadline:
+                    raise BrokerCapabilityError(
+                        "IBKR_READ_TIMEOUT:collection_freeze"
+                    )
                 self._active = None
                 completed = self._normalize(collection)
-                if collection.generation != self._generation:
-                    raise BrokerCapabilityError("IBKR_READ_COLLECTION_GENERATION_LOST")
                 self._last = completed
         except Exception:
+            self._finish_read_diagnostic(collection, normalized=False)
             self._best_effort_cancel(collection)
             with self._condition:
                 if self._active is collection:
                     self._active = None
             raise
+        self._finish_read_diagnostic(collection, normalized=True)
         self._best_effort_cancel(collection)
         return completed.observation
 
@@ -455,6 +740,72 @@ class IbkrWholeAccountReadBridge:
             if self._last is None or self._authenticated_generation != self._generation:
                 raise BrokerCapabilityError("IBKR_READ_COLLECTION_UNAVAILABLE")
             return self._last.pages[normalized_family]
+
+    def diagnose_finite_reads(
+        self, exact_account_id: str, *, diagnostic_token: object | None = None
+    ) -> IbkrFiniteReadDiagnostic:
+        """Validate bounded account/order reads without subscribing to P&L.
+
+        The result exposes status only. Neither it nor its temporary normalized
+        data is published to production pages, reference recovery or valuation
+        inputs. The ordinary account read still requires its real P&L callback.
+        """
+        self._assert_account(exact_account_id)
+        with self._condition:
+            self._last_read_diagnostic = None
+            self._last_read_diagnostic_token = None
+            if self._authenticated_generation != self._generation:
+                raise BrokerCapabilityError("IBKR_READ_NOT_AUTHENTICATED")
+            if self._active is not None:
+                raise BrokerCapabilityError("IBKR_READ_COLLECTION_ALREADY_ACTIVE")
+            self._last = None
+            self._diagnostic_nonce += 1
+            collection = _Collection(
+                generation=self._generation,
+                summary_request_id=self._allocate_request_id(),
+                execution_request_id=self._allocate_request_id(),
+                # No P&L request exists in this diagnostic. Empty subscription
+                # tracking also prevents cancellation of an unissued request.
+                pnl_request_id=-1,
+                started_at=self._now(),
+                diagnostic_nonce=self._diagnostic_nonce,
+                diagnostic_token=diagnostic_token,
+            )
+            self._active = collection
+            deadline = time.monotonic() + self._timeout
+        normalized = False
+        try:
+            self._issue_finite_requests(collection, deadline)
+            with self._condition:
+                while True:
+                    self._assert_collection_current(collection)
+                    missing = _FINITE_READ_ENDS - collection.ends
+                    missing_commissions = set(collection.executions) - set(collection.commissions)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        scope = ",".join(sorted(missing)) if missing else (
+                            "commission" if missing_commissions else "collection_freeze"
+                        )
+                        raise BrokerCapabilityError(f"IBKR_READ_TIMEOUT:{scope}")
+                    if not missing and not missing_commissions:
+                        break
+                    self._condition.wait(remaining)
+                # Freeze under the same lock as the final failure/generation
+                # checks; no late callback can turn a partial read into proof.
+                self._active = None
+                completed = self._normalize_finite(collection)
+                diagnostic = IbkrFiniteReadDiagnostic(
+                    observed_at=completed.observation.request_completed_at,
+                    completed_reads=tuple(sorted(_FINITE_READ_ENDS)),
+                )
+                normalized = True
+        finally:
+            self._finish_read_diagnostic(collection, normalized=normalized)
+            self._best_effort_cancel(collection)
+            with self._condition:
+                if self._active is collection:
+                    self._active = None
+        return diagnostic
 
     def lookup_equity_orders_by_client_ref(
         self, exact_account_id: str, client_refs: tuple[str, ...]
@@ -494,69 +845,483 @@ class IbkrWholeAccountReadBridge:
             complete=True,
         )
 
-    def _issue_requests(self, collection: _Collection) -> None:
+    def collect_session_facts(self, *, diagnostic_token: object | None = None) -> "IbkrFiniteSessionFacts":
+        """Copy typed finite session inputs without P&L or production publication.
+
+        The exact managed account remains private.  The caller must bind this
+        result to its concrete runtime/generation; finite completion does not
+        establish all-client, continuous-event or account-adjustment coverage.
+        """
+        return self._collect_session_inputs(diagnostic_token=diagnostic_token, include_exposure=False)
+
+    def collect_session_exposure(self, *, diagnostic_token: object | None = None) -> IbkrFiniteSessionExposure:
+        """Return same-collection facts/base/pages without publishing ``_last``."""
+        return self._collect_session_inputs(diagnostic_token=diagnostic_token, include_exposure=True)
+
+    def _collect_session_inputs(
+        self, *, diagnostic_token: object | None, include_exposure: bool,
+    ) -> "IbkrFiniteSessionFacts | IbkrFiniteSessionExposure":
+        with self._condition:
+            self._last_read_diagnostic = None
+            self._last_read_diagnostic_token = None
+            if self._authenticated_generation != self._generation:
+                raise BrokerCapabilityError("IBKR_READ_NOT_AUTHENTICATED")
+            if self._active is not None:
+                raise BrokerCapabilityError("IBKR_READ_COLLECTION_ALREADY_ACTIVE")
+            if self._session_cleanup_failed:
+                raise BrokerCapabilityError("IBKR_SESSION_ACCOUNT_UPDATES_CLEANUP_UNCONFIRMED")
+            if not isinstance(self._requester, IbkrAccountUpdatesRequester):
+                raise BrokerCapabilityError("IBKR_SESSION_ACCOUNT_UPDATES_UNSUPPORTED")
+            self._last = None
+            self._diagnostic_nonce += 1
+            collection = _Collection(
+                generation=self._generation,
+                summary_request_id=self._allocate_request_id(),
+                execution_request_id=self._allocate_request_id(),
+                pnl_request_id=-1,
+                started_at=self._now(),
+                account_values_channel="account_updates_multi",
+                diagnostic_nonce=self._diagnostic_nonce,
+                diagnostic_token=diagnostic_token,
+            )
+            self._active = collection
+            deadline = time.monotonic() + self._timeout
+        normalized = False
         try:
-            self._requester.reqAccountSummary(
-                collection.summary_request_id, "All", _SUMMARY_TAGS
+            self._issue_finite_requests(collection, deadline)
+            with self._condition:
+                while True:
+                    self._assert_collection_current(collection)
+                    missing = _SESSION_READ_ENDS - collection.ends
+                    missing_commissions = set(collection.executions) - set(collection.commissions)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        scope = ",".join(sorted(missing)) if missing else (
+                            "commission" if missing_commissions else "collection_freeze"
+                        )
+                        raise BrokerCapabilityError(f"IBKR_READ_TIMEOUT:{scope}")
+                    if not missing and not missing_commissions:
+                        break
+                    self._condition.wait(remaining)
+                # Keep ownership until cancellation dispatch finishes, so a
+                # second collection cannot race this attempt's cleanup.
+                completed = self._normalize_finite(collection)
+                facts = self._copy_session_facts(collection, completed)
+                result = self._copy_session_exposure(collection, completed, facts) if include_exposure else facts
+                self._assert_before_deadline(deadline, "session_facts_normalization")
+                normalized = True
+        finally:
+            self._finish_read_diagnostic(collection, normalized=normalized)
+            # Cancellation dispatch is not a broker acknowledgement. A local
+            # exception or synchronous SDK error must nevertheless not be
+            # hidden as a successful reusable session. Both cancels are tried.
+            cleanup_ok = self._cancel_session_reads(collection)
+            with self._condition:
+                if self._active is collection:
+                    self._active = None
+            if normalized and not cleanup_ok:
+                raise BrokerCapabilityError("IBKR_SESSION_ACCOUNT_UPDATES_CLEANUP_UNCONFIRMED")
+        return result
+
+    def _copy_session_exposure(
+        self, collection: _Collection, completed: _CompletedCollection, facts: "IbkrFiniteSessionFacts",
+    ) -> IbkrFiniteSessionExposure:
+        # Legacy normalization defaults some missing currency/time metadata.
+        # That behavior is not changed, but cannot escape this new USD bundle.
+        monetary = {"NetLiquidation", "TotalCashValue", "AvailableFunds", "BuyingPower", "SettledCash"}
+        if any(currency != "USD" for key, (_value, currency) in collection.summary.items() if key in monetary):
+            raise BrokerContractViolation("IBKR_SESSION_EXPOSURE_USD_UNPROVEN")
+        if (any(item.currency != "USD" for item in facts.positions)
+                or any(self._text(item.contract, "currency", optional=True).upper() != "USD" for item in collection.orders.values())):
+            raise BrokerContractViolation("IBKR_SESSION_EXPOSURE_USD_UNPROVEN")
+        if any(item.commission_currency != "USD" or item.currency != "USD" or item.source_executed_at is None for item in facts.executions):
+            raise BrokerContractViolation("IBKR_SESSION_EXPOSURE_EXECUTION_METADATA_UNPROVEN")
+        return IbkrFiniteSessionExposure(
+            facts=facts, observation=completed.observation,
+            order_family_pages=tuple(completed.pages[family] for family in OrderFamily),
+        )
+
+    def _copy_session_facts(self, collection: _Collection, completed: _CompletedCollection) -> "IbkrFiniteSessionFacts":
+        # Import locally to keep callback/type definitions independent of the
+        # optional adapter.  No old AccountSnapshot or mutable SDK object leaves
+        # this API, and actual commission currency is never inferred as USD.
+        from .ibkr_session_inputs import (
+            IbkrFiniteSessionFacts,
+            SessionExecutionFact,
+            SessionOrderFact,
+            SessionPositionFact,
+        )
+
+        def contract_id(contract: object) -> int | None:
+            value = getattr(contract, "conId", None)
+            if value is None:
+                return None
+            return self._integer(value, "conId", nonnegative=True) or None
+
+        positions = tuple(
+            SessionPositionFact(
+                contract_id=contract_id(contract),
+                symbol=self._symbol(contract),
+                security_type=self._text(contract, "secType").upper(),
+                currency=self._text(contract, "currency", optional=True).upper(),
+                quantity=quantity,
+                received_at=received,
             )
-            self._requester.reqPositions()
-            self._requester.reqAllOpenOrders()
-            self._requester.reqCompletedOrders(False)
-            self._requester.reqExecutions(
+            for contract, quantity, _cost, received in collection.positions
+            if quantity != 0
+        )
+        executions = []
+        for exec_id, raw in collection.executions.items():
+            execution = raw.execution
+            commission, commission_currency, commission_received = collection.commissions[exec_id]
+            source_time = getattr(execution, "time", None)
+            # The legacy normalizer can use local receipt as a missing-time
+            # fallback.  This new input contract must expose that absence.
+            if source_time is not None and not isinstance(source_time, (str, datetime)):
+                raise BrokerContractViolation("IBKR_SESSION_EXECUTION_SOURCE_TIME_INVALID")
+            source_executed_at = (
+                None if source_time is None or (isinstance(source_time, str) and not source_time.strip())
+                else self._ibkr_time(source_time, raw.received_at)
+            )
+            if source_executed_at is None:
+                source_time_basis = "ABSENT"
+            elif isinstance(source_time, datetime):
+                if source_time.tzinfo is None or source_time.utcoffset() is None:
+                    raise BrokerContractViolation("IBKR_SESSION_EXECUTION_SOURCE_TIME_INVALID")
+                source_time_basis = "PROVIDER_EXPLICIT_ZONE"
+            else:
+                # Classify the parser's actual branch, not merely the presence
+                # of some text after HH:MM:SS.  The legacy parser interprets
+                # blank/EST/EDT/US-Eastern aliases using _session_tz.  Even an
+                # explicit Eastern label therefore retains that dependency.
+                match = re.match(r"^(\d{8})[- ]+\s*(\d{2}:\d{2}:\d{2})(?:\s+(.+))?$", source_time.strip())
+                if match is None:
+                    raise BrokerContractViolation("IBKR_SESSION_EXECUTION_SOURCE_TIME_INVALID")
+                source_zone = (match.group(3) or "").strip()
+                source_time_basis = (
+                    "CONFIGURED_SESSION_ZONE_INTERPRETATION"
+                    if source_zone in {"US/Eastern", "America/New_York", "EST", "EDT", ""}
+                    else "PROVIDER_EXPLICIT_ZONE"
+                )
+            side = self._text(execution, "side").upper()
+            executions.append(SessionExecutionFact(
+                exec_id=exec_id,
+                contract_id=contract_id(raw.contract),
+                symbol=self._symbol(raw.contract),
+                security_type=self._text(raw.contract, "secType").upper(),
+                currency=self._text(raw.contract, "currency", optional=True).upper(),
+                side={"BOT": "BUY", "SLD": "SELL"}.get(side, side),
+                quantity=self._decimal(getattr(execution, "shares", None), "execution.shares"),
+                price=self._decimal(getattr(execution, "price", None), "execution.price"),
+                source_executed_at=source_executed_at,
+                source_time_basis=source_time_basis,
+                received_at=raw.received_at,
+                commission=commission,
+                commission_currency=commission_currency,
+                commission_received_at=commission_received,
+            ))
+        normalized_orders = {item.broker_order_id: item for item in completed.all_equity_orders}
+        orders = []
+        for identity, raw in collection.orders.items():
+            normalized_order = normalized_orders.get(identity)
+            orders.append(SessionOrderFact(
+                order_identity=identity,
+                contract_id=contract_id(raw.contract),
+                family=self._classify_order(raw.contract, raw.order).value,
+                terminal_observed=(
+                    normalized_order.state.terminal if normalized_order is not None
+                    else self._raw_order_terminal(raw, collection.order_statuses)
+                ),
+                state=normalized_order.state.value if normalized_order is not None else "UNNORMALIZED_OPTION_ORDER",
+                blocking_warning_present=raw.blocking_warning_present,
+            ))
+        return IbkrFiniteSessionFacts(
+            generation=collection.generation,
+            collection_id=completed.collection_id,
+            collection_started_at=collection.started_at,
+            collection_completed_at=completed.observation.request_completed_at,
+            net_liquidation=completed.observation.snapshot.funds.total_value,
+            net_liquidation_currency=collection.summary["NetLiquidation"][1],
+            net_liquidation_received_at=collection.summary_received_at["NetLiquidation"],
+            positions=positions,
+            executions=tuple(sorted(executions, key=lambda item: item.exec_id)),
+            orders=tuple(sorted(orders, key=lambda item: item.order_identity)),
+            completed_reads=tuple(sorted(_SESSION_READ_ENDS)),
+            commission_conflict_observed=collection.commission_conflict_observed,
+            orphan_commission_report_count=len(set(collection.commissions) - set(collection.executions)),
+            account_values_source="IBKR_ACCOUNT_UPDATES_MULTI_V1",
+            cash_value=self._decimal(collection.summary["TotalCashValue"][0], "cash_value"),
+            cash_currency=collection.summary["TotalCashValue"][1],
+            cash_received_at=collection.summary_received_at["TotalCashValue"],
+        )
+
+    @staticmethod
+    def _assert_before_deadline(deadline: float, phase: str) -> None:
+        if time.monotonic() >= deadline:
+            raise BrokerCapabilityError(f"IBKR_READ_TIMEOUT:{phase}")
+
+    def _note_read_event(self, collection: _Collection, channel: str, event: str) -> None:
+        with self._condition:
+            elapsed = max(0, int((time.monotonic() - collection.started_monotonic) * 1000))
+            if event == "dispatch_started":
+                collection.channel_attempts[channel] = collection.channel_attempts.get(channel, 0) + 1
+                collection.channel_timings[(channel, "last_dispatch_started")] = elapsed
+                collection.channel_timings.pop((channel, "last_dispatch_returned"), None)
+            elif event == "dispatch_returned":
+                collection.channel_timings[(channel, "last_dispatch_returned")] = elapsed
+            collection.channel_timings.setdefault((channel, event), elapsed)
+
+    def _dispatch_read(self, collection: _Collection, channel: str, request: Callable[[], None]) -> None:
+        self._note_read_event(collection, channel, "dispatch_started")
+        request()
+        self._note_read_event(collection, channel, "dispatch_returned")
+
+    def _finish_read_diagnostic(self, collection: _Collection, *, normalized: bool) -> None:
+        # Freeze before cancellation: ambient cancellation callbacks cannot
+        # rewrite what was observed during this bounded collection attempt.
+        with self._condition:
+            if (collection.generation != self._generation
+                    or collection.diagnostic_nonce != self._diagnostic_nonce):
+                return
+            channels = []
+            required = _SESSION_READ_ENDS if collection.account_values_channel == "account_updates_multi" else _FINITE_READ_ENDS
+            for channel in sorted(required | {"daily_realized_pnl"}):
+                timing = lambda event: collection.channel_timings.get((channel, event))
+                if timing("dispatch_started") is None:
+                    observation = "not_requested"
+                elif timing("last_dispatch_returned") is None:
+                    observation = "dispatch_did_not_return"
+                elif channel in collection.ends:
+                    observation = "end_callback_received"
+                elif channel == "daily_realized_pnl" and collection.daily_realized_pnl is not None:
+                    observation = "usable_callback_received"
+                elif channel == "daily_realized_pnl" and collection.unavailable_pnl_request_ids:
+                    observation = "value_unavailable"
+                elif timing("first_callback") is None:
+                    observation = "no_matching_callback_received"
+                else:
+                    observation = "required_completion_not_received"
+                channels.append(IbkrReadChannelDiagnostic(
+                    channel=channel,
+                    request_attempts=collection.channel_attempts.get(channel, 0),
+                    first_dispatch_started_ms=timing("dispatch_started"),
+                    last_dispatch_started_ms=timing("last_dispatch_started"),
+                    last_dispatch_returned_ms=timing("last_dispatch_returned"),
+                    first_callback_ms=timing("first_callback"),
+                    end_callback_ms=timing("end_callback"),
+                    observation=observation,
+                ))
+            self._last_read_diagnostic = IbkrReadCollectionDiagnostic(
+                channels=tuple(channels),
+                elapsed_ms=max(0, int((time.monotonic() - collection.started_monotonic) * 1000)),
+                normalization_completed=normalized,
+                commission_reports_missing=bool(set(collection.executions) - set(collection.commissions)),
+            )
+            self._last_read_diagnostic_token = collection.diagnostic_token
+
+    def _issue_finite_requests(self, collection: _Collection, deadline: float) -> None:
+        try:
+            if collection.account_values_channel == "account_updates_multi":
+                # A fresh exact-account request returns real account values,
+                # not a timestamp-refreshed cache of the summary subscription.
+                # False selects account values as well as currency positions.
+                self._dispatch_read(collection, "account_updates_multi", lambda: self._requester.reqAccountUpdatesMulti(
+                    collection.summary_request_id, self._exact_account_id, "", False
+                ))
+            else:
+                self._dispatch_read(collection, "account_summary", lambda: self._requester.reqAccountSummary(
+                    collection.summary_request_id, "All", _SUMMARY_TAGS
+                ))
+            self._assert_before_deadline(deadline, collection.account_values_channel + "_dispatch")
+            self._dispatch_read(collection, "positions", self._requester.reqPositions)
+            self._assert_before_deadline(deadline, "positions_dispatch")
+            self._dispatch_read(collection, "open_orders", self._requester.reqAllOpenOrders)
+            self._assert_before_deadline(deadline, "open_orders_dispatch")
+            self._dispatch_read(collection, "completed_orders", lambda: self._requester.reqCompletedOrders(False))
+            self._assert_before_deadline(deadline, "completed_orders_dispatch")
+            self._dispatch_read(collection, "executions", lambda: self._requester.reqExecutions(
                 collection.execution_request_id, self._execution_filter_factory()
-            )
+            ))
+            self._assert_before_deadline(deadline, "executions_dispatch")
+        except BrokerCapabilityError:
+            raise
+        except Exception:
+            raise BrokerCapabilityError("IBKR_READ_REQUEST_DISPATCH_FAILED") from None
+
+    def _issue_requests(self, collection: _Collection, deadline: float) -> None:
+        self._issue_finite_requests(collection, deadline)
+        try:
             # ``AccountSummary.RealizedPnL`` has an account/window-dependent
             # period and is deliberately not accepted as current-day authority.
             # The account-level PnL subscription exposes IBKR's dedicated daily
             # realized value and is bound to this collection's request ID.
-            self._requester.reqPnL(
+            self._dispatch_read(collection, "daily_realized_pnl", lambda: self._requester.reqPnL(
                 collection.pnl_request_id, self._exact_account_id, ""
+            ))
+            self._assert_before_deadline(
+                deadline, "daily_realized_pnl_initial_dispatch"
             )
+        except BrokerCapabilityError:
+            raise
         except Exception:
-            raise BrokerCapabilityError("IBKR_READ_REQUEST_DISPATCH_FAILED") from None
+            raise BrokerCapabilityError("IBKR_READ_PNL_INITIAL_DISPATCH_FAILED") from None
 
-    def _wait_for_collection(self, collection: _Collection) -> None:
-        required = {
-            "account_summary",
-            "positions",
-            "open_orders",
-            "completed_orders",
-            "executions",
-        }
-        deadline = time.monotonic() + self._timeout
-        with self._condition:
-            while True:
-                if self._active is not collection or collection.generation != self._generation:
-                    raise BrokerCapabilityError("IBKR_READ_COLLECTION_GENERATION_LOST")
-                if collection.error is not None:
-                    reason = (
-                        ":API_READ_ONLY"
-                        if collection.error.reason == "API_READ_ONLY"
-                        else ""
-                    )
-                    raise BrokerCapabilityError(
-                        f"IBKR_READ_CALLBACK_ERROR:{collection.error.code}:{collection.error.scope}{reason}"
-                    )
+    def _wait_for_collection(self, collection: _Collection, deadline: float) -> None:
+        required = _FINITE_READ_ENDS
+        # IBKR documents reqPnL as a subscription and notes that aggregate
+        # account P&L can take several seconds.  Give the initial subscription
+        # half of the existing bounded deadline.  Only when every finite read
+        # has completed do we cancel it and make one fresh-ID retry; the retry
+        # never lengthens the caller's configured timeout.
+        retry_at = deadline - (self._timeout / _PNL_ATTEMPT_LIMIT)
+        while True:
+            retry: tuple[int, int] | None = None
+            with self._condition:
+                self._assert_collection_current(collection)
                 missing_commissions = set(collection.executions) - set(collection.commissions)
-                if (
-                    required.issubset(collection.ends)
-                    and not missing_commissions
-                    and collection.daily_realized_pnl is not None
-                ):
-                    return
-                remaining = deadline - time.monotonic()
+                finite_reads_complete = (
+                    required.issubset(collection.ends) and not missing_commissions
+                )
+                now = time.monotonic()
+                remaining = deadline - now
                 if remaining <= 0:
                     missing = sorted(required - collection.ends)
                     if missing:
                         scope = ",".join(missing)
                     elif missing_commissions:
                         scope = "commission"
+                    elif collection.daily_realized_pnl is not None:
+                        scope = "collection_completion"
                     else:
-                        scope = "daily_realized_pnl"
+                        detail = (
+                            "unavailable"
+                            if collection.unavailable_pnl_request_ids
+                            else "no_callback"
+                        )
+                        attempt = (
+                            "retry_exhausted"
+                            if len(collection.pnl_request_ids) >= _PNL_ATTEMPT_LIMIT
+                            else "initial"
+                        )
+                        scope = f"daily_realized_pnl_{attempt}_{detail}"
                     raise BrokerCapabilityError(f"IBKR_READ_TIMEOUT:{scope}")
-                self._condition.wait(remaining)
+                if finite_reads_complete and collection.daily_realized_pnl is not None:
+                    return
+                if (
+                    finite_reads_complete
+                    and collection.daily_realized_pnl is None
+                    and len(collection.pnl_request_ids) < _PNL_ATTEMPT_LIMIT
+                    and now >= retry_at
+                ):
+                    old_request_id = collection.pnl_request_id
+                    new_request_id = self._allocate_request_id()
+                    retry = (old_request_id, new_request_id)
+                if retry is None:
+                    wake_at = (
+                        min(deadline, retry_at)
+                        if (
+                            finite_reads_complete
+                            and collection.daily_realized_pnl is None
+                            and len(collection.pnl_request_ids) < _PNL_ATTEMPT_LIMIT
+                        )
+                        else deadline
+                    )
+                    self._condition.wait(max(0.0, wake_at - now))
+                    continue
+            if retry is not None:
+                self._retry_daily_pnl(collection, *retry, deadline)
+
+    def _assert_collection_current(self, collection: _Collection) -> None:
+        """Validate collection identity, callback health, and authentication.
+
+        The caller must hold ``self._condition`` so this check and any
+        subsequent freeze are one atomic callback boundary.
+        """
+
+        if (
+            self._active is not collection
+            or collection.generation != self._generation
+        ):
+            raise BrokerCapabilityError("IBKR_READ_COLLECTION_GENERATION_LOST")
+        if collection.error is not None:
+            reason = (
+                ":API_READ_ONLY"
+                if collection.error.reason == "API_READ_ONLY"
+                else ""
+            )
+            raise BrokerCapabilityError(
+                f"IBKR_READ_CALLBACK_ERROR:{collection.error.code}:"
+                f"{collection.error.scope}{reason}"
+            )
+        if self._authenticated_generation != self._generation:
+            raise BrokerCapabilityError("IBKR_READ_AUTHENTICATION_LOST")
+
+    def _retry_daily_pnl(
+        self,
+        collection: _Collection,
+        old_request_id: int,
+        new_request_id: int,
+        deadline: float,
+    ) -> None:
+        """Atomically retire one subscription and dispatch the sole retry."""
+
+        with self._condition:
+            if (
+                self._active is not collection
+                or collection.generation != self._generation
+                or collection.daily_realized_pnl is not None
+                or collection.pnl_request_id != old_request_id
+                or len(collection.pnl_request_ids) >= _PNL_ATTEMPT_LIMIT
+            ):
+                if collection.daily_realized_pnl is not None:
+                    return
+                raise BrokerCapabilityError("IBKR_READ_COLLECTION_GENERATION_LOST")
+            self._assert_before_deadline(
+                deadline, "daily_realized_pnl_retry_cancel"
+            )
+            # Retire the old ID before invoking cancelPnL.  A conforming or
+            # test-double requester may synchronously deliver a final callback
+            # from inside cancellation; it belongs to the retired subscription
+            # and must not be relabeled as evidence for the fresh request.
+            collection.pnl_request_id = new_request_id
+            try:
+                self._requester.cancelPnL(old_request_id)
+            except Exception:
+                raise BrokerCapabilityError("IBKR_READ_PNL_RETRY_CANCEL_FAILED") from None
+            collection.cancelled_pnl_request_ids.add(old_request_id)
+            self._assert_collection_current(collection)
+            self._assert_before_deadline(
+                deadline, "daily_realized_pnl_retry_cancel"
+            )
+            collection.pnl_request_ids.append(new_request_id)
+            try:
+                self._dispatch_read(collection, "daily_realized_pnl", lambda: self._requester.reqPnL(
+                    new_request_id, self._exact_account_id, ""
+                ))
+            except Exception:
+                raise BrokerCapabilityError("IBKR_READ_PNL_RETRY_DISPATCH_FAILED") from None
+            self._assert_collection_current(collection)
+            self._assert_before_deadline(
+                deadline, "daily_realized_pnl_retry_dispatch"
+            )
 
     def _normalize(self, collection: _Collection) -> _CompletedCollection:
+        completed = self._normalize_finite(collection)
+        if collection.daily_realized_pnl is None:
+            raise BrokerContractViolation("IBKR_DAILY_REALIZED_PNL_MISSING")
+        realized, realized_received_at = collection.daily_realized_pnl
+        snapshot = replace(
+            completed.observation.snapshot,
+            daily_realized_pnl=realized,
+            daily_realized_pnl_complete=True,
+            risk_evidence_authoritative=True,
+            risk_evidence_source="ibkr:reqPnL.realizedPnL:current-day",
+            risk_evidence_as_of=realized_received_at,
+        )
+        return replace(completed, observation=replace(completed.observation, snapshot=snapshot))
+
+    def _normalize_finite(self, collection: _Collection) -> _CompletedCollection:
+        """Shared validation; missing risk facts retain AccountSnapshot defaults."""
         completed_at = self._now()
         summary = self._normalize_summary(collection.summary)
         raw_by_family: dict[OrderFamily, list[_RawOrder]] = {
@@ -609,6 +1374,11 @@ class IbkrWholeAccountReadBridge:
                         raw,
                         execution_by_order.get(self._raw_order_key(raw.order), ()),
                         collection.order_statuses,
+                        protection_statuses=collection.protection_statuses,
+                        protection_status_conflicts=collection.protection_status_conflicts,
+                        protection_order_conflicts=collection.protection_order_conflicts,
+                        collection_started_at=collection.started_at,
+                        collection_completed_at=completed_at,
                     )
                 )
 
@@ -622,9 +1392,6 @@ class IbkrWholeAccountReadBridge:
             + tuple(normalized[OrderFamily.ADVANCED_EQUITY]),
         )
         account_type, total_value, cash, buying_power, unleveraged, unsettled = summary
-        if collection.daily_realized_pnl is None:
-            raise BrokerContractViolation("IBKR_DAILY_REALIZED_PNL_MISSING")
-        realized, realized_received_at = collection.daily_realized_pnl
         snapshot = AccountSnapshot(
             account_masked=self._account_masked,
             observed_at=completed_at,
@@ -655,20 +1422,13 @@ class IbkrWholeAccountReadBridge:
             option_orders_complete=False,
             advanced_orders_complete=False,
             auth_point_in_time=True,
-            daily_realized_pnl=realized,
-            daily_realized_pnl_complete=True,
-            weekly_realized_pnl_complete=False,
-            peak_equity_complete=False,
-            risk_evidence_authoritative=True,
-            risk_evidence_source="ibkr:reqPnL.realizedPnL:current-day",
-            risk_evidence_as_of=realized_received_at,
         )
         self._collection_nonce += 1
         collection_id = hashlib.sha256(
             (
                 f"ibkr-read-v1:{collection.generation}:{self._collection_nonce}:"
                 f"{collection.summary_request_id}:{collection.execution_request_id}:"
-                f"{collection.pnl_request_id}:"
+                f"{','.join(str(item) for item in collection.pnl_request_ids)}:"
                 f"{collection.started_at.isoformat()}:{completed_at.isoformat()}"
             ).encode("ascii")
         ).hexdigest()
@@ -805,6 +1565,12 @@ class IbkrWholeAccountReadBridge:
         raw_fills: tuple[tuple[str, _RawExecution, Decimal, str, datetime], ...]
         | list[tuple[str, _RawExecution, Decimal, str, datetime]],
         statuses: dict[tuple[int, int], tuple[str, datetime]],
+        *,
+        protection_statuses: dict[tuple[int, int], IbkrOrderStatusFact | None],
+        protection_status_conflicts: set[tuple[int, int]],
+        protection_order_conflicts: set[str],
+        collection_started_at: datetime,
+        collection_completed_at: datetime,
     ) -> OrderSnapshot:
         order = raw.order
         requested = self._decimal(getattr(order, "totalQuantity", None), "totalQuantity")
@@ -813,7 +1579,7 @@ class IbkrWholeAccountReadBridge:
         client_id = self._integer(getattr(order, "clientId", 0), "clientId", nonnegative=True)
         order_id = self._integer(getattr(order, "orderId", 0), "orderId", nonnegative=True)
         status_record = statuses.get((client_id, order_id))
-        status = status_record[0] if status_record else self._order_status_text(raw.order_state)
+        status = status_record[0] if status_record else raw.status
         fills = tuple(
             sorted(
                 (
@@ -833,6 +1599,15 @@ class IbkrWholeAccountReadBridge:
         if cumulative > requested:
             raise BrokerContractViolation("IBKR_EXECUTIONS_EXCEED_ORDER_QUANTITY")
         state = self._state(status, cumulative, requested)
+        if raw.blocking_warning_present and state in {
+            BrokerOrderState.CONFIRMED,
+            BrokerOrderState.PARTIALLY_FILLED,
+        }:
+            # A warning invalidates positive evidence that an order is working,
+            # but cannot negate independent terminal status or complete fill
+            # evidence. This keeps warned stops out of verified protection
+            # without turning cancelled/filled orders back into active orders.
+            state = BrokerOrderState.UNKNOWN
         received = max(
             [raw.received_at]
             + ([status_record[1]] if status_record else [])
@@ -864,6 +1639,16 @@ class IbkrWholeAccountReadBridge:
             raise BrokerContractViolation("IBKR_ORDER_SIDE_UNSUPPORTED") from None
         order_ref = self._client_ref(getattr(order, "orderRef", ""))
         identity = self._raw_order_key(order)
+        evidence = raw.protection_evidence
+        if evidence is not None:
+            evidence = replace(
+                evidence,
+                blocking_warning_present=raw.blocking_warning_present,
+                status=(None if (client_id, order_id) in protection_status_conflicts or identity in protection_order_conflicts else protection_statuses.get((client_id, order_id))),
+                collection_started_at=collection_started_at,
+                collection_completed_at=collection_completed_at,
+            )
+        evidence_facts = protection_evidence_facts(evidence)
         fact_fingerprint = hashlib.sha256(
             repr(
                 (
@@ -878,6 +1663,8 @@ class IbkrWholeAccountReadBridge:
                     str(stop_price) if stop_price is not None else None,
                     order_ref,
                     status,
+                    raw.blocking_warning_present,
+                    evidence_facts,
                     tuple(
                         (
                             fill.fill_id,
@@ -922,6 +1709,11 @@ class IbkrWholeAccountReadBridge:
                 self._integer(getattr(order, "permId", 0), "permId", nonnegative=True)
                 or None
             ),
+            broker_contract_id=(
+                self._integer(getattr(raw.contract, "conId", 0), "conId", nonnegative=True)
+                or None
+            ),
+            ibkr_protection_evidence=evidence,
         )
 
     def _provider_order_time(
@@ -930,9 +1722,8 @@ class IbkrWholeAccountReadBridge:
         fills: tuple[FillSnapshot, ...],
         fallback: datetime,
     ) -> datetime:
-        completed_time = getattr(raw.order_state, "completedTime", "")
-        if isinstance(completed_time, str) and completed_time.strip():
-            return self._ibkr_time(completed_time, fallback)
+        if raw.completed_time:
+            return self._ibkr_time(raw.completed_time, fallback)
         if fills and self._raw_order_terminal(raw, {}):
             return max(fill.executed_at for fill in fills)
         return fallback
@@ -1004,7 +1795,7 @@ class IbkrWholeAccountReadBridge:
     ) -> bool:
         client_id = self._integer(getattr(raw.order, "clientId", 0), "clientId", nonnegative=True)
         order_id = self._integer(getattr(raw.order, "orderId", 0), "orderId", nonnegative=True)
-        status = statuses.get((client_id, order_id), (self._order_status_text(raw.order_state), raw.received_at))[0]
+        status = statuses.get((client_id, order_id), (raw.status, raw.received_at))[0]
         return status.lower().replace(" ", "") in {
             "filled",
             "cancelled",
@@ -1168,10 +1959,44 @@ class IbkrWholeAccountReadBridge:
 
     @staticmethod
     def _order_status_text(order_state: object) -> str:
-        value = getattr(order_state, "status", "")
+        try:
+            value = getattr(order_state, "status", "")
+        except Exception:
+            raise BrokerContractViolation("IBKR_ORDER_STATUS_INVALID") from None
         if not isinstance(value, str):
             raise BrokerContractViolation("IBKR_ORDER_STATUS_INVALID")
         return value.strip()
+
+    @staticmethod
+    def _order_completed_time_text(order_state: object) -> str:
+        """Copy only bounded provider time; never retain the raw order-state object."""
+
+        try:
+            value = getattr(order_state, "completedTime", "")
+        except Exception:
+            raise BrokerContractViolation(
+                "IBKR_ORDER_COMPLETED_TIME_INVALID"
+            ) from None
+        if not isinstance(value, str):
+            return ""
+        if len(value) > 256:
+            raise BrokerContractViolation("IBKR_ORDER_COMPLETED_TIME_INVALID")
+        return value.strip()
+
+    @staticmethod
+    def _order_state_blocking_warning_present(order_state: object) -> bool:
+        """Reduce an untrusted broker warning to presence without retaining text."""
+
+        missing = object()
+        try:
+            value = getattr(order_state, "warningText", missing)
+        except Exception:
+            return True
+        if value is missing or type(value) is not str:
+            return True
+        if len(value) > _MAX_WARNING_TEXT_LENGTH:
+            return True
+        return bool(value.strip())
 
     @staticmethod
     def _order_watermark(orders: tuple[OrderSnapshot, ...], option_count: int) -> str:
@@ -1200,10 +2025,40 @@ class IbkrWholeAccountReadBridge:
             self._requester.cancelPositions()
         except Exception:
             pass
-        try:
-            self._requester.cancelPnL(collection.pnl_request_id)
-        except Exception:
-            pass
+        for request_id in tuple(collection.pnl_request_ids):
+            if request_id in collection.cancelled_pnl_request_ids:
+                continue
+            try:
+                self._requester.cancelPnL(request_id)
+            except Exception:
+                continue
+            collection.cancelled_pnl_request_ids.add(request_id)
+
+    def _cancel_session_reads(self, collection: _Collection) -> bool:
+        """Bounded cleanup dispatch, not an assertion of server-side removal."""
+        with self._condition:
+            prior_error = collection.error
+        ok = True
+        for cancel in (
+            lambda: self._requester.cancelAccountUpdatesMulti(collection.summary_request_id),
+            self._requester.cancelPositions,
+        ):
+            try:
+                cancel()
+            except Exception:
+                ok = False
+        with self._condition:
+            # The diagnostic error list is a capped ring. Its length/slice is
+            # not an event cursor. This attempt still owns _active, so every
+            # non-informational callback installs its immutable error here.
+            if (collection.error is not prior_error
+                    or self._active is not collection
+                    or self._generation != collection.generation
+                    or self._authenticated_generation != collection.generation):
+                ok = False
+            if not ok:
+                self._session_cleanup_failed = True
+        return ok
 
     def _assert_account(self, exact_account_id: str) -> None:
         if exact_account_id != self._exact_account_id:
@@ -1234,6 +2089,7 @@ class IbkrWholeAccountReadBridge:
                 self._authenticated_generation = generation
             else:
                 self._authenticated_generation = None
+                self._last = None
                 self._record_error(-1, 0, "managed_account_mismatch")
             self._condition.notify_all()
 
@@ -1248,10 +2104,11 @@ class IbkrWholeAccountReadBridge:
     ) -> None:
         with self._condition:
             active = self._active_for(generation)
-            if active is None or request_id != active.summary_request_id:
+            if active is None or active.account_values_channel != "account_summary" or request_id != active.summary_request_id:
                 return
             if account != self._exact_account_id:
                 return
+            self._note_read_event(active, "account_summary", "first_callback")
             if not all(isinstance(item, str) for item in (tag, value, currency)):
                 self._callback_contract_error(active, request_id, "account_summary_shape")
                 return
@@ -1263,6 +2120,40 @@ class IbkrWholeAccountReadBridge:
                 self._callback_contract_error(active, request_id, "account_summary_conflict")
                 return
             active.summary[tag] = current
+            active.summary_received_at.setdefault(tag, self._now())
+
+    def _account_update_multi(
+        self, generation: int, request_id: int, account: str, model_code: str,
+        key: str, value: str, currency: str,
+    ) -> None:
+        with self._condition:
+            active = self._active_for(generation)
+            if active is None or active.account_values_channel != "account_updates_multi" or request_id != active.summary_request_id:
+                return
+            self._note_read_event(active, "account_updates_multi", "first_callback")
+            if account != self._exact_account_id or model_code != "":
+                self._callback_contract_error(active, request_id, "account_updates_scope")
+                return
+            if not all(type(item) is str for item in (key, value, currency)):
+                self._callback_contract_error(active, request_id, "account_updates_shape")
+                return
+            if key.casefold() == "accountready":
+                if value.casefold() != "true":
+                    self._callback_contract_error(active, request_id, "account_updates_not_ready")
+                return
+            # Do not combine ledger/segment values with whole-account totals.
+            if key not in _SUMMARY_TAGS.split(","):
+                return
+            if currency not in ("", "USD", "BASE"):
+                self._callback_contract_error(active, request_id, "account_updates_currency")
+                return
+            previous = active.summary.get(key)
+            current = (value, currency)
+            if previous is not None and previous != current:
+                self._callback_contract_error(active, request_id, "account_updates_conflict")
+                return
+            active.summary[key] = current
+            active.summary_received_at.setdefault(key, self._now())
 
     def _position(
         self,
@@ -1276,6 +2167,7 @@ class IbkrWholeAccountReadBridge:
             active = self._active_for(generation)
             if active is None or account != self._exact_account_id:
                 return
+            self._note_read_event(active, "positions", "first_callback")
             try:
                 normalized_quantity = self._decimal(quantity, "position")
                 normalized_cost = self._decimal(average_cost, "average_cost")
@@ -1299,6 +2191,7 @@ class IbkrWholeAccountReadBridge:
                 return
             if getattr(order, "account", None) != self._exact_account_id:
                 return
+            self._note_read_event(active, "open_orders" if source == "open" else "completed_orders", "first_callback")
             try:
                 callback_id = self._integer(callback_order_id, "callback_order_id", nonnegative=True)
                 embedded_id = self._integer(getattr(order, "orderId", callback_id), "orderId", nonnegative=True)
@@ -1310,17 +2203,51 @@ class IbkrWholeAccountReadBridge:
                     except Exception:
                         raise BrokerContractViolation("IBKR_CALLBACK_ORDER_ID_MISSING") from None
                 key = self._raw_order_key(order)
+                status = self._order_status_text(order_state)
+                completed_time = self._order_completed_time_text(order_state)
+                blocking_warning_present = (
+                    self._order_state_blocking_warning_present(order_state)
+                )
             except BrokerContractViolation:
                 self._callback_contract_error(active, -1, "order_shape")
                 return
             received = self._now()
-            candidate = _RawOrder(contract, order, order_state, received, source)
+            candidate = _RawOrder(
+                contract=contract,
+                order=order,
+                status=status,
+                completed_time=completed_time,
+                blocking_warning_present=blocking_warning_present,
+                received_at=received,
+                source=source,
+                protection_evidence=capture_ibkr_protection_evidence(
+                    contract=contract, order=order, broker_order_id=key,
+                    expected_account_id=self._exact_account_id, account_masked=self._account_masked,
+                    source=source, open_order_status=status,
+                    blocking_warning_present=blocking_warning_present,
+                    open_order_received_at=received, status=None,
+                    collection_started_at=active.started_at, collection_completed_at=received,
+                ),
+            )
             previous = active.orders.get(key)
+            if previous is not None and protection_evidence_facts(previous.protection_evidence) != protection_evidence_facts(candidate.protection_evidence):
+                active.protection_order_conflicts.add(key)
             if previous is None or previous.received_at <= received:
+                if previous is not None and previous.blocking_warning_present:
+                    candidate = replace(candidate, blocking_warning_present=True)
                 active.orders[key] = candidate
+            elif blocking_warning_present and not previous.blocking_warning_present:
+                # Receipt clocks can move backwards. A duplicate callback can
+                # add a blocking fact, but never erase one already observed in
+                # this complete collection.
+                active.orders[key] = replace(
+                    previous, blocking_warning_present=True
+                )
 
     def _order_status(
-        self, generation: int, client_id: object, order_id: object, status: object
+        self, generation: int, client_id: object, order_id: object, status: object,
+        *, filled: object, remaining: object, perm_id: object, parent_id: object,
+        why_held: object,
     ) -> None:
         with self._condition:
             active = self._active_for(generation)
@@ -1336,7 +2263,21 @@ class IbkrWholeAccountReadBridge:
             except BrokerContractViolation:
                 self._callback_contract_error(active, -1, "order_status_shape")
                 return
-            active.order_statuses[key] = (status.strip(), self._now())
+            received_at = self._now()
+            active.order_statuses[key] = (status.strip(), received_at)
+            fact = capture_ibkr_order_status_fact(
+                order_id=order_id, client_id=client_id, perm_id=perm_id, parent_id=parent_id,
+                status=status, filled=filled, remaining=remaining, why_held=why_held,
+                received_at=received_at,
+            )
+            previous = active.protection_statuses.get(key)
+            if key in active.protection_statuses and (
+                previous is None or fact is None
+                or replace(previous, received_at=received_at) != fact
+                or previous.received_at > received_at
+            ):
+                active.protection_status_conflicts.add(key)
+            active.protection_statuses[key] = fact
 
     def _execution(
         self, generation: int, request_id: int, contract: object, execution: object
@@ -1347,6 +2288,7 @@ class IbkrWholeAccountReadBridge:
                 return
             if getattr(execution, "acctNumber", None) != self._exact_account_id:
                 return
+            self._note_read_event(active, "executions", "first_callback")
             exec_id = getattr(execution, "execId", None)
             if not isinstance(exec_id, str) or not exec_id.strip():
                 self._callback_contract_error(active, request_id, "execution_shape")
@@ -1374,6 +2316,11 @@ class IbkrWholeAccountReadBridge:
             except BrokerContractViolation:
                 self._callback_contract_error(active, -1, "commission_shape")
                 return
+            previous = active.commissions.get(exec_id.strip())
+            if previous is not None and previous[:2] != (commission, currency.strip().upper()):
+                # Retain this diagnostic fact for the additive session-input
+                # path; do not change the existing strict reader's behavior.
+                active.commission_conflict_observed = True
             active.commissions[exec_id.strip()] = (commission, currency.strip().upper(), self._now())
             self._condition.notify_all()
 
@@ -1388,15 +2335,36 @@ class IbkrWholeAccountReadBridge:
                 normalized_request_id = self._integer(
                     request_id, "pnl.request_id", nonnegative=True
                 )
-                if normalized_request_id != active.pnl_request_id:
-                    return
-                normalized_realized = self._decimal(realized_pnl, "pnl.realizedPnL")
-                # IB's UNSET_DOUBLE sentinel is a finite ~1.8e308 value. It is
-                # absence, never valid financial evidence.
-                if abs(normalized_realized) >= Decimal("1e300"):
-                    raise BrokerContractViolation("IBKR_DAILY_PNL_UNAVAILABLE")
             except BrokerContractViolation:
-                self._callback_contract_error(active, -1, "daily_pnl_shape")
+                self._callback_contract_error(
+                    active, -1, "daily_pnl_request_id_shape"
+                )
+                return
+            if normalized_request_id != active.pnl_request_id:
+                # The initial subscription is explicitly retired before a retry.
+                # Its delayed callback must never satisfy the fresh request.
+                return
+            self._note_read_event(active, "daily_realized_pnl", "first_callback")
+            try:
+                normalized_realized = self._decimal(realized_pnl, "pnl.realizedPnL")
+            except BrokerContractViolation:
+                self._callback_contract_error(
+                    active, normalized_request_id, "daily_pnl_nonfinite_or_shape"
+                )
+                return
+            # IB's UNSET_DOUBLE sentinel is a finite ~1.8e308 value. It is
+            # explicit absence, never valid financial evidence.  Preserve that
+            # distinction and let the bounded subscription retry run once.
+            if abs(normalized_realized) >= Decimal("1e300"):
+                if active.daily_realized_pnl is not None:
+                    self._callback_contract_error(
+                        active,
+                        normalized_request_id,
+                        "daily_pnl_became_unavailable",
+                    )
+                    return
+                active.unavailable_pnl_request_ids.add(normalized_request_id)
+                self._condition.notify_all()
                 return
             received = self._now()
             previous = active.daily_realized_pnl
@@ -1415,10 +2383,13 @@ class IbkrWholeAccountReadBridge:
             active = self._active_for(generation)
             if active is None:
                 return
-            if marker == "account_summary" and request_id != active.summary_request_id:
-                return
+            if marker in {"account_summary", "account_updates_multi"}:
+                if marker != active.account_values_channel or request_id != active.summary_request_id:
+                    return
             if marker == "executions" and request_id != active.execution_request_id:
                 return
+            self._note_read_event(active, marker, "first_callback")
+            self._note_read_event(active, marker, "end_callback")
             active.ends.add(marker)
             self._condition.notify_all()
 
@@ -1455,6 +2426,7 @@ class IbkrWholeAccountReadBridge:
                 # even when no collection happens to be active.  A later read
                 # must reauthenticate on a strictly newer generation.
                 self._authenticated_generation = None
+                self._last = None
                 if active is not None:
                     active.error = error
                 self._condition.notify_all()
@@ -1480,6 +2452,7 @@ class IbkrWholeAccountReadBridge:
             if generation != self._generation:
                 return
             self._authenticated_generation = None
+            self._last = None
             error = self._record_error(-1, 1100, "connection_closed")
             if self._active is not None:
                 self._active.error = error
@@ -1512,6 +2485,9 @@ class IbkrWholeAccountReadBridge:
 
 
 __all__ = [
+    "IbkrFiniteReadDiagnostic",
+    "IbkrReadChannelDiagnostic",
+    "IbkrReadCollectionDiagnostic",
     "IbkrReadRequester",
     "IbkrWholeAccountReadBridge",
     "SanitizedIbkrError",

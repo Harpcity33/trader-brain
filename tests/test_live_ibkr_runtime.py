@@ -63,6 +63,8 @@ class FakeEClient:
     emit_new_read_error_signature = False
     emit_completed_orders_error = False
     emit_order = False
+    order_status = "Submitted"
+    order_warning = ""
     suppress_callbacks = False
 
     def __init__(self, wrapper):
@@ -158,7 +160,10 @@ class FakeEClient:
                         699,
                         SimpleNamespace(symbol="SECRET"),
                         SimpleNamespace(clientId=19736, account=SYNTHETIC_ACCOUNT),
-                        SimpleNamespace(status="Submitted"),
+                        SimpleNamespace(
+                            status=type(self).order_status,
+                            warningText=type(self).order_warning,
+                        ),
                     )
         self.stopped.wait(2)
 
@@ -298,6 +303,8 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
         FakeEClient.emit_new_read_error_signature = False
         FakeEClient.emit_completed_orders_error = False
         FakeEClient.emit_order = False
+        FakeEClient.order_status = "Submitted"
+        FakeEClient.order_warning = ""
         FakeEClient.suppress_callbacks = False
         self.load = patch(
             "titan_brain.live.broker.ibkr_runtime._load_attested_sdk",
@@ -541,10 +548,86 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
         events = runtime.sanitized_order_events
         self.assertEqual((errors[-1].request_id, errors[-1].code), (41, 201))
         self.assertEqual((events[-1].order_id, events[-1].status), (699, "Submitted"))
+        self.assertFalse(events[-1].blocking_warning_present)
+        self.assertFalse(events[-1].proves_execution_acceptance)
         for value in (repr(errors), repr(events), repr(runtime.status())):
             self.assertNotIn(SYNTHETIC_ACCOUNT, value)
             self.assertNotIn("private broker text", value)
             self.assertNotIn("SECRET", value)
+
+    def test_order_warning_or_rejection_is_presence_only_and_never_acceptance(self):
+        FakeEClient.emit_order = True
+        FakeEClient.order_status = "Inactive"
+        FakeEClient.order_warning = (
+            f"private blocking warning for {SYNTHETIC_ACCOUNT} SECRET"
+        )
+        runtime = self.make()
+        runtime.connect_reads()
+        runtime.connect_command(
+            mutation_interlock=lambda: None,
+            authorize_dispatch=lambda request, evidence: None,
+        )
+        command = FakeEClient.instances[1]
+        initial = runtime.sanitized_order_events[-1]
+        self.assertEqual(initial.status, "Inactive")
+        self.assertTrue(initial.blocking_warning_present)
+        self.assertFalse(initial.proves_execution_acceptance)
+
+        command.wrapper.completedOrder(
+            SimpleNamespace(symbol="SECRET"),
+            SimpleNamespace(
+                orderId=701,
+                clientId=19736,
+                account=SYNTHETIC_ACCOUNT,
+            ),
+            SimpleNamespace(
+                status="Filled",
+                warningText=f"private completed warning {SYNTHETIC_ACCOUNT}",
+            ),
+        )
+        completed = runtime.sanitized_order_events[-1]
+        self.assertEqual(completed.kind, "completed_order")
+        self.assertEqual(completed.status, "Filled")
+        self.assertTrue(completed.blocking_warning_present)
+        self.assertFalse(completed.proves_execution_acceptance)
+        public = repr(runtime.sanitized_order_events)
+        for private in (
+            SYNTHETIC_ACCOUNT,
+            "private blocking warning",
+            "private completed warning",
+            "SECRET",
+        ):
+            self.assertNotIn(private, public)
+
+    def test_unreadable_order_warning_fails_closed_without_stringification(self):
+        class UnreadableWarning:
+            status = "Submitted"
+
+            @property
+            def warningText(self):
+                raise RuntimeError(f"private warning {SYNTHETIC_ACCOUNT}")
+
+            def __str__(self):
+                raise AssertionError("untrusted order state must not be stringified")
+
+        runtime = self.make()
+        runtime.connect_reads()
+        runtime.connect_command(
+            mutation_interlock=lambda: None,
+            authorize_dispatch=lambda request, evidence: None,
+        )
+        command = FakeEClient.instances[1]
+        command.wrapper.openOrder(
+            702,
+            SimpleNamespace(symbol="SECRET"),
+            SimpleNamespace(clientId=19736, account=SYNTHETIC_ACCOUNT),
+            UnreadableWarning(),
+        )
+        event = runtime.sanitized_order_events[-1]
+        self.assertEqual(event.status, "Submitted")
+        self.assertTrue(event.blocking_warning_present)
+        self.assertFalse(event.proves_execution_acceptance)
+        self.assertNotIn(SYNTHETIC_ACCOUNT, repr(event))
 
     def test_sdk_1050_error_time_callback_is_sanitized_without_loop_failure(self):
         FakeEClient.emit_error = True
@@ -583,6 +666,8 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
             "managedAccountsProtoBuf",
             "accountSummaryProtoBuf",
             "accountSummaryEndProtoBuf",
+            "accountUpdateMultiProtoBuf",
+            "accountUpdateMultiEndProtoBuf",
             "positionProtoBuf",
             "positionEndProtoBuf",
             "openOrderProtoBuf",
@@ -666,6 +751,143 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
         self.assertEqual(read.market_data, [])
         self.assertEqual(read.mutations, [])
 
+    def test_finite_probe_is_separate_from_strict_pnl_and_authority(self):
+        runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
+        components = runtime.connect_reads()
+        read = FakeEClient.instances[0]
+        with patch.object(read, "reqPnL", side_effect=AssertionError("P&L not requested")):
+            result = runtime.probe_finite_reads("SPY")
+        self.assertIsNotNone(result.finite_reads)
+        self.assertIsNone(result.finite_read_error)
+        self.assertTrue(result.contract_read_complete)
+        self.assertIsNone(result.contract_read_error)
+        public = result.public_dict()
+        self.assertTrue(public["diagnostic_only"])
+        self.assertEqual(public["daily_pnl_status"], "not_requested")
+        for field in ("strict_account_read_complete", "daily_starting_equity_ready",
+                      "whole_broker_history_verified", "write_authority_granted"):
+            self.assertFalse(public[field])
+        self.assertNotIn(SYNTHETIC_ACCOUNT, repr(public))
+        self.assertNotIn("10000", repr(public))
+        self.assertIsNone(components.read_bridge._last)
+        self.assertEqual(len(FakeEClient.instances), 1)
+        self.assertFalse(runtime.status().command_connected)
+        self.assertEqual(read.market_data, [])
+        self.assertEqual(read.mutations, [])
+        methods = [call[0] for call in read.calls]
+        self.assertIn("reqContractDetails", methods)
+        self.assertNotIn("reqPnL", methods)
+        self.assertNotIn("cancelPnL", methods)
+        with patch.object(read, "reqPnL"):
+            strict = runtime.probe_reads("SPY")
+        self.assertEqual(strict.phase, "BLOCKED")
+        self.assertEqual(strict.error_code,
+            "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_EXHAUSTED_NO_CALLBACK")
+        channels = {item.channel: item for item in strict.channel_diagnostic.channels}
+        self.assertEqual(channels["daily_realized_pnl"].observation, "no_matching_callback_received")
+        self.assertEqual(channels["daily_realized_pnl"].request_attempts, 2)
+        self.assertFalse(strict.channel_diagnostic.normalization_completed)
+
+    def test_probe_channel_diagnostics_expose_all_missing_channels_without_authority(self):
+        runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
+        components = runtime.connect_reads()
+        read = FakeEClient.instances[0]
+        with patch.object(read, "reqCompletedOrders"), patch.object(read, "reqPnL"):
+            strict = runtime.probe_reads()
+        channels = {item.channel: item for item in strict.channel_diagnostic.channels}
+        self.assertEqual(strict.phase, "BLOCKED")
+        for missing in ("completed_orders", "daily_realized_pnl"):
+            self.assertEqual(channels[missing].observation, "no_matching_callback_received")
+        self.assertIsNone(components.read_bridge._last)
+        self.assertEqual(read.mutations, [])
+        self.assertNotIn(SYNTHETIC_ACCOUNT, repr(strict.public_dict()))
+        self.assertTrue(strict.public_dict()["channel_diagnostic"]["diagnostic_only"])
+        with patch.object(read, "reqCompletedOrders"):
+            finite = runtime.probe_finite_reads()
+        channels = {item.channel: item for item in finite.channel_diagnostic.channels}
+        self.assertEqual(channels["completed_orders"].observation, "no_matching_callback_received")
+        self.assertEqual(channels["daily_realized_pnl"].observation, "not_requested")
+        self.assertTrue(finite.contract_read_complete)
+        self.assertFalse(finite.public_dict()["write_authority_granted"])
+        self.assertEqual(len(FakeEClient.instances), 1)
+
+    def test_probe_never_attaches_a_different_attempts_channel_diagnostic(self):
+        for finite in (False, True):
+            with self.subTest(finite=finite):
+                runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
+                bridge = runtime.connect_reads().read_bridge
+                method = "diagnose_finite_reads" if finite else "get_account_base"
+                original = getattr(bridge, method)
+                other = bridge.get_account_base if finite else bridge.diagnose_finite_reads
+
+                def interleaved(*args, **kwargs):
+                    result = original(*args, **kwargs)
+                    other(SYNTHETIC_ACCOUNT)
+                    return result
+
+                with patch.object(bridge, method, side_effect=interleaved):
+                    result = runtime.probe_finite_reads() if finite else runtime.probe_reads()
+                self.assertIsNotNone(bridge.last_read_diagnostic)
+                self.assertIsNone(result.channel_diagnostic)
+                runtime.stop()
+
+    def test_failed_probe_never_attaches_a_later_successful_diagnostic(self):
+        runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
+        bridge = runtime.connect_reads().read_bridge
+        read = FakeEClient.instances[0]
+        original = bridge.get_account_base
+
+        def interleaved(*args, **kwargs):
+            try:
+                return original(*args, **kwargs)
+            finally:
+                bridge.diagnose_finite_reads(SYNTHETIC_ACCOUNT)
+
+        with patch.object(read, "reqPnL"), patch.object(bridge, "get_account_base", side_effect=interleaved):
+            result = runtime.probe_reads()
+        self.assertEqual(result.phase, "BLOCKED")
+        self.assertTrue(bridge.last_read_diagnostic.normalization_completed)
+        self.assertIsNone(result.channel_diagnostic)
+
+    def test_finite_probe_reports_account_failure_and_contract_success_separately(self):
+        runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
+        components = runtime.connect_reads()
+        read = FakeEClient.instances[0]
+        with patch.object(read, "reqPositions"):
+            result = runtime.probe_finite_reads("SPY")
+        self.assertIsNone(result.finite_reads)
+        self.assertIsNotNone(result.finite_read_error)
+        self.assertTrue(result.contract_read_complete)
+        self.assertIsNone(result.contract_read_error)
+        self.assertIsNone(components.read_bridge._last)
+        self.assertEqual(read.mutations, [])
+
+    def test_finite_probe_preserves_account_result_when_contract_fails(self):
+        runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.02)
+        runtime.connect_reads()
+        read = FakeEClient.instances[0]
+        with patch.object(read, "reqContractDetails", side_effect=RuntimeError(SYNTHETIC_ACCOUNT)):
+            result = runtime.probe_finite_reads("SPY")
+        self.assertIsNotNone(result.finite_reads)
+        self.assertIsNone(result.finite_read_error)
+        self.assertFalse(result.contract_read_complete)
+        self.assertTrue(result.channel_diagnostic.normalization_completed)
+        self.assertIsNotNone(result.contract_read_error)
+        self.assertNotIn(SYNTHETIC_ACCOUNT, repr(result.public_dict()))
+        self.assertEqual(read.mutations, [])
+
+    def test_finite_probe_without_read_connection_is_inert(self):
+        runtime = self.make()
+        result = runtime.probe_finite_reads()
+        self.assertFalse(result.connected)
+        self.assertIsNone(result.finite_reads)
+        self.assertFalse(result.contract_read_complete)
+        self.assertIsNone(result.channel_diagnostic)
+        self.assertEqual(result.finite_read_error, "IBKR_RUNTIME_READS_NOT_READY")
+        self.assertEqual(result.contract_read_error, "IBKR_RUNTIME_READS_NOT_READY")
+        self.assertEqual(FakeEClient.instances, [])
+        self.loader.assert_not_called()
+
     def test_contract_metadata_probe_connects_after_hours_without_trade_eligibility(self):
         after_hours = NOW.replace(hour=23)
         runtime = self.make(
@@ -690,13 +912,161 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
         runtime = self.make(read_timeout_seconds=0.02, instrument_timeout_seconds=0.25)
         runtime.connect_reads()
         read = FakeEClient.instances[0]
-        read.reqPnL = lambda *args: None
+        pnl_requests = []
+
+        def no_pnl(req_id, account, model_code):
+            pnl_requests.append((req_id, account, model_code))
+
+        read.reqPnL = no_pnl
         result = runtime.probe_reads("SPY")
         self.assertEqual(result.phase, "BLOCKED")
-        self.assertEqual(result.error_code, "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_TIMEOUT")
+        self.assertEqual(
+            result.error_code,
+            "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_EXHAUSTED_NO_CALLBACK",
+        )
         self.assertIsNone(result.account_collection_id)
+        self.assertEqual(len(pnl_requests), 2)
+        self.assertNotEqual(pnl_requests[0][0], pnl_requests[1][0])
+        self.assertTrue(
+            all(item[1:] == (SYNTHETIC_ACCOUNT, "") for item in pnl_requests)
+        )
         self.assertEqual(read.market_data, [])
         self.assertEqual(read.mutations, [])
+
+    def test_daily_pnl_unavailable_and_nonfinite_have_distinct_diagnostics(self):
+        for mode, expected in (
+            (
+                "unavailable",
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_EXHAUSTED_UNAVAILABLE",
+            ),
+            ("nonfinite", "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INVALID"),
+        ):
+            with self.subTest(mode=mode):
+                runtime = self.make(
+                    read_timeout_seconds=0.02,
+                    instrument_timeout_seconds=0.25,
+                )
+                runtime.connect_reads()
+                read = FakeEClient.instances[-1]
+
+                def unavailable(req_id, account, model_code):
+                    read.calls.append(("reqPnL", req_id, account, model_code))
+                    read.wrapper.pnl(
+                        req_id,
+                        1.7976931348623157e308,
+                        0.0,
+                        1.7976931348623157e308,
+                    )
+
+                def nonfinite(req_id, account, model_code):
+                    read.calls.append(("reqPnL", req_id, account, model_code))
+                    read.wrapper.pnl(req_id, 0.0, 0.0, float("nan"))
+
+                read.reqPnL = unavailable if mode == "unavailable" else nonfinite
+                result = runtime.probe_reads("SPY")
+                self.assertEqual(result.phase, "BLOCKED")
+                self.assertEqual(result.error_code, expected)
+                self.assertIsNone(result.account_collection_id)
+                self.assertEqual(read.market_data, [])
+                self.assertEqual(read.mutations, [])
+                runtime.stop()
+
+    def test_read_probe_error_taxonomy_is_exact_and_redacted(self):
+        cases = {
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_no_callback": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_NO_CALLBACK"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_unavailable": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_UNAVAILABLE"
+            ),
+            "IBKR_READ_PNL_INITIAL_DISPATCH_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_DISPATCH_FAILED"
+            ),
+            "IBKR_READ_PNL_RETRY_CANCEL_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_CANCEL_FAILED"
+            ),
+            "IBKR_READ_PNL_RETRY_DISPATCH_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_DISPATCH_FAILED"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_dispatch": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_DISPATCH_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_cancel": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_CANCEL_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_dispatch": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_DISPATCH_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:account_summary_dispatch": (
+                "IBKR_RUNTIME_READ_ACCOUNT_SUMMARY_DISPATCH_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:collection_completion": (
+                "IBKR_RUNTIME_READ_COLLECTION_COMPLETION_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:collection_freeze": (
+                "IBKR_RUNTIME_READ_COLLECTION_FREEZE_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:commission": (
+                "IBKR_RUNTIME_READ_COMMISSION_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:positions": (
+                "IBKR_RUNTIME_READ_POSITIONS_CALLBACK_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:open_orders,positions": (
+                "IBKR_RUNTIME_READ_MULTIPLE_CALLBACKS_TIMEOUT"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_request_id_shape": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_REQUEST_ID_INVALID"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_became_unavailable": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_BECAME_UNAVAILABLE"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_moved": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_MOVED"
+            ),
+            "IBKR_READ_AUTHENTICATION_LOST": (
+                "IBKR_RUNTIME_READ_AUTHENTICATION_LOST"
+            ),
+            "IBKR_READ_COLLECTION_GENERATION_LOST": (
+                "IBKR_RUNTIME_READ_COLLECTION_GENERATION_LOST"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:1100:connection_closed": (
+                "IBKR_RUNTIME_READ_CONNECTION_LOST"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:1100:session": (
+                "IBKR_RUNTIME_READ_CONNECTION_LOST"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:502:session": (
+                "IBKR_RUNTIME_READ_SESSION_ERROR_502"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:503:session": (
+                "IBKR_RUNTIME_READ_SESSION_ERROR_503"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:504:session": (
+                "IBKR_RUNTIME_READ_SESSION_ERROR_504"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:1300:session": (
+                "IBKR_RUNTIME_READ_SESSION_ERROR_1300"
+            ),
+        }
+        for private_message, expected in cases.items():
+            with self.subTest(private_message=private_message):
+                self.assertEqual(
+                    IbkrOfficialRuntime._probe_error_code(
+                        RuntimeError(private_message), contract=False
+                    ),
+                    expected,
+                )
+        self.assertEqual(
+            IbkrOfficialRuntime._probe_error_code(
+                RuntimeError(
+                    "IBKR_READ_CALLBACK_ERROR:1100:connection_closed:"
+                    + SYNTHETIC_ACCOUNT
+                ),
+                contract=False,
+            ),
+            "IBKR_RUNTIME_READ_PROBE_FAILED",
+        )
 
     def test_read_probe_surfaces_only_sanitized_sdk_error_code(self):
         FakeEClient.emit_completed_orders_error = True
@@ -775,7 +1145,10 @@ class IbkrOfficialRuntimeTests(unittest.TestCase):
         read.reqCompletedOrders = incomplete_with_information
         result = runtime.probe_reads("SPY")
         self.assertEqual(result.phase, "BLOCKED")
-        self.assertEqual(result.error_code, "IBKR_RUNTIME_READ_PROBE_FAILED")
+        self.assertEqual(
+            result.error_code,
+            "IBKR_RUNTIME_READ_COMPLETED_ORDERS_CALLBACK_TIMEOUT",
+        )
 
     def test_read_probe_preserves_account_receipt_when_contract_probe_fails(self):
         runtime = self.make(read_timeout_seconds=0.25, instrument_timeout_seconds=0.25)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 import tempfile
@@ -36,7 +36,16 @@ from titan_brain.live.pipeline import (
     build_account_risk_snapshot,
 )
 from titan_brain.live.policy import PolicyBundle, sha256_json
-from titan_brain.live.risk_runtime import SessionLatch, entry_lifecycle_fee_reserve
+from titan_brain.live.plans import ExpiringPlan
+from titan_brain.live.risk_evidence_binding import (
+    daily_starting_equity_receipt_hash,
+    risk_high_water_receipt_hash,
+)
+from titan_brain.live.risk_runtime import (
+    SessionLatch,
+    entry_lifecycle_fee_reserve,
+    evaluate_entry,
+)
 from titan_brain.live.state import LiveStateStore
 from titan_brain.scoring import BASELINE_SETUP_WEIGHTS, EQUITY_EXECUTION_WEIGHTS
 
@@ -515,6 +524,253 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertIsNone(inconsistent)
         self.assertIn("ACTIVE_RESERVATION_FEE_BINDING_MISMATCH", fee_failures)
+
+    def _daily_snapshot_with_position(self):
+        policy = PolicyBundle.load(
+            ROOT, config_relative="config/full_live_ibkr.json"
+        )
+        observed = NOW.astimezone(timezone.utc)
+        masked = f"••••{policy.account_last4}"
+        baseline_identity = "1" * 64
+        baseline_receipt = "2" * 64
+        high_water_identity = "3" * 64
+        high_water_lineage = "4" * 64
+        high_water_receipt = risk_high_water_receipt_hash(
+            identity_hash=high_water_identity,
+            baseline_receipt_hash=baseline_receipt,
+            lineage_hash=high_water_lineage,
+            peak_equity=Decimal("1000"),
+        )
+        cash_flow_receipt = "5" * 64
+        starting_equity_as_of = observed.replace(
+            hour=4, minute=0, second=0, microsecond=0
+        )
+        starting_equity_receipt = daily_starting_equity_receipt_hash(
+            baseline_receipt_hash=baseline_receipt,
+            cash_flow_receipt_hash=cash_flow_receipt,
+            starting_equity=Decimal("1000"),
+            external_cash_flow=Decimal("0"),
+            starting_equity_as_of=starting_equity_as_of,
+            cash_flow_as_of=observed,
+            total_equity=self.snapshot.funds.total_value,
+        )
+        snapshot = replace(
+            self.snapshot,
+            account_masked=masked,
+            account_type="no_borrow_margin",
+            equity_positions=(
+                PositionSnapshot(
+                    symbol="XYZ",
+                    quantity=Decimal("2"),
+                    sellable_quantity=Decimal("0"),
+                    held_for_sells=Decimal("2"),
+                    average_price=Decimal("12"),
+                ),
+            ),
+            daily_realized_pnl=Decimal("0"),
+            weekly_realized_pnl=Decimal("0"),
+            peak_equity=Decimal("1000"),
+            daily_realized_pnl_complete=True,
+            weekly_realized_pnl_complete=True,
+            peak_equity_complete=True,
+            risk_evidence_authoritative=True,
+            risk_evidence_source="authenticated-test-risk-source",
+            risk_evidence_as_of=observed,
+            risk_baseline_identity_hash=baseline_identity,
+            risk_baseline_receipt_hash=baseline_receipt,
+            risk_high_water_identity_hash=high_water_identity,
+            risk_high_water_lineage_hash=high_water_lineage,
+            risk_high_water_receipt_hash=high_water_receipt,
+            daily_starting_equity=Decimal("1000"),
+            daily_external_cash_flow=Decimal("0"),
+            daily_starting_equity_as_of=starting_equity_as_of,
+            daily_external_cash_flow_as_of=observed,
+            daily_external_cash_flow_receipt_hash=cash_flow_receipt,
+            daily_starting_equity_receipt_hash=starting_equity_receipt,
+        )
+        return policy, snapshot
+
+    def _record_excluded_entry(
+        self, policy, snapshot, intent_state, *, filled=False, filled_quantity=2
+    ):
+        suffix = intent_state.lower()
+        plan_id = f"excluded-{suffix}-plan"
+        reservation_id = f"excluded-{suffix}-reservation"
+        stamp = snapshot.observed_at.isoformat()
+        fee_cents = int(entry_lifecycle_fee_reserve(policy, quantity=2) * 100)
+        with self.store.transaction() as connection:
+            connection.execute(
+                """INSERT INTO plans(
+                       plan_id,account_key,strategy_id,symbol,setup_id,quantity,
+                       limit_price,structural_stop,market_hours,time_in_force,
+                       evidence_cutoff_at,created_at,expires_at,policy_hash,
+                       config_hash,evidence_hash,targets_json,state)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan_id, policy.account_key, policy.strategy_id,
+                    "XYZ", "ORB_BREAKOUT", 2,
+                    "12", "11.50", "regular_hours", "gfd", stamp, stamp, stamp,
+                    policy.policy_hash, policy.config_hash, "6" * 64, "[]", "ACTIVE",
+                ),
+            )
+            connection.execute(
+                """INSERT INTO risk_reservations(
+                       reservation_id,plan_id,account_key,planned_risk_cents,
+                       stress_risk_cents,execution_reserve_cents,notional_cents,
+                       created_at,state) VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    reservation_id, plan_id, policy.account_key,
+                    100, 110 + fee_cents, 10, 2400, stamp, "BOUND",
+                ),
+            )
+            connection.execute(
+                """INSERT INTO order_intents(
+                       intent_id,plan_id,reservation_id,account_key,kind,client_ref,
+                       order_tuple_json,tuple_hash,created_at,
+                       acknowledgement_deadline_at,state,updated_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    f"excluded-{suffix}-intent", plan_id, reservation_id,
+                    policy.account_key, "ENTRY",
+                    f"00000000-0000-4000-8000-00000000010{1 if intent_state == 'UNKNOWN' else 2}",
+                    "{}", "7" * 64, stamp, stamp, intent_state, stamp,
+                ),
+            )
+            if filled:
+                connection.execute(
+                    "INSERT INTO broker_orders VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        f"excluded-{suffix}-order", f"excluded-{suffix}-intent",
+                        policy.account_key,
+                        "FILLED" if filled_quantity == 2 else "PARTIALLY_FILLED",
+                        2, filled_quantity, 1, stamp, stamp,
+                        "8" * 64,
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO fills VALUES (?,?,?,?,?,?,?)",
+                    (
+                        f"excluded-{suffix}-fill", f"excluded-{suffix}-order",
+                        policy.account_key, filled_quantity, "12", stamp, stamp,
+                    ),
+                )
+        return plan_id
+
+    def test_actual_position_blocks_unknown_or_submitting_excluded_replay(self) -> None:
+        policy, snapshot = self._daily_snapshot_with_position()
+        for intent_state in ("UNKNOWN", "SUBMITTING"):
+            with self.subTest(intent_state=intent_state):
+                plan_id = self._record_excluded_entry(policy, snapshot, intent_state)
+                risk, failures = build_account_risk_snapshot(
+                    policy=policy,
+                    state=self.store,
+                    broker_snapshot=snapshot,
+                    now=NOW,
+                    exclude_plan_id=plan_id,
+                )
+
+                self.assertIsNone(risk)
+                self.assertIn("OPEN_POSITION_SOURCE_VALUATION_TIME_UNAVAILABLE", failures)
+                self.assertIn("OPEN_POSITION_COMMON_NLV_EPOCH_UNAVAILABLE", failures)
+                self.assertIn("OPEN_POSITION_REMAINING_FEE_BOUND_UNAVAILABLE", failures)
+                self.assertIn("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED", failures)
+
+    def test_flat_snapshot_cannot_exclude_filled_durable_reservation(self) -> None:
+        self._assert_flat_snapshot_cannot_exclude_filled_reservation("ACKNOWLEDGED")
+
+    def test_flat_snapshot_cannot_exclude_unknown_filled_reservation(self) -> None:
+        self._assert_flat_snapshot_cannot_exclude_filled_reservation("UNKNOWN")
+
+    def test_flat_snapshot_cannot_exclude_submitting_filled_reservation(self) -> None:
+        self._assert_flat_snapshot_cannot_exclude_filled_reservation("SUBMITTING")
+
+    def _assert_flat_snapshot_cannot_exclude_filled_reservation(self, intent_state):
+        policy, snapshot = self._daily_snapshot_with_position()
+        snapshot = replace(snapshot, equity_positions=())
+        plan_id = self._record_excluded_entry(
+            policy, snapshot, intent_state, filled=True
+        )
+        risk, failures = build_account_risk_snapshot(
+            policy=policy,
+            state=self.store,
+            broker_snapshot=snapshot,
+            now=NOW,
+            exclude_plan_id=plan_id,
+        )
+
+        self.assertIsNone(risk)
+        self.assertIn("DAILY_EQUITY_OPEN_RISK_REVALUATION_REQUIRED", failures)
+
+    def test_legacy_protected_partial_fill_preserves_unknown_replay_blocker(self) -> None:
+        self.assertFalse(self.policy.daily_starting_equity_risk)
+        plan_id = self._record_excluded_entry(
+            self.policy, self.snapshot, "UNKNOWN", filled=True, filled_quantity=1
+        )
+        stamp = self.snapshot.observed_at.isoformat()
+        with self.store.transaction() as connection:
+            connection.execute(
+                """INSERT INTO order_intents
+                   SELECT 'partial-stop-intent',plan_id,NULL,account_key,'PROTECTION',
+                          'partial-stop-ref',order_tuple_json,tuple_hash,created_at,
+                          acknowledgement_deadline_at,'ACKNOWLEDGED',updated_at
+                     FROM order_intents WHERE intent_id='excluded-unknown-intent'"""
+            )
+            connection.execute(
+                "INSERT INTO broker_orders VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "partial-stop", "partial-stop-intent", self.policy.account_key,
+                    "CONFIRMED", 1, 0, 1, stamp, stamp, "9" * 64,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO protection_obligations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "partial-protection", "excluded-unknown-fill",
+                    self.policy.account_key, "XYZ", 1, 1, "11.50", "WORKING",
+                    1, stamp, "partial-stop",
+                ),
+            )
+        snapshot = replace(
+            self.snapshot,
+            equity_positions=(
+                PositionSnapshot(
+                    symbol="XYZ", quantity=Decimal("1"),
+                    sellable_quantity=Decimal("0"), held_for_sells=Decimal("1"),
+                    average_price=Decimal("12"),
+                ),
+            ),
+        )
+        plan = ExpiringPlan.build(
+            strategy_id=self.policy.strategy_id,
+            policy_hash=self.policy.policy_hash,
+            config_hash=self.policy.config_hash,
+            account_last4=self.policy.account_last4,
+            symbol="NEXT", instrument_id="instrument-next", setup_id="ORB_BREAKOUT",
+            quantity=2, entry_limit="12", structural_stop="11.50", targets=["13"],
+            execution_reserve_per_share="0.05", market_hours="regular_hours",
+            time_in_force="gfd", quality_tier="normal",
+            completed_bar_end=NOW - timedelta(minutes=1),
+            quote_observed_at=NOW - timedelta(seconds=1),
+            created_at=NOW - timedelta(seconds=1),
+            expires_at=NOW + timedelta(seconds=20), source_event_ids=["bar", "quote"],
+        )
+        for excluded in (None, plan_id):
+            with self.subTest(exclude_plan_id=excluded):
+                risk, failures = build_account_risk_snapshot(
+                    policy=self.policy, state=self.store, broker_snapshot=snapshot,
+                    now=NOW, exclude_plan_id=excluded,
+                )
+                self.assertEqual(failures, ())
+                self.assertIsNotNone(risk)
+                assert risk is not None
+                self.assertEqual(len(risk.exposures), 1)
+                self.assertEqual(risk.exposures[0].category, "unknown")
+                decision = evaluate_entry(
+                    policy=self.policy, snapshot=risk, plan=plan,
+                    latch=SessionLatch(NOW.date()), now=NOW,
+                )
+                self.assertFalse(decision.allowed)
+                self.assertIn("UNKNOWN_POSSIBLE_EXPOSURE", decision.failures)
 
     def test_pipeline_records_distinct_compute_risk_durable_and_ack_stages(self) -> None:
         item = structure()

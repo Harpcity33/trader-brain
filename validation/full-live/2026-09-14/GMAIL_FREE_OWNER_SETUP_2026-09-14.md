@@ -1,6 +1,6 @@
 # Independent Gmail alerts: owner setup, no additional paid service
 
-## Prepared, not connected
+## Setup mechanism and connection boundary
 
 The owner approved the existing Gmail address as both sender and destination,
 and one clearly labelled alert test after local authorization. The address is
@@ -13,8 +13,10 @@ The new executable `titan_brain.live.gmail_oauth_setup` prepares the supported
 Google Desktop OAuth flow. It requests only `gmail.send`, verifies PKCE/state,
 exchanges the code, tests a real refresh, and creates only the five exact IBKR
 Keychain entries. It does not enable a route, send an email, change a broker
-control, start a service, or authorize trading. No client or refresh credential
-has yet been supplied; mocked tests are not an authenticated connection.
+control, start a service, or authorize trading. Current real enrollment and
+deployment results are recorded separately in
+`GMAIL_GOOGLE_PRODUCTION_AND_CONSENT_2026-09-14.md`; mocked tests alone are not
+an authenticated connection.
 
 ## Owner steps in Google Cloud
 
@@ -69,6 +71,22 @@ overwriting them. A partial or uncertain enrollment remains route-not-ready;
 credentials may have been saved even if final readback failed. It does not
 automatically delete credentials. Review existing items before retrying.
 Tokens never appear in process command arguments or reports.
+
+### Narrow recovery after a client-only partial enrollment
+
+Only after exact metadata reconciliation and explicit owner authorization,
+append `--authorize-recover-client-only` to the command above. Both
+authorization flags are required. The helper accepts only the single existing
+Desktop client plus four missing entries. It compares the complete saved
+client document with the authorized download in memory, then requires a fresh
+Google grant. It repeats the checks before creating the four missing entries,
+with consent saved last. It does not replay the old code, overwrite a token,
+delete credentials, or repair any other partial/conflicting state.
+
+Setup uses native Keychain reads so a normal owner authentication dialog is
+not terminated by a ten-second subprocess timeout. It does not weaken access
+controls or supply the owner's password. Successful interactive enrollment
+must still be followed by a separate background-reader and delivery check.
 
 ## What remains after successful enrollment
 

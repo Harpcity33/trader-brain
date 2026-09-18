@@ -41,6 +41,8 @@ from .ibkr_instrument import IbkrInstrumentProvider
 from .ibkr_position_valuation import IbkrPositionValuationCollector
 from .ibkr_read import (
     IBKR_API_READ_ONLY_MESSAGE,
+    IbkrFiniteReadDiagnostic,
+    IbkrReadCollectionDiagnostic,
     IbkrWholeAccountReadBridge,
     classify_ibkr_error_callback,
 )
@@ -72,6 +74,25 @@ _ORDER_STATES = frozenset(
         "Submitted",
     }
 )
+_MAX_WARNING_TEXT_LENGTH = 4096
+
+
+def _blocking_warning_present(value: object) -> bool:
+    """Reduce an untrusted broker warning to presence without retaining text."""
+
+    if type(value) is not str or len(value) > _MAX_WARNING_TEXT_LENGTH:
+        return True
+    return bool(value.strip())
+
+
+def _order_state_blocking_warning_present(order_state: object) -> bool:
+    """Treat an unreadable warning field as blocking without stringifying it."""
+
+    try:
+        value = getattr(order_state, "warningText", "")
+    except Exception:
+        return True
+    return _blocking_warning_present(value)
 
 
 class IbkrRuntimeError(RuntimeError):
@@ -104,6 +125,13 @@ class SanitizedIbkrOrderEvent:
     client_id: int | None
     status: str
     received_at: datetime
+    blocking_warning_present: bool = False
+
+    @property
+    def proves_execution_acceptance(self) -> bool:
+        """Command callbacks are observations, never broker execution receipts."""
+
+        return False
 
 
 @dataclass(frozen=True)
@@ -209,6 +237,7 @@ class IbkrReadProbe:
     symbol: str
     contract_read_receipt_id: str | None = None
     contract_regular_session_open: bool | None = None
+    channel_diagnostic: IbkrReadCollectionDiagnostic | None = None
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -223,6 +252,45 @@ class IbkrReadProbe:
             "symbol": self.symbol,
             "contract_read_receipt_id": self.contract_read_receipt_id,
             "contract_regular_session_open": self.contract_regular_session_open,
+            "channel_diagnostic": self.channel_diagnostic.public_dict() if self.channel_diagnostic else None,
+            "whole_broker_history_verified": False,
+            "order_history_scope": "current_day_completed_orders_and_api_visible_executions",
+            "full_account_identifier_persisted": False,
+            "write_authority_granted": False,
+        }
+
+
+@dataclass(frozen=True)
+class IbkrFiniteReadProbe:
+    """Independent finite-account and contract diagnostics; no risk authority."""
+
+    connected: bool
+    account_masked: str
+    symbol: str
+    finite_reads: IbkrFiniteReadDiagnostic | None
+    finite_read_error: str | None
+    contract_read_complete: bool
+    contract_read_error: str | None
+    contract_observed_at: datetime | None = None
+    contract_regular_session_open: bool | None = None
+    channel_diagnostic: IbkrReadCollectionDiagnostic | None = None
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "connected": self.connected,
+            "account_masked": self.account_masked,
+            "symbol": self.symbol,
+            "finite_reads": self.finite_reads.public_dict() if self.finite_reads else None,
+            "finite_read_error": self.finite_read_error,
+            "contract_read_complete": self.contract_read_complete,
+            "contract_read_error": self.contract_read_error,
+            "contract_observed_at": self.contract_observed_at,
+            "contract_regular_session_open": self.contract_regular_session_open,
+            "channel_diagnostic": self.channel_diagnostic.public_dict() if self.channel_diagnostic else None,
+            "diagnostic_only": True,
+            "daily_pnl_status": "not_requested",
+            "strict_account_read_complete": False,
+            "daily_starting_equity_ready": False,
             "whole_broker_history_verified": False,
             "order_history_scope": "current_day_completed_orders_and_api_visible_executions",
             "full_account_identifier_persisted": False,
@@ -343,6 +411,10 @@ _READ_CALLBACK_MEMBERS = (
     "accountSummaryProtoBuf",
     "accountSummaryEnd",
     "accountSummaryEndProtoBuf",
+    "accountUpdateMulti",
+    "accountUpdateMultiProtoBuf",
+    "accountUpdateMultiEnd",
+    "accountUpdateMultiEndProtoBuf",
     "position",
     "positionProtoBuf",
     "positionEnd",
@@ -436,6 +508,8 @@ class _ReadCallbackRouter:
     managedAccountsProtoBuf = _discard_proto
     accountSummaryProtoBuf = _discard_proto
     accountSummaryEndProtoBuf = _discard_proto
+    accountUpdateMultiProtoBuf = _discard_proto
+    accountUpdateMultiEndProtoBuf = _discard_proto
     positionProtoBuf = _discard_proto
     positionEndProtoBuf = _discard_proto
     openOrderProtoBuf = _discard_proto
@@ -473,6 +547,12 @@ class _ReadCallbackRouter:
 
     def accountSummaryEnd(self, reqId: int) -> None:
         self._forward("accountSummaryEnd", reqId)
+
+    def accountUpdateMulti(self, reqId: int, account: str, modelCode: str, key: str, value: str, currency: str) -> None:
+        self._forward("accountUpdateMulti", reqId, account, modelCode, key, value, currency)
+
+    def accountUpdateMultiEnd(self, reqId: int) -> None:
+        self._forward("accountUpdateMultiEnd", reqId)
 
     def position(self, account: str, contract: object, position: object, avgCost: float) -> None:
         self._forward("position", account, contract, position, avgCost)
@@ -620,6 +700,12 @@ class _OfficialReadRequester:
     def cancelAccountSummary(self, reqId: int) -> None:
         self._client.cancelAccountSummary(reqId)
 
+    def reqAccountUpdatesMulti(self, reqId: int, account: str, modelCode: str, ledgerAndNLV: bool) -> None:
+        self._client.reqAccountUpdatesMulti(reqId, account, modelCode, ledgerAndNLV)
+
+    def cancelAccountUpdatesMulti(self, reqId: int) -> None:
+        self._client.cancelAccountUpdatesMulti(reqId)
+
     def reqPositions(self) -> None:
         self._client.reqPositions()
 
@@ -741,6 +827,7 @@ class _CommandCallbackRouter:
             orderId,
             getattr(order, "clientId", None),
             getattr(orderState, "status", ""),
+            blocking_warning_present=_order_state_blocking_warning_present(orderState),
         )
 
     def openOrderEnd(self) -> None:
@@ -754,6 +841,7 @@ class _CommandCallbackRouter:
             getattr(order, "orderId", 0),
             getattr(order, "clientId", None),
             getattr(orderState, "status", ""),
+            blocking_warning_present=_order_state_blocking_warning_present(orderState),
         )
 
     def completedOrdersEnd(self) -> None:
@@ -1547,8 +1635,9 @@ class IbkrOfficialRuntime:
                 instrument_evidence_id=None,
                 symbol=normalized,
             )
+        diagnostic_token = object()
         try:
-            observation = components.read_bridge.get_account_base(exact)
+            observation = components.read_bridge.get_account_base(exact, diagnostic_token=diagnostic_token)
         except Exception as exc:
             return IbkrReadProbe(
                 phase="BLOCKED",
@@ -1563,7 +1652,9 @@ class IbkrOfficialRuntime:
                 account_collection_id=None,
                 instrument_evidence_id=None,
                 symbol=normalized,
+                channel_diagnostic=components.read_bridge.read_diagnostic_for(diagnostic_token),
             )
+        channel_diagnostic = components.read_bridge.read_diagnostic_for(diagnostic_token)
         try:
             instrument = components.instrument_provider.read_contract_metadata(
                 normalized, now=self._now()
@@ -1583,6 +1674,7 @@ class IbkrOfficialRuntime:
                 symbol=instrument.identity.symbol,
                 contract_read_receipt_id=instrument.receipt_id,
                 contract_regular_session_open=instrument.regular_session_open,
+                channel_diagnostic=channel_diagnostic,
             )
         except Exception as exc:
             return IbkrReadProbe(
@@ -1598,7 +1690,67 @@ class IbkrOfficialRuntime:
                 account_collection_id=observation.collection_id,
                 instrument_evidence_id=None,
                 symbol=normalized,
+                channel_diagnostic=channel_diagnostic,
             )
+
+    def probe_finite_reads(self, symbol: str = "SPY") -> IbkrFiniteReadProbe:
+        """Diagnose finite callbacks and contract metadata without a P&L request.
+
+        This separate result never enters the production account reader,
+        reconciliation, risk enrichment, or command connection. Either read
+        may report its own failure without hiding the other diagnostic.
+        """
+        normalized = str(symbol).strip().upper()
+        with self._condition:
+            components, exact = self._components, self._exact_account_id
+            connected = (
+                self._read_requester is not None
+                and self._read_requester.is_connected()
+            )
+        if components is None or exact is None or not connected:
+            return IbkrFiniteReadProbe(
+                connected=connected,
+                account_masked=f"ending-{self._profile.account_last4}",
+                symbol=normalized,
+                finite_reads=None,
+                finite_read_error="IBKR_RUNTIME_READS_NOT_READY",
+                contract_read_complete=False,
+                contract_read_error="IBKR_RUNTIME_READS_NOT_READY",
+            )
+        finite, finite_error = None, None
+        diagnostic_token = object()
+        try:
+            finite = components.read_bridge.diagnose_finite_reads(exact, diagnostic_token=diagnostic_token)
+        except Exception as exc:
+            finite_error = self._probe_error_code(exc, contract=False)
+        channel_diagnostic = components.read_bridge.read_diagnostic_for(diagnostic_token)
+        instrument, contract_error = None, None
+        if self._read_requester is None or not self._read_requester.is_connected():
+            contract_error = "IBKR_RUNTIME_READS_NOT_READY"
+        else:
+            try:
+                instrument = components.instrument_provider.read_contract_metadata(
+                    normalized, now=self._now()
+                )
+            except Exception as exc:
+                contract_error = self._probe_error_code(exc, contract=True)
+        return IbkrFiniteReadProbe(
+            connected=(
+                self._read_requester is not None
+                and self._read_requester.is_connected()
+            ),
+            account_masked=f"ending-{self._profile.account_last4}",
+            symbol=normalized,
+            finite_reads=finite,
+            finite_read_error=finite_error,
+            channel_diagnostic=channel_diagnostic,
+            contract_read_complete=instrument is not None,
+            contract_read_error=contract_error,
+            contract_observed_at=instrument.received_at if instrument else None,
+            contract_regular_session_open=(
+                instrument.regular_session_open if instrument else None
+            ),
+        )
 
     def stop(self) -> None:
         """Revoke command evidence, disconnect both clients, and join threads."""
@@ -1897,6 +2049,98 @@ class IbkrOfficialRuntime:
             return "IBKR_RUNTIME_CONTRACT_PROBE_FAILED"
         if message == "IBKR_READ_TIMEOUT:daily_realized_pnl":
             return "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_TIMEOUT"
+        pnl_failures = {
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_no_callback": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_NO_CALLBACK"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_unavailable": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_UNAVAILABLE"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_exhausted_no_callback": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_EXHAUSTED_NO_CALLBACK"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_exhausted_unavailable": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_EXHAUSTED_UNAVAILABLE"
+            ),
+            "IBKR_READ_PNL_INITIAL_DISPATCH_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_DISPATCH_FAILED"
+            ),
+            "IBKR_READ_PNL_RETRY_CANCEL_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_CANCEL_FAILED"
+            ),
+            "IBKR_READ_PNL_RETRY_DISPATCH_FAILED": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_DISPATCH_FAILED"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_initial_dispatch": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INITIAL_DISPATCH_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_cancel": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_CANCEL_TIMEOUT"
+            ),
+            "IBKR_READ_TIMEOUT:daily_realized_pnl_retry_dispatch": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_RETRY_DISPATCH_TIMEOUT"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_request_id_shape": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_REQUEST_ID_INVALID"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_nonfinite_or_shape": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_INVALID"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_became_unavailable": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_BECAME_UNAVAILABLE"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:0:daily_pnl_moved": (
+                "IBKR_RUNTIME_READ_DAILY_REALIZED_PNL_MOVED"
+            ),
+            "IBKR_READ_AUTHENTICATION_LOST": (
+                "IBKR_RUNTIME_READ_AUTHENTICATION_LOST"
+            ),
+            "IBKR_READ_COLLECTION_GENERATION_LOST": (
+                "IBKR_RUNTIME_READ_COLLECTION_GENERATION_LOST"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:1100:connection_closed": (
+                "IBKR_RUNTIME_READ_CONNECTION_LOST"
+            ),
+            "IBKR_READ_CALLBACK_ERROR:1100:session": (
+                "IBKR_RUNTIME_READ_CONNECTION_LOST"
+            ),
+        }
+        if message in pnl_failures:
+            return pnl_failures[message]
+        read_deadline = re.fullmatch(
+            r"IBKR_READ_TIMEOUT:(account_summary_dispatch|positions_dispatch|"
+            r"open_orders_dispatch|completed_orders_dispatch|executions_dispatch|"
+            r"collection_completion|collection_freeze|commission)",
+            message,
+        )
+        if read_deadline is not None:
+            return "IBKR_RUNTIME_READ_" + read_deadline.group(1).upper() + "_TIMEOUT"
+        if message.startswith("IBKR_READ_TIMEOUT:"):
+            scopes = message.removeprefix("IBKR_READ_TIMEOUT:").split(",")
+            callback_scopes = {
+                "account_summary",
+                "completed_orders",
+                "executions",
+                "open_orders",
+                "positions",
+            }
+            if (
+                scopes
+                and len(scopes) == len(set(scopes))
+                and set(scopes) <= callback_scopes
+            ):
+                if len(scopes) == 1:
+                    return (
+                        "IBKR_RUNTIME_READ_"
+                        + scopes[0].upper()
+                        + "_CALLBACK_TIMEOUT"
+                    )
+                return "IBKR_RUNTIME_READ_MULTIPLE_CALLBACKS_TIMEOUT"
+        session_failure = re.fullmatch(
+            r"IBKR_READ_CALLBACK_ERROR:(502|503|504|1300):session", message
+        )
+        if session_failure is not None:
+            return "IBKR_RUNTIME_READ_SESSION_ERROR_" + session_failure.group(1)
         matched = re.fullmatch(
             r"IBKR_READ_CALLBACK_ERROR:([0-9]{1,10}):sdk_callback(:API_READ_ONLY)?",
             message,
@@ -1947,6 +2191,8 @@ class IbkrOfficialRuntime:
         order_id: object,
         client_id: object,
         status: object,
+        *,
+        blocking_warning_present: object = False,
     ) -> None:
         if not self._accept_command_generation(generation):
             return
@@ -1959,6 +2205,11 @@ class IbkrOfficialRuntime:
             else None
         )
         safe_status = status if isinstance(status, str) and status in _ORDER_STATES else "UNKNOWN"
+        safe_warning = (
+            blocking_warning_present
+            if type(blocking_warning_present) is bool
+            else True
+        )
         with self._condition:
             self._order_events.append(
                 SanitizedIbkrOrderEvent(
@@ -1967,6 +2218,7 @@ class IbkrOfficialRuntime:
                     client_id=safe_client,
                     status=safe_status,
                     received_at=self._now(),
+                    blocking_warning_present=safe_warning,
                 )
             )
             self._last_observed_at = self._order_events[-1].received_at
@@ -1974,6 +2226,7 @@ class IbkrOfficialRuntime:
 
 
 __all__ = [
+    "IbkrFiniteReadProbe",
     "IbkrOfficialRuntime",
     "IbkrReadProbe",
     "IbkrRuntimeComponents",

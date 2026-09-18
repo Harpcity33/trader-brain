@@ -164,11 +164,24 @@ class IbkrCommandAssemblyTests(unittest.TestCase):
         self.release_root = Path(self.tmp.name) / "release"
         self.install_root = Path(self.tmp.name) / "install"
         shutil.copytree(self.source_root / "config", self.release_root / "config")
+        bindings_path = self.release_root / "config/provider_bindings.json"
+        bindings = json.loads(bindings_path.read_text())
+        bindings["ibkr_gmail"].update(
+            {"enabled": False, "send_probe_authorized": False}
+        )
+        bindings_path.write_text(json.dumps(bindings), encoding="utf-8")
         copy_dollar_policy_inputs(self.source_root, self.release_root)
         (self.install_root / "state").mkdir(parents=True)
         config_path = self.release_root / "config/full_live_supported_test.json"
         config = json.loads(
             (self.release_root / "config/full_live_ibkr.json").read_text()
+        )
+        # Broker command fixtures do not enroll or exercise a Gmail route.
+        config["notifications"].update(
+            {
+                "delivery_sink": "local_jsonl_staging",
+                "destination_bridge_configured": False,
+            }
         )
         config["risk"]["limits_live_provenance_verified"] = True
         config["execution"].update(

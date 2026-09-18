@@ -5,12 +5,14 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import io
 import copy
 import hashlib
+import json
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -30,9 +32,11 @@ from titan_brain.live.broker import (
 from titan_brain.live.broker.robinhood import RobinhoodBrokerAdapter
 from titan_brain.live.cli import (
     ACCOUNT_KEY,
+    CommandBlocked,
     InstallLayout,
     _broker_command_lane_blockers,
     _broker_command_lane_report,
+    _doctor,
     _ActivationRiskBoundBroker,
     _legacy_retirement_payload,
     _machine_readiness,
@@ -49,6 +53,7 @@ from titan_brain.live.cli import (
 from titan_brain.live.composition import RuntimeComposition
 from titan_brain.live.notification_worker import notification_worker_health
 from titan_brain.live.models import BrokerOrderState, Incident, IncidentSeverity
+from titan_brain.live.market_data import MarketSessionState
 from titan_brain.live.notifications import (
     DeliveryAssurance,
     GmailAuthorizationEvidence,
@@ -462,6 +467,185 @@ class CliReadinessTests(unittest.TestCase):
         finally:
             holder.release()
         self.assertEqual(composition_calls, [])
+
+    def test_doctor_fallback_uses_manifest_calendar_for_session_diagnostics(self) -> None:
+        class CalendarAwareFallback:
+            def __init__(
+                inner,
+                database_path,
+                *,
+                session_state,
+                **_kwargs,
+            ) -> None:
+                inner.database_path = str(database_path)
+                inner.session_state = session_state
+
+            def health(inner, *, now):
+                session = inner.session_state(now)
+                entry = session is MarketSessionState.ENTRY_ELIGIBLE
+                stale = ("MASSIVE_QUOTE_STALE",) if entry else ()
+                return SimpleNamespace(
+                    blockers=stale,
+                    producer_fresh=False,
+                    database_path=inner.database_path,
+                    latest_quote_at=None,
+                    latest_completed_bar_at=None,
+                    component_states={
+                        "massive_websocket": "healthy",
+                        "market_data_freshness": "healthy",
+                    },
+                    session_state=session,
+                    entry_evidence_ready=False,
+                    entry_blockers=(
+                        stale
+                        if entry
+                        else ("WAITING_FOR_SESSION",)
+                    ),
+                )
+
+        cases = (
+            (datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc), "premarket_attended", False),
+            (datetime(2026, 9, 8, 13, 30, tzinfo=timezone.utc), "transition", False),
+            (datetime(2026, 9, 8, 13, 35, tzinfo=timezone.utc), "regular_entry", True),
+            (datetime(2026, 9, 8, 20, 0, tzinfo=timezone.utc), "closed", False),
+            (datetime(2026, 9, 7, 14, 0, tzinfo=timezone.utc), "closed", False),
+        )
+        for observed_at, expected_lane, entry_eligible in cases:
+            with self.subTest(lane=expected_lane, observed_at=observed_at):
+                with (
+                    mock.patch.object(
+                        InstallLayout,
+                        "load_release",
+                        return_value=(self.manifest, self.policy),
+                    ),
+                    mock.patch(
+                        "titan_brain.live.cli.LocalMassiveReadOnlySource",
+                        CalendarAwareFallback,
+                    ),
+                    mock.patch("titan_brain.live.cli._now", return_value=observed_at),
+                ):
+                    report = _doctor(
+                        self.layout,
+                        runtime_composition=RuntimeComposition(),
+                    )
+                market = report["market_data"]
+                self.assertEqual(market["calendar_lane"], expected_lane)
+                self.assertEqual(
+                    market["session_state"],
+                    (
+                        MarketSessionState.ENTRY_ELIGIBLE.value
+                        if entry_eligible
+                        else MarketSessionState.WAITING_FOR_SESSION.value
+                    ),
+                )
+                self.assertFalse(market["entry_evidence_ready"])
+                if entry_eligible:
+                    self.assertIn("MASSIVE_QUOTE_STALE", market["entry_blockers"])
+                    self.assertIn("MASSIVE_QUOTE_STALE", report["blockers"])
+                else:
+                    self.assertEqual(
+                        market["entry_blockers"], ["WAITING_FOR_SESSION"]
+                    )
+                    self.assertNotIn("MASSIVE_QUOTE_STALE", report["blockers"])
+
+    def test_flex_setup_cli_is_lazy_and_accepts_only_reporting_results(self) -> None:
+        calls = []
+        module = ModuleType("titan_brain.live.ibkr_flex_setup")
+
+        def setup_status(policy):
+            calls.append(("status", policy))
+            return {"ok": True, "reporting_only": True, "state": "NOT_ENROLLED"}
+
+        def enroll(policy):
+            calls.append(("enroll", policy))
+            return {"ok": True, "reporting_only": True, "state": "ENROLLED"}
+
+        def probe(policy, *, report_date, install_root):
+            calls.append(("probe", policy, report_date, install_root))
+            return {"ok": False, "reporting_only": True, "state": "NOT_READY"}
+
+        module.setup_status = setup_status
+        module.enroll = enroll
+        module.probe = probe
+        parser = build_parser()
+        for forbidden in ("--token", "--account-id", "--query-id"):
+            with (
+                self.subTest(forbidden_argument=forbidden),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                parser.parse_args(
+                    [
+                        "flex-enroll",
+                        "--install-root",
+                        str(self.install),
+                        forbidden,
+                        "private-value",
+                    ]
+                )
+        cases = (
+            ("flex-setup-status", (), 0, "status"),
+            ("flex-enroll", (), 0, "enroll"),
+            ("flex-probe", ("--date", "2026-09-14"), 2, "probe"),
+        )
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {"titan_brain.live.ibkr_flex_setup": module},
+            ),
+            mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, self.policy),
+            ),
+        ):
+            for command_name, extra, expected_code, expected_call in cases:
+                with self.subTest(command=command_name):
+                    args = parser.parse_args(
+                        [command_name, "--install-root", str(self.install), *extra]
+                    )
+                    output = io.StringIO()
+                    with mock.patch("sys.stdout", output):
+                        self.assertEqual(args.handler(args), expected_code)
+                    payload = json.loads(output.getvalue())
+                    self.assertIs(payload["reporting_only"], True)
+                    self.assertEqual(calls[-1][0], expected_call)
+        self.assertIs(calls[0][1], self.policy)
+        self.assertIs(calls[1][1], self.policy)
+        self.assertEqual(calls[2][2].isoformat(), "2026-09-14")
+        self.assertEqual(calls[2][3], self.layout.root)
+
+        invalid = parser.parse_args(
+            ["flex-probe", "--install-root", str(self.install), "--date", "bad"]
+        )
+        with mock.patch.object(
+            InstallLayout,
+            "load_release",
+            side_effect=AssertionError("invalid date must stop before release access"),
+        ):
+            with self.assertRaisesRegex(CommandBlocked, "REPORT_DATE_INVALID"):
+                invalid.handler(invalid)
+
+        invalid_report = parser.parse_args(
+            ["flex-setup-status", "--install-root", str(self.install)]
+        )
+        module.setup_status = lambda _policy: {
+            "ok": True,
+            "reporting_only": False,
+        }
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {"titan_brain.live.ibkr_flex_setup": module},
+            ),
+            mock.patch.object(
+                InstallLayout,
+                "load_release",
+                return_value=(self.manifest, self.policy),
+            ),
+        ):
+            with self.assertRaisesRegex(CommandBlocked, "SETUP_REPORT_INVALID"):
+                invalid_report.handler(invalid_report)
 
     def test_network_provider_probe_cannot_collide_with_coordinator(self) -> None:
         holder = AccountWriterLock(

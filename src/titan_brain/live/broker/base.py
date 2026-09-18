@@ -19,6 +19,7 @@ from uuid import UUID
 from ..models import BrokerOrderState
 from ..money import finite_decimal, positive_decimal, whole_shares
 from ..risk_evidence_binding import risk_high_water_receipt_hash, daily_starting_equity_receipt_hash
+from .ibkr_protection_evidence import IbkrProtectionEvidence
 
 
 _ACCOUNT_MASK = re.compile(r"^(?:•{4}|\*{4})[0-9]{4}$")
@@ -494,6 +495,8 @@ class OrderSnapshot:
     client_ref_id: str | None = None
     fills: tuple[FillSnapshot, ...] = ()
     broker_perm_id: int | None = None
+    broker_contract_id: int | None = None
+    ibkr_protection_evidence: IbkrProtectionEvidence | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "broker_order_id", _required(self.broker_order_id, "broker_order_id"))
@@ -574,6 +577,12 @@ class OrderSnapshot:
             or self.broker_perm_id <= 0
         ):
             raise ValueError("broker_perm_id must be a positive integer when supplied")
+        if self.broker_contract_id is not None and (
+            type(self.broker_contract_id) is not int or self.broker_contract_id <= 0
+        ):
+            raise ValueError("broker_contract_id must be a positive integer when supplied")
+        if self.ibkr_protection_evidence is not None and type(self.ibkr_protection_evidence) is not IbkrProtectionEvidence:
+            raise ValueError("ibkr_protection_evidence must be typed callback evidence")
         if any(
             fill.broker_perm_id is not None
             and self.broker_perm_id is not None
