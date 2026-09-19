@@ -1,5 +1,16 @@
 # Kiro handoff: finish the Titan / IBKR session-risk integration
 
+## September 19 SDK recovery update
+
+The original September 14 **303-file SDK snapshot has been recovered**, with
+unchanged inventory and receipt hashes. See
+[`recovery/ibkr-sdk-2026-09-14/README.md`](recovery/ibkr-sdk-2026-09-14/README.md)
+for the checked-in recovery archive, upstream sources/licenses, offline
+verification and reviewed-install staging steps. No SDK re-pin is required for
+this original macOS/CPython 3.12 snapshot. This is an explicit recovery-payload
+addition to the source-only September 18 handoff described below; no broker
+state/credentials are included, and it does not make the system trade-ready.
+
 ## Start here
 
 This is a **source-code handoff, not a trade-ready deployment**. The owner wants
