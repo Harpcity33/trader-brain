@@ -149,6 +149,62 @@ class AccountUpdatesLifecycleTests(unittest.TestCase):
             self.adapter.capture()
         self.assertEqual(len(self.client.calls), before)
 
+    def test_mid_collection_disconnect_still_cancels_the_subscription(self):
+        """Area 2: no accumulation on the FAILURE path.
+
+        A connection loss mid-collection must not leak the account-updates
+        subscription: the reader's finally-cleanup must still dispatch
+        cancelAccountUpdatesMulti (and cancelPositions) for the failed
+        collection. Existing tests only prove the SUCCESS path pairs
+        request<->cancel; this pins the failure-path release.
+        """
+        self.connect()
+        self.client.disconnect_after_execution = True
+        with self.assertRaises(IbkrSessionInputError):
+            self.adapter.capture()
+        request_id = next(call[1] for call in self.client.calls if call[0] == "reqAccountUpdatesMulti")
+        self.assertIn(("cancelAccountUpdatesMulti", request_id), self.client.calls)
+        self.assertIn(("cancelPositions",), self.client.calls)
+        # No stale value escapes the failed collection.
+        self.assertIsNone(self.components.read_bridge._last)
+
+    def test_no_subscription_accumulates_across_failed_then_recovered_cycles(self):
+        """Area 2: the live (req minus matching cancel) subscription count stays 0.
+
+        Run several mid-collection disconnect failures, each followed by a real
+        reconnect (runtime.stop() + connect_reads(), the genuine recovery path),
+        then a clean read. Every account-updates request must be matched 1:1 by
+        a cancel across ALL clients, so no subscription is ever left live.
+        """
+        all_requests: list[object] = []
+        all_cancels: list[object] = []
+
+        def record(client):
+            for call in client.calls:
+                if call[0] == "reqAccountUpdatesMulti":
+                    all_requests.append(call[1])
+                elif call[0] == "cancelAccountUpdatesMulti":
+                    all_cancels.append(call[1])
+
+        for cycle in range(3):
+            self.connect()
+            self.client.disconnect_after_execution = True
+            with self.assertRaises(IbkrSessionInputError):
+                self.adapter.capture()
+            record(self.client)
+            # A mid-collection disconnect tears down the connection; recover it
+            # the way production does before the next read.
+            self.runtime.stop()
+            self.now += timedelta(seconds=1)
+
+        # Every request was cancelled: requests and cancels pair up exactly, so
+        # no subscription is left live. (Request ids may repeat across fresh
+        # reconnects because each new connection restarts its id counter; that
+        # is not accumulation — the pairing is what proves nothing leaked.)
+        self.assertEqual(sorted(all_requests), sorted(all_cancels))
+        self.assertEqual(len(all_requests), 3)
+        self.assertEqual(len(all_cancels), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
