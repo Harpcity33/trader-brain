@@ -296,7 +296,11 @@ class SupportedDiscoveryProviderComposition:
         latency: LatencyRecorder | None,
         authority: object,
         plan_sealer: object | None = None,
+        session_trading_store: object | None = None,
     ) -> FullLiveDiscoveryExecutor:
+        # The Robinhood/non-IBKR composition never runs the session risk model,
+        # so it ignores any session store: the legacy pipeline is unchanged.
+        del session_trading_store
         # Imports are concrete and release-contained; the writer lock is
         # revalidated by ``authority`` at every mutation boundary.
         instrument = RobinhoodInstrumentEvidenceProvider(
@@ -444,6 +448,7 @@ class SupportedIbkrDiscoveryProviderComposition:
         latency: LatencyRecorder | None,
         authority: object,
         plan_sealer: object | None = None,
+        session_trading_store: object | None = None,
     ) -> FullLiveDiscoveryExecutor:
         del writer_lock
         quality = NormalizedQualityEvidenceProvider(
@@ -460,6 +465,7 @@ class SupportedIbkrDiscoveryProviderComposition:
             thresholds=PipelineThresholds.from_policy(policy),
             plan_sealer=plan_sealer,
             latency=latency,
+            session_trading_store=session_trading_store,
         )
         return FullLiveDiscoveryExecutor(source=self._source, pipeline=pipeline)
 

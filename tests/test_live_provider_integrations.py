@@ -664,6 +664,41 @@ class ProviderIntegrationTests(unittest.TestCase):
         )
         self.assertFalse(blocked.tradability_ready(now=NOW))
 
+    def test_session_store_is_threaded_to_ibkr_pipeline_and_ignored_by_legacy(self) -> None:
+        sentinel = object()  # stand-in SessionTradingstore; identity is enough.
+        ibkr = SupportedIbkrDiscoveryProviderComposition(
+            source=self.source(),
+            read_bridge=object.__new__(IbkrWholeAccountReadBridge),
+            instrument_evidence=FakeIbkrEvidenceProvider(),
+            quality_reader=QualityReader(),
+            provider_binding_id=BINDING,
+            timeout_seconds=2,
+        )
+        ibkr_executor = ibkr.build_executor(
+            policy=MinimalLivePolicy(), state=object(), broker=object(),
+            writer_lock=object(), latency=None, authority=object(),
+            session_trading_store=sentinel,
+        )
+        self.assertIs(ibkr_executor.pipeline.session_trading_store, sentinel)
+
+        legacy = SupportedDiscoveryProviderComposition(
+            source=self.source(),
+            instrument_reader=ProductionRobinhoodReader({
+                "evidence_id": "rh-1", "symbol": "XYZ", "instrument_id": "rh-xyz",
+                "observed_at": NOW - timedelta(seconds=1),
+                "source": "robinhood_authenticated_instrument_read", "asset_type": "stock",
+                "exchange_listed": True, "robinhood_tradable": True, "regular_hours_eligible": True,
+            }),
+            quality_reader=QualityReader(), provider_binding_id=BINDING, timeout_seconds=2,
+        )
+        legacy_executor = legacy.build_executor(
+            policy=MinimalLivePolicy(), state=object(), broker=object(),
+            writer_lock=object(), latency=None, authority=object(),
+            session_trading_store=sentinel,
+        )
+        # The legacy (non-session) pipeline never carries a session store.
+        self.assertIsNone(legacy_executor.pipeline.session_trading_store)
+
     def test_runtime_composition_rejects_captured_session_callable(self) -> None:
         marker = MarketSessionState.ENTRY_ELIGIBLE
 

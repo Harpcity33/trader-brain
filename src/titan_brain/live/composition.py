@@ -209,6 +209,7 @@ class DiscoveryProviderComposition(Protocol):
         latency: object,
         authority: object,
         plan_sealer: object | None = None,
+        session_trading_store: object | None = None,
     ) -> object: ...
 
 
@@ -882,6 +883,7 @@ class RuntimeComposition:
         latency: object,
         authority: object,
         plan_sealer: object | None = None,
+        session_trading_store: object | None = None,
     ) -> object | None:
         configured_sealer = self.autonomous_plan_sealer
         if plan_sealer is not configured_sealer:
@@ -907,6 +909,7 @@ class RuntimeComposition:
                 latency=latency,
                 authority=authority,
                 plan_sealer=plan_sealer,
+                session_trading_store=session_trading_store,
             )
             self._verify_dynamic_component(
                 executor,
