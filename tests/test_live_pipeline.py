@@ -1260,6 +1260,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.status, PipelineStatus.NO_TRADE)
         self.assertEqual(result.candidates, ())
 
+    def test_plan_expiry_boundary_is_deterministic_and_fail_closed(self) -> None:
+        # Area 6 pin: a produced plan expires at exactly created_at + plan_ttl,
+        # and plan.validate is an exact, fail-closed boundary (tolerates the
+        # boundary instant, rejects one tick past). No candidate is fabricated,
+        # Massive stays the data source, and no readiness gate is moved.
+        item = structure()
+        pipeline = self.pipeline([item])
+        result = pipeline.run_once(
+            structures=[item],
+            broker_snapshot=self.snapshot,
+            latch=SessionLatch(NOW.date()),
+        )
+        self.assertEqual(result.status, PipelineStatus.ACKNOWLEDGED)
+        assert result.selected is not None
+        plan = result.selected.plan
+        ttl = int(self.policy.config["evidence"]["plan_ttl_seconds"])
+        # Deterministic expiry: expires_at == created_at + ttl, exactly.
+        self.assertEqual(plan.expires_at, plan.created_at + timedelta(seconds=ttl))
+        self.assertGreater(plan.expires_at, plan.created_at)
+
+        # plan.validate boundary (plans.py: `now > expires_at`): the exact
+        # expiry instant is still valid; one microsecond past fails closed.
+        plan.validate(self.policy, plan.expires_at)
+        with self.assertRaises((TypeError, ValueError)):
+            plan.validate(self.policy, plan.expires_at + timedelta(microseconds=1))
+        # A created_at-relative sanity anchor: well before expiry stays valid.
+        plan.validate(self.policy, plan.created_at + timedelta(seconds=1))
+
     def test_exact_evidence_replay_never_calls_broker_twice(self) -> None:
         item = structure()
         pipeline = self.pipeline([item])
