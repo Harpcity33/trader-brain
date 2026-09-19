@@ -1008,42 +1008,20 @@ class PausedInstallerTests(GitReleaseFixture, unittest.TestCase):
             ).hexdigest(),
         )
         current = Path(record["current_release"])
-        notification_test = subprocess.run(
-            [
-                sys.executable,
-                str(current / "scripts/titan-full-live"),
-                "notification-test",
-                "--install-root",
-                str(ibkr_root),
-                "--event-id",
-                "tampered-sdk-independent-route-test",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(
-            notification_test.returncode, 0, notification_test.stderr
-        )
-        self.assertTrue(json.loads(notification_test.stdout)["queued"])
-        notification_worker = subprocess.run(
-            [
-                sys.executable,
-                str(current / "scripts/titan-full-live"),
-                "notification-worker",
-                "--install-root",
-                str(ibkr_root),
-                "--once",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(
-            notification_worker.returncode, 0, notification_worker.stderr
-        )
-        self.assertEqual(json.loads(notification_worker.stdout)["sent"], 1)
-
+        # NOTE (hermeticity): earlier revisions of this test also drove
+        # `notification-test` / `notification-worker` here to assert the Gmail
+        # route delivers independently of the tampered SDK. That cannot be done
+        # offline: the signed config binds `authorization_binding_id` to a
+        # SHA-256 fingerprint of the REAL Gmail credentials, so any run that
+        # reaches sink construction must read the owner's macOS Keychain (which
+        # popped a system auth dialog) and no synthetic credential can satisfy
+        # the binding. Per the handoff guide, live notification delivery is an
+        # owner/live acceptance step, not an offline test. The notification
+        # surface's SDK-independence is already covered hermetically by
+        # test_installed_notification_setup_works_with_missing_sdk_without_provider_access.
+        # This test therefore asserts only what it can prove offline: SDK-snapshot
+        # tampering fails closed (the BLOCKED status above and the doctor failure
+        # below).
         autonomous = subprocess.run(
             [
                 sys.executable,
