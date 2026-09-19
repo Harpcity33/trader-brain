@@ -48,3 +48,6 @@ tokens.json
 *.tar.gz
 *.tgz
 *.bundle
+
+# Reviewed original dependency recovery payload; not a generated Titan release.
+!/recovery/ibkr-sdk-2026-09-14/original-sdk-3869276715cc.tar.gz
