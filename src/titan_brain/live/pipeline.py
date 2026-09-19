@@ -24,7 +24,7 @@ from enum import Enum
 import hashlib
 import json
 import math
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence, TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from titan_brain.models import SetupID
@@ -69,6 +69,9 @@ from .risk_runtime import (
 )
 from .state import LiveStateStore
 from .session_trading_policy import SessionTradingState, evaluate_session_state
+
+if TYPE_CHECKING:
+    from .session_trading_store import SessionTradingStore
 
 
 ZERO = Decimal("0")
@@ -1033,6 +1036,7 @@ class FullLiveEntryPipeline:
         plan_sealer: PreparedOrderPlanSealer | None = None,
         clock: Callable[[], datetime] | None = None,
         latency: LatencyRecorder | None = None,
+        session_trading_store: "SessionTradingStore | None" = None,
     ) -> None:
         self.policy = policy
         self.market_data = market_data
@@ -1044,6 +1048,13 @@ class FullLiveEntryPipeline:
         self.thresholds = thresholds
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.latency = latency
+        # Session-mode durable state source. None (the default) keeps every
+        # non-session construction and test unchanged; when the session model is
+        # selected the pipeline sources SessionTradingState from this store and
+        # fails closed if it is absent or the store returns nothing. This does
+        # NOT lift SESSION_TRADING_RUNTIME_INTEGRATION_UNAVAILABLE (that gate
+        # lives in policy.activation_blockers, a separate path).
+        self.session_trading_store = session_trading_store
         self.execution = EntryExecutionCoordinator(
             policy=policy,
             market_data=market_data,
@@ -1053,6 +1064,45 @@ class FullLiveEntryPipeline:
             plan_sealer=plan_sealer,
             clock=self._clock,
             latency=latency,
+        )
+
+    def _risk_snapshot(
+        self,
+        *,
+        broker_snapshot: AccountSnapshot,
+        now: datetime,
+        prices: "Mapping[str, Decimal] | None",
+        exclude_plan_id: str | None,
+    ):
+        """Build the account risk snapshot for the ACTIVE risk model.
+
+        Legacy models use build_account_risk_snapshot unchanged. When the
+        session-trading model is selected, source the SessionTradingState from
+        the durable store and use build_session_account_risk_snapshot; a missing
+        store or absent stored session yields session_state=None, which the
+        builder rejects (SESSION_RISK_STATE_REQUIRED) — fail closed, never a
+        legacy fallback. This changes no readiness gate.
+        """
+        if not self.policy.session_trading_risk:
+            return build_account_risk_snapshot(
+                policy=self.policy, state=self.state, broker_snapshot=broker_snapshot,
+                now=now, prices=prices, exclude_plan_id=exclude_plan_id,
+            )
+        account_binding = self.policy.config["execution"].get(
+            "production_account_binding_fingerprint"
+        )
+        session_state = None
+        if self.session_trading_store is not None and account_binding is not None:
+            session_zone = ZoneInfo(str(self.policy.config["sessions"]["timezone"]))
+            session_date = _aware_utc(now, "now").astimezone(session_zone).date()
+            stored = self.session_trading_store.load(
+                account_binding_sha256=account_binding, session_date=session_date,
+            )
+            session_state = stored.state if stored is not None else None
+        return build_session_account_risk_snapshot(
+            policy=self.policy, state=self.state, broker_snapshot=broker_snapshot,
+            session_state=session_state, account_binding_sha256=account_binding,
+            now=now, prices=prices, exclude_plan_id=exclude_plan_id,
         )
 
     def run_once(
@@ -1539,9 +1589,7 @@ class FullLiveEntryPipeline:
             quote=quote,
         )
         price_map = self.market_data.quote_prices()
-        preliminary_snapshot, snapshot_failures = build_account_risk_snapshot(
-            policy=self.policy,
-            state=self.state,
+        preliminary_snapshot, snapshot_failures = self._risk_snapshot(
             broker_snapshot=broker_snapshot,
             now=now,
             prices=price_map,
@@ -1563,9 +1611,7 @@ class FullLiveEntryPipeline:
                 expires_at=expires_at,
                 source_event_ids=source_event_ids,
             )
-            risk_snapshot, replay_failures = build_account_risk_snapshot(
-                policy=self.policy,
-                state=self.state,
+            risk_snapshot, replay_failures = self._risk_snapshot(
                 broker_snapshot=broker_snapshot,
                 now=now,
                 prices=price_map,
