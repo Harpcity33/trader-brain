@@ -1,0 +1,393 @@
+{
+  "schema_version": "titan_august_robinhood_forensics_v1",
+  "generated_at": "2026-09-08",
+  "scope": {
+    "account_binding": "ending-7153",
+    "original_task_id": "01a01764-a7f0-7933-b753-333cb50ff178",
+    "automation_id": "robinhood-momentum-engine",
+    "timezone": "America/New_York",
+    "purpose": "Historical actor, approval, and broker-call reconstruction for PR #8 review"
+  },
+  "read_only": true,
+  "redactions": [
+    "full brokerage account identifier",
+    "OAuth material and credentials",
+    "unrelated task history",
+    "encrypted model records",
+    "unrelated portfolio data",
+    "absolute local home-directory paths"
+  ],
+  "sources": [
+    {
+      "alias": "original_task_selected_records",
+      "file": "rollout-2026-08-18T20-21-07-01a01764-...jsonl",
+      "selection": "10973,11060,11065,11072,11095,11112,11121,11126,11133,11144,11155,11158,11184,11188,11200,11205,11211,11212,27993,28005,28048,28070,28084,28088,28092,28100,28101,28105,28107,28110,28115,28148,32207,32313,32322,32346,35777,35959,36648,36765,36898,46036,64200,64226,73412; concatenated in ascending order",
+      "sha256": "e9186399ebdd89d5ac0d7ba77baf5efc9629643b17fae275a20a96d91cb57982"
+    },
+    {
+      "alias": "august_21_autonomous_automation",
+      "file": "2026-08-21-sol-ultra-live-prepromotion/automation/automation.toml",
+      "sha256": "1eb17de6ad2eb572a8ce1e10ff9ced748921ce398ba376425a7f26bd53aa1d1f"
+    },
+    {
+      "alias": "august_25_v8_attended_staged",
+      "file": "v8-attended-review/automation.toml",
+      "sha256": "888ac7c6edf155bb890a6b2522aa3ee259639ea64dd3a73157765a663cf5aacc"
+    },
+    {
+      "alias": "august_27_v1_attended_active",
+      "file": "20260827T150919Z-alerts-only/automation.toml",
+      "sha256": "9e2a20f6591fb99ca9b4f23e611bfc51136b5e3c0b8c79b3badff2f65c142a08"
+    },
+    {
+      "alias": "retained_v2_attended_policy",
+      "file": "automations/robinhood-momentum-engine/automation.toml",
+      "sha256": "ea039335e94daf48f9c4bf5f03063609797cbe40540921de473a818a2bd220a6"
+    },
+    {
+      "alias": "august_29_metadata_record",
+      "file": "rollout-2026-08-29T11-35-59-01a04e29-...jsonl",
+      "selection": "record 40527",
+      "sha256": "7fe18daca4db9077b148d35ed2ae7878443488b2773e724424575d076a1de982"
+    }
+  ],
+  "instruction_versions": [
+    {
+      "effective_context": "HSAI and USDE scheduled runs",
+      "policy_mode": "AUTONOMOUS_STANDING_AUTHORITY_ASSERTED",
+      "minimal_excerpt": "Once an exact contemporaneous trigger fires and Robinhood review is clean, submit without asking the user for another confirmation.",
+      "contradictory_tool_contract": "The review guide required preview presentation and explicit confirmation before place_equity_order; cancel_equity_order said always confirm."
+    },
+    {
+      "effective_context": "August 24 after 10:55:57 ET",
+      "policy_mode": "PAUSED",
+      "minimal_excerpt": "Automation status was written and verified PAUSED.",
+      "operational_effect": "No scheduled execution authority during the GIPR window."
+    },
+    {
+      "effective_context": "August 25 V8 staged artifact",
+      "policy_mode": "ATTENDED_ONLY_PAUSED",
+      "minimal_excerpt": "Silence, standing authority, a prior request, an ambiguous response, another automation, or an approval for a different ticket is not confirmation."
+    },
+    {
+      "effective_context": "August 27 approximately 10:54 ET onward",
+      "policy_mode": "ATTENDED_COMPATIBILITY_ACTIVE",
+      "minimal_excerpt": "Do not call place_equity_order until the user explicitly confirms after seeing that review.",
+      "lifecycle_scope": "Entry, protection, cancel, discretionary exit, mandatory exit, and safe close each require their current exact confirmation."
+    }
+  ],
+  "trades": [
+    {
+      "symbol": "HSAI",
+      "date": "2026-08-20",
+      "classification": "USER_TRIGGERED_ENTRY_WITH_SCHEDULED_AGENTIC_EXIT",
+      "events": [
+        {
+          "timestamp_et": "2026-08-20T10:17:44-04:00",
+          "origin": "human_user_message",
+          "action": "requested HSAI buy near $1000 and an exit plan",
+          "confirmation_state": "REQUEST_ONLY",
+          "source_line": 10973
+        },
+        {
+          "timestamp_et": "2026-08-20T10:20:28-04:00",
+          "origin": "codex_tool_call",
+          "tool": "review_equity_order",
+          "action": "review",
+          "tuple": {
+            "side": "buy",
+            "type": "limit",
+            "quantity": "52",
+            "limit_price": "19.05",
+            "time_in_force": "gfd",
+            "market_hours": "regular_hours"
+          },
+          "confirmation_state": "REVIEW_REQUIRES_EXPLICIT_CONFIRMATION",
+          "source_line": 11060
+        },
+        {
+          "timestamp_et": "2026-08-20T10:21:05-04:00",
+          "origin": "codex_message",
+          "action": "displayed $19.05 preview, stop, risk, plan, and market disclosure",
+          "confirmation_state": "AWAITING_CONFIRMATION",
+          "source_line": 11065
+        },
+        {
+          "timestamp_et": "2026-08-20T10:22:06-04:00",
+          "origin": "human_user_message",
+          "action": "Submit the trade",
+          "confirmation_state": "CONFIRMED_PREVIOUS_DISPLAYED_REVIEW",
+          "source_line": 11095
+        },
+        {
+          "timestamp_et": "2026-08-20T10:22:27.076-04:00",
+          "origin": "codex_tool_call",
+          "tool": "review_equity_order",
+          "action": "refreshed review with changed price",
+          "tuple": {
+            "side": "buy",
+            "type": "limit",
+            "quantity": "52",
+            "limit_price": "19.08",
+            "time_in_force": "gfd",
+            "market_hours": "regular_hours"
+          },
+          "confirmation_state": "NOT_REDISPLAYED_OR_RECONFIRMED",
+          "source_line": 11112
+        },
+        {
+          "timestamp_et": "2026-08-20T10:22:37.569-04:00",
+          "origin": "codex_tool_call",
+          "tool": "place_equity_order_then_exact_order_read",
+          "action": "entry filled",
+          "client_ref": "ddea0252-97c4-4e5e-ae14-a166dc84ccf2",
+          "broker_order_id": "6a870dad-f824-4c41-963e-2875790ad9d7",
+          "execution_ids": [
+            "6a870dad-216e-4de0-9d82-d9d8ed522248"
+          ],
+          "confirmation_state": "USED_PRIOR_USER_MESSAGE_AFTER_TUPLE_CHANGE",
+          "source_lines": [
+            11121,
+            11126
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-20T10:23:01.054-04:00",
+          "origin": "codex_tool_calls",
+          "tool": "review_equity_order_then_place_equity_order",
+          "action": "placed GTC stop-market protection",
+          "tuple": {
+            "side": "sell",
+            "type": "stop_market",
+            "quantity": "52",
+            "stop_price": "18.78",
+            "time_in_force": "gtc",
+            "market_hours": "regular_hours"
+          },
+          "client_ref": "232f799c-6d34-4a82-8c51-2a2298a165ba",
+          "broker_order_id": "6a870dbc-2e05-43ce-be7e-ab35169e2e17",
+          "confirmation_state": "NO_SEPARATE_HUMAN_CONFIRMATION",
+          "source_lines": [
+            11133,
+            11144
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-20T10:24:23-04:00",
+          "origin": "scheduled_heartbeat",
+          "action": "reconciled, detected VWAP/structure failure, canceled stop, reviewed and placed exit",
+          "confirmation_state": "NO_INTERVENING_HUMAN_MESSAGE",
+          "source_lines": [
+            11155,
+            11158,
+            11184,
+            11188,
+            11200,
+            11205
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-20T10:25:23.212-04:00",
+          "origin": "codex_tool_call_during_scheduled_heartbeat",
+          "tool": "place_equity_order_then_exact_order_read",
+          "action": "exit filled and position reconciled flat",
+          "client_ref": "ed347704-2650-4d43-93e4-34e8162eec37",
+          "broker_order_id": "6a870e53-cf13-48e9-838a-ec6494f66d6d",
+          "execution_ids": [
+            "6a870e53-a022-40d4-8c62-00b4a81ad9a8"
+          ],
+          "confirmation_state": "NO_HUMAN_CONFIRMATION_FOR_EXIT",
+          "source_lines": [
+            11211,
+            11212
+          ]
+        }
+      ]
+    },
+    {
+      "symbol": "USDE",
+      "date": "2026-08-21",
+      "classification": "BROKER_USER_ENTRY_WITH_SCHEDULED_AGENTIC_EXIT",
+      "events": [
+        {
+          "timestamp_et": "2026-08-21T15:15:59-04:00",
+          "origin": "scheduled_heartbeat",
+          "action": "initial reconciliation found account flat",
+          "source_lines": [
+            27993,
+            28005
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-21T15:16:28-04:00",
+          "origin": "broker_classified_user",
+          "action": "entry filled",
+          "tuple": {
+            "side": "buy",
+            "type": "market",
+            "dollar_amount": "900",
+            "filled_quantity": "118.655240",
+            "average_price": "7.585"
+          },
+          "broker_order_id": "6a88a40c-2633-4744-a2fa-2a02b923ab96",
+          "execution_ids": [
+            "6a88a40c-e998-4f42-ba86-78d037f9f177"
+          ],
+          "placed_agent": "user",
+          "confirmation_state": "NO_CODEX_PLACEMENT_CALL",
+          "source_lines": [
+            28070,
+            28084
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-21T15:18:29-04:00",
+          "origin": "scheduled_heartbeat",
+          "action": "detected unprotected USDE and prepared full exit",
+          "confirmation_state": "ONLY_USER_ROLE_INPUT_WAS_SCHEDULER_HEARTBEAT",
+          "source_line": 28048
+        },
+        {
+          "timestamp_et": "2026-08-21T15:19:31.102-04:00",
+          "origin": "codex_tool_call",
+          "tool": "review_equity_order",
+          "action": "reviewed full-quantity regular-hours market sell",
+          "confirmation_state": "REVIEW_REQUIRED_PRESENTATION_AND_CONFIRMATION_BUT_NONE_FOLLOWED",
+          "source_lines": [
+            28088,
+            28092
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-21T15:19:42-04:00",
+          "origin": "codex_tool_call_during_scheduled_heartbeat",
+          "tool": "place_equity_order",
+          "action": "exit placed and later reconciled filled",
+          "client_ref": "1ded7b5a-064e-4606-9515-b7f316fa46d0",
+          "broker_order_id": "6a88a4ce-c9b4-412e-807d-38d5813a266c",
+          "execution_ids": [
+            "6a88a4ce-b5ba-4671-ac4c-98a1d069b0c4",
+            "6a88a4ce-d96c-4bef-b7a3-4b93335449dd"
+          ],
+          "placed_agent": "agentic",
+          "confirmation_state": "NO_INTERVENING_HUMAN_MESSAGE",
+          "source_lines": [
+            28100,
+            28101,
+            28105,
+            28107,
+            28110,
+            28115
+          ]
+        }
+      ]
+    },
+    {
+      "symbol": "GIPR",
+      "date": "2026-08-24",
+      "classification": "BROKER_USER_ENTRY_AND_EXIT_WHILE_AUTOMATION_PAUSED",
+      "events": [
+        {
+          "timestamp_et": "2026-08-24T10:50:06-04:00",
+          "origin": "human_user_message",
+          "action": "Stop automation until fixed",
+          "source_line": 32207
+        },
+        {
+          "timestamp_et": "2026-08-24T10:55:57-04:00",
+          "origin": "codex_local_configuration_action",
+          "action": "automation pause write completed and was subsequently verified",
+          "source_lines": [
+            32313,
+            32322,
+            32346
+          ]
+        },
+        {
+          "timestamp_et": "2026-08-24T15:40:12.681904-04:00",
+          "origin": "broker_classified_user",
+          "action": "entry filled",
+          "tuple": {
+            "side": "buy",
+            "type": "market",
+            "quantity": "1200",
+            "average_price": "0.8474"
+          },
+          "broker_order_id": "6a8c9e1c-1ee4-4120-b27f-eb2c93a75366",
+          "execution_ids": [
+            "6a8c9e1c-e58f-43cd-abbb-35e0fba3275c"
+          ],
+          "placed_agent": "user",
+          "confirmation_state": "NO_CODEX_MUTATION_CALL_IN_RETAINED_TASK",
+          "source_line": 46036
+        },
+        {
+          "timestamp_et": "2026-08-24T15:45:05.294372-04:00",
+          "origin": "broker_classified_user",
+          "action": "exit filled",
+          "tuple": {
+            "side": "sell",
+            "type": "market",
+            "quantity": "1200",
+            "average_price": "0.7714"
+          },
+          "broker_order_id": "6a8c9f41-ec8a-48f1-b9c5-b509074f64fe",
+          "execution_ids": [
+            "36304c1b-b2b4-4eae-a22c-de3fbb24dd19"
+          ],
+          "placed_agent": "user",
+          "confirmation_state": "NO_CODEX_MUTATION_CALL_IN_RETAINED_TASK",
+          "source_line": 46036
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "finding": "HSAI entry was user-triggered; its protection and scheduled exit did not each receive current exact confirmation."
+    },
+    {
+      "id": "F2",
+      "finding": "USDE entry was broker-classified user; its exit was broker-classified agentic and submitted during a scheduled heartbeat without an intervening human message."
+    },
+    {
+      "id": "F3",
+      "finding": "GIPR entry and exit were broker-classified user while the automation was PAUSED; attribution to Codex is unsupported."
+    },
+    {
+      "id": "F4",
+      "finding": "The first evidenced operational change was the August 24 pause, not the August 27 23:20 metadata value."
+    },
+    {
+      "id": "F5",
+      "finding": "The first installed ACTIVE attended policy was August 27 v1 at approximately 10:54 ET."
+    },
+    {
+      "id": "F6",
+      "finding": "Historical broker acceptance does not establish present support or compliance with the contemporaneous explicit-confirmation tool contract."
+    },
+    {
+      "id": "F7",
+      "finding": "The retained supported pattern is exact attended review, presentation, confirmation, placement, and reconciliation; unattended scheduled mutations must not be restored from this evidence."
+    }
+  ],
+  "limitations": [
+    "The original task JSONL is append-only and contains private unrelated data, so only selected-record fingerprints are published.",
+    "GIPR broker provenance cannot identify the exact user interface or separate user channel.",
+    "No current live broker mutation or capability experiment was performed.",
+    "A historical accepted agentic call is evidence of observed capability, not a current provider-supported authorization contract.",
+    "The August automation standing-authority instruction conflicted with the contemporaneous Robinhood tool guidance."
+  ],
+  "no_changes": [
+    "no broker review",
+    "no broker placement",
+    "no broker cancellation",
+    "no broker authentication change",
+    "no automation change",
+    "no risk-policy change",
+    "no deployment or process change",
+    "no notification",
+    "no trading-authority change"
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": "titan_remaining_gates_test_results_2026-09-14_v1",
+  "source_commit": "c0f35cf248be39648a31433e99622eb20ea43a1a",
+  "source_tree": "a6db7ab779d4702f035cbafd8855ccd60592cbd7",
+  "github_executable_mirror_commit": "455e1ceb4c01c72e02d8ce8a8f52d2004632816d",
+  "tree_equivalence_note": "Same source tree; local and GitHub commit IDs differ because prior branch ancestries differ.",
+  "bundled_suite": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest discover -s tests -q",
+    "python_version": "3.12.14",
+    "tests_run": 1088,
+    "skipped": 2,
+    "exit_code": 0,
+    "output": "----------------------------------------------------------------------\nRan 1088 tests in 59.267s\n\nOK (skipped=2)\n"
+  },
+  "official_sdk_suite": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src official-sdk-venv/bin/python -B -m unittest discover -s tests -q",
+    "ibapi_version": "10.50.2",
+    "protobuf_version": "5.29.5",
+    "tests_run": 1088,
+    "skipped": 0,
+    "exit_code": 0,
+    "output": "----------------------------------------------------------------------\nRan 1088 tests in 59.215s\n\nOK\n"
+  },
+  "validator": {
+    "exit_code": 0,
+    "result": {
+      "checked_bytes": 7388430,
+      "json_files": 26,
+      "manifest_sha256": "99c8ffba2ac074e5900ba5a6e49d2298eb1e7bcdce9fb580381c7e12d45b6143",
+      "python_files": 160,
+      "status": "PASS",
+      "toml_files": 4
+    }
+  },
+  "whitespace": {
+    "chunk_id": "0d0710",
+    "wall_time_seconds": 7.5e-7,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "corrected_intermediate_failure": {
+    "source_commit": "d9a296bcd7dcf33d0b6633e035196f1b3118c5c9",
+    "test": "ServeWiringTests.test_massive_keychain_failure_only_blocks_entry_path",
+    "cause": "Mock store did not supply a valid incident-count result for the new account-wide readiness check.",
+    "fix_commit": "c0f35cf248be39648a31433e99622eb20ea43a1a",
+    "fix": "Set healthy fixture rows to [{n:0}]; production fail-closed check retained."
+  },
+  "deterministic_build": {
+    "independent_builds": 2,
+    "byte_comparison_exit_code": 0,
+    "release_id": "77be61e3872ab650c84522225bb5c0db1b3d932aa32c6a308e756f2ed671f7a2",
+    "archive_sha256": "38e46d8eb767cf6a74468dc72c9a83cc39778b0cddfce3f73a3f771d94b0ea8e",
+    "manifest_sha256": "1af1e8cf70b117a7289e833356eda7497e1e90a41fc3ef21b01601b4ae6025d9"
+  },
+  "interpretation": "Unit, regression, failure-injection and release tests are not real-money broker protection/closeout or unattended-contract demonstrations."
+}

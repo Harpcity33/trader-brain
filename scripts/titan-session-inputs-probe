@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Explicit read-only, isolated launcher; no production composition or writer."""
+
+from pathlib import Path
+import sys
+
+
+def main() -> int:
+    if not sys.flags.isolated or not sys.flags.no_site or not sys.dont_write_bytecode:
+        print('{"error_code":"SESSION_PROBE_REQUIRES_ISOLATED_NO_SITE_NO_BYTECODE","live_authority":false}')
+        return 2
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "src"))
+    from titan_brain.live.session_input_probe import run_isolated_probe
+    return run_isolated_probe(source_root=root, argv=sys.argv[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

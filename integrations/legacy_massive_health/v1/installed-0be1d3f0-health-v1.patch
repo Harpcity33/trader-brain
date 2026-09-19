@@ -1,0 +1,126 @@
+--- a/titan_runtime/massive.py
++++ b/titan_runtime/massive.py
+@@ -19,6 +19,7 @@
+ from zoneinfo import ZoneInfo
+ 
+ from .config import RuntimeConfig
++from .massive_health import AuthenticatedMarketHealth
+ from .policy import evaluate_shadow_candidate
+ from .ranking import apply_weighted_opportunity_scale, build_preliminary_trade_plan
+ from .signals import Bar, compute_market_signal, trigger_cross_payload
+@@ -315,6 +316,7 @@
+             config, api_key, self.stop_event, self.logger
+         )
+         self.client: MinimalWebSocket | None = None
++        self.stream_health = AuthenticatedMarketHealth()
+         self.dynamic_symbols: set[str] = set()
+         self.crossed_triggers: dict[str, float] = {}
+         self.bars: dict[str, deque[Bar]] = defaultdict(lambda: deque(maxlen=30))
+@@ -764,12 +766,13 @@
+                 f"luld:{symbol}:{event.get('t')}:{indicator}",
+             )
+ 
+-    def _handle_status(self, event: dict[str, Any]) -> None:
++    def _handle_status(self, event: dict[str, Any], *, connection: object) -> bool:
+         status = event.get("status")
+         message = str(event.get("message") or "")
+-        if status in ("connected", "auth_success", "success"):
+-            self.store.set_health("massive_websocket", "healthy", {"status": status})
+-        elif status:
++        if self.stream_health.note_status(connection, status):
++            # Authentication/subscription acknowledgements are not data heartbeats.
++            return True
++        else:
+             self.store.set_health("massive_websocket", "degraded", {"status": status, "message": message})
+             self.logger.warning("websocket_status status=%s message=%s", status, message)
+             if status == "error" and "access real-time data" in message.lower():
+@@ -786,9 +789,20 @@
+                     f"entitlement:{datetime.now(self.et).date().isoformat()}",
+                 )
+                 self.stop_event.set()
+-
+-    def _process_message(self, message: Any) -> None:
++        return False
++
++    def _process_message(self, message: Any, *, connection: object | None = None) -> None:
++        connection = self.client if connection is None else connection
+         events = message if isinstance(message, list) else [message]
++        # Reject the whole frame before any data can pulse health: a negative
++        # status later in the same frame must not be hidden by an earlier quote.
++        rejected = False
++        for event in events:
++            if isinstance(event, dict) and event.get("ev") == "status":
++                if not self._handle_status(event, connection=connection):
++                    rejected = True
++        if rejected:
++            raise WebSocketError("MASSIVE_STREAM_STATUS_REJECTED")
+         for event in events:
+             if not isinstance(event, dict):
+                 continue
+@@ -801,8 +815,14 @@
+                 self._handle_quote(event)
+             elif event_type == "LULD":
+                 self._handle_luld(event)
+-            elif event_type == "status":
+-                self._handle_status(event)
++            if self.stream_health.processed_event(
++                connection, event, now_ms=int(time_module.time() * 1000),
++                monotonic=time_module.monotonic(),
++            ):
++                self.store.set_health(
++                    "massive_websocket", "healthy",
++                    {"source": "authenticated_processed_market_data", "event_type": event_type},
++                )
+ 
+     def _refresh_dynamic_subscriptions(self) -> None:
+         if not self.client:
+@@ -841,25 +861,34 @@
+ 
+     def _connect(self) -> None:
+         client = MinimalWebSocket(self.config.websocket_url)
+-        client.connect()
+-        connected = client.recv_json(timeout=10)
+-        self._process_message(connected)
+-        client.send_json({"action": "auth", "params": self.api_key})
+-        auth = client.recv_json(timeout=10)
+-        self._process_message(auth)
+-        auth_events = auth if isinstance(auth, list) else [auth]
+-        if not any(isinstance(item, dict) and item.get("status") == "auth_success" for item in auth_events):
++        self.stream_health.begin_connection(client)
++        self.store.set_health(
++            "massive_websocket", "degraded", {"reason": "AWAITING_AUTHENTICATED_MARKET_DATA"}
++        )
++        try:
++            client.connect()
++            connected = client.recv_json(timeout=10)
++            self._process_message(connected, connection=client)
++            client.send_json({"action": "auth", "params": self.api_key})
++            auth = client.recv_json(timeout=10)
++            self._process_message(auth, connection=client)
++            if not self.stream_health.authenticate(client, auth):
++                raise WebSocketError("Massive WebSocket authentication did not succeed")
++            client.send_json({"action": "subscribe", "params": ",".join(self.BASE_SUBSCRIPTIONS)})
++            self.client = client
++            self.dynamic_symbols.clear()
++            self._refresh_dynamic_subscriptions()
++            self.last_message_monotonic = time_module.monotonic()
++            self.logger.info("websocket_authenticated subscription_request=%s", ",".join(self.BASE_SUBSCRIPTIONS))
++        except BaseException:
++            self.stream_health.disconnect(client)
+             client.close()
+-            raise WebSocketError("Massive WebSocket authentication did not succeed")
+-        client.send_json({"action": "subscribe", "params": ",".join(self.BASE_SUBSCRIPTIONS)})
+-        self.client = client
+-        self.dynamic_symbols.clear()
+-        self._refresh_dynamic_subscriptions()
+-        self.last_message_monotonic = time_module.monotonic()
+-        self.logger.info("websocket_authenticated subscription_request=%s", ",".join(self.BASE_SUBSCRIPTIONS))
++            self.client = None
++            raise
+ 
+     def _disconnect(self) -> None:
+         if self.client:
++            self.stream_health.disconnect(self.client)
+             self.client.close()
+             self.client = None
+ 

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "patch": "installed-0be1d3f0-health-v1.patch",
+  "target_relative_path": "titan_runtime/massive.py",
+  "target_before_sha256": "0be1d3f0d6be20f92cac97a913636e8299ba122300dcbfe244e003f17791b2e3",
+  "target_after_sha256": "6d43ef4eb89efec5a89ec6cfbaa8edcf4dd8ecb89eac190d73eb99ebe234163b",
+  "rejected_older_canonical_sha256": "31dee996286adb3157b37a8d2b691c1a2ef4eb4569fcd5e884f63aeb53c06922",
+  "helper_source": "src/titan_brain/live/massive_health.py",
+  "helper_destination": "titan_runtime/massive_health.py",
+  "helper_sha256": "0e787f84f0188ee1ffd015eca2f814f25e990216b6b2bc8a49de0e53abc3254f",
+  "fixture_sha256": "fdd60a46e8e0f65c7a873c9825b10ea5dac2e219890bd83a31a3a4730e618c7a"
+}
