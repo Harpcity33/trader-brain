@@ -14,6 +14,9 @@ from titan_brain.live.plan_freshness import (
     ObservedOpenOrder,
     ObservedPosition,
     PlanFreshnessError,
+    SymbolOpenOrder,
+    SymbolPosition,
+    account_exposure_fingerprint,
     evaluate_plan_freshness,
     exposure_fingerprint,
 )
@@ -121,6 +124,60 @@ class PlanFreshnessTests(unittest.TestCase):
         with self.assertRaises(PlanFreshnessError):
             evaluate_plan_freshness(plan_bound_fingerprint=fp, observed_fingerprint=fp,
                                     created_at=datetime(2026, 9, 18, 14, 0), expires_at=EXPIRES, now=WITHIN)
+
+
+class SymbolExposureFingerprintTests(unittest.TestCase):
+    def _sym_positions(self):
+        return (SymbolPosition("ABC", 100), SymbolPosition("XYZ", 50))
+
+    def _sym_orders(self):
+        return (SymbolOpenOrder("stop-1", "ABC", "SELL", 100, D("48.00")),)
+
+    def test_order_independent_and_valid_sha256(self):
+        a = account_exposure_fingerprint((SymbolPosition("ABC", 100), SymbolPosition("XYZ", 50)), self._sym_orders())
+        b = account_exposure_fingerprint((SymbolPosition("XYZ", 50), SymbolPosition("ABC", 100)), self._sym_orders())
+        self.assertEqual(a, b)
+        self.assertRegex(a, r"^[0-9a-f]{64}$")
+
+    def test_changes_when_a_symbol_position_changes(self):
+        base = account_exposure_fingerprint(self._sym_positions(), self._sym_orders())
+        moved = account_exposure_fingerprint((SymbolPosition("ABC", 90), SymbolPosition("XYZ", 50)), self._sym_orders())
+        gone = account_exposure_fingerprint((SymbolPosition("XYZ", 50),), self._sym_orders())
+        self.assertNotEqual(base, moved)
+        self.assertNotEqual(base, gone)
+
+    def test_changes_when_an_open_order_changes(self):
+        base = account_exposure_fingerprint(self._sym_positions(), self._sym_orders())
+        cancelled = account_exposure_fingerprint(self._sym_positions(), ())
+        self.assertNotEqual(base, cancelled)
+
+    def test_symbol_scheme_never_collides_with_contract_id_scheme(self):
+        # Empty exposure in both schemes must still differ (distinct domain tag).
+        self.assertNotEqual(account_exposure_fingerprint((), ()), exposure_fingerprint((), ()))
+
+    def test_duplicate_symbol_or_order_and_bad_inputs_fail_closed(self):
+        with self.assertRaises(PlanFreshnessError):
+            account_exposure_fingerprint((SymbolPosition("ABC", 1), SymbolPosition("ABC", 2)), ())
+        with self.assertRaises(PlanFreshnessError):
+            account_exposure_fingerprint((), (SymbolOpenOrder("o", "ABC", "SELL", 1), SymbolOpenOrder("o", "ABC", "SELL", 2)))
+        with self.assertRaises(PlanFreshnessError):
+            SymbolPosition("bad symbol", 1)
+        with self.assertRaises(PlanFreshnessError):
+            SymbolOpenOrder("o", "ABC", "HOLD", 1)
+
+    def test_feeds_evaluate_plan_freshness_end_to_end(self):
+        plan_fp = account_exposure_fingerprint(self._sym_positions(), self._sym_orders())
+        changed = account_exposure_fingerprint((SymbolPosition("ABC", 90), SymbolPosition("XYZ", 50)), self._sym_orders())
+        self.assertEqual(
+            evaluate_plan_freshness(plan_bound_fingerprint=plan_fp, observed_fingerprint=plan_fp,
+                                    created_at=CREATED, expires_at=EXPIRES, now=WITHIN),
+            (),
+        )
+        self.assertIn(
+            "EXTERNAL_EXPOSURE_CHANGED",
+            evaluate_plan_freshness(plan_bound_fingerprint=plan_fp, observed_fingerprint=changed,
+                                    created_at=CREATED, expires_at=EXPIRES, now=WITHIN),
+        )
 
 
 if __name__ == "__main__":

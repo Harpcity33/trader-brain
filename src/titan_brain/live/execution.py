@@ -42,6 +42,13 @@ from .authority import (
 )
 from .market_data import EvidenceDecision, MarketDataCache
 from .latency import LatencyMeasurement, LatencyRecorder, LatencySpan
+from .plan_freshness import (
+    PlanFreshnessError,
+    SymbolOpenOrder,
+    SymbolPosition,
+    account_exposure_fingerprint,
+    evaluate_plan_freshness,
+)
 from .models import (
     BrokerOrder,
     BrokerOrderState,
@@ -307,12 +314,65 @@ class EntryExecutionCoordinator:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.latency = latency
 
+    def _plan_freshness_failures(
+        self,
+        *,
+        plan_bound_fingerprint: str,
+        broker_snapshot: "AccountSnapshot | None",
+        created_at: datetime,
+        expires_at: datetime,
+        now: datetime,
+    ) -> tuple[str, ...]:
+        """Return freshness blockers for the entry, or () if fresh. Fail closed.
+
+        Maps the current broker AccountSnapshot to symbol-keyed exposure, then
+        compares its fingerprint to the plan-bound fingerprint and checks the
+        validity window. A missing snapshot, an unmappable row, or any
+        PlanFreshnessError becomes a blocker (never a silent pass). Pure — no
+        broker or network access.
+        """
+        if broker_snapshot is None:
+            return ("PLAN_FRESHNESS_SNAPSHOT_UNAVAILABLE",)
+        try:
+            positions = tuple(
+                SymbolPosition(symbol=p.symbol, quantity=int(p.quantity))
+                for p in broker_snapshot.equity_positions
+                if p.quantity == p.quantity.to_integral_value()
+            )
+            if len(positions) != len(broker_snapshot.equity_positions):
+                # A fractional position cannot be represented as whole shares.
+                return ("PLAN_FRESHNESS_UNMAPPABLE_POSITION",)
+            open_orders = tuple(
+                SymbolOpenOrder(
+                    order_identity=o.broker_order_id,
+                    symbol=o.symbol,
+                    side="BUY" if o.side is BrokerSide.BUY else "SELL",
+                    quantity=int(o.requested_quantity),
+                    limit_price=o.limit_price,
+                )
+                for o in broker_snapshot.equity_orders
+                if o.requested_quantity == o.requested_quantity.to_integral_value()
+            )
+            if len(open_orders) != len(broker_snapshot.equity_orders):
+                return ("PLAN_FRESHNESS_UNMAPPABLE_ORDER",)
+            observed = account_exposure_fingerprint(positions, open_orders)
+            return evaluate_plan_freshness(
+                plan_bound_fingerprint=plan_bound_fingerprint,
+                observed_fingerprint=observed,
+                created_at=created_at,
+                expires_at=expires_at,
+                now=now,
+            )
+        except PlanFreshnessError as exc:
+            return (str(exc),)
+
     def submit_entry(
         self,
         *,
         plan: ExpiringPlan,
         risk_decision: RiskDecision,
         broker_snapshot: AccountSnapshot | None = None,
+        plan_bound_fingerprint: str | None = None,
         now: datetime | None = None,
     ) -> ExecutionOutcome:
         """Validate, reserve, review, and submit exactly one logical entry.
@@ -613,6 +673,33 @@ class EntryExecutionCoordinator:
                 message="runtime mutation authority failed immediately before broker place",
                 failure_codes=authority_failures,
             )
+        # External-change / expiry gate (fail-closed). Active only when the
+        # caller supplied the fingerprint the plan was bound to at sizing time.
+        # Immediately before the broker place, refuse if the observed account
+        # exposure changed out-of-band or the plan is outside its validity
+        # window. When no fingerprint is supplied (all current callers) this is
+        # skipped and behaviour is unchanged; it lifts no gate and never reaches
+        # the broker on refusal.
+        if plan_bound_fingerprint is not None:
+            freshness_failures = self._plan_freshness_failures(
+                plan_bound_fingerprint=plan_bound_fingerprint,
+                broker_snapshot=broker_snapshot,
+                created_at=plan.created_at,
+                expires_at=plan.expires_at,
+                now=submitting_at,
+            )
+            if freshness_failures:
+                return ExecutionOutcome(
+                    status=ExecutionStatus.BLOCKED,
+                    plan_id=plan.plan_id,
+                    reservation_id=reservation_id,
+                    intent_id=intent_id,
+                    client_ref_id=request.client_ref_id,
+                    risk_reserved=True,
+                    replay=not inserted,
+                    message="plan freshness gate refused the entry immediately before broker place",
+                    failure_codes=freshness_failures,
+                )
         self.state.transition_intent(
             intent_id,
             IntentState.SUBMITTING,

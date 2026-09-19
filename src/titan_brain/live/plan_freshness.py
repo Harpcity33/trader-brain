@@ -97,6 +97,94 @@ class ObservedOpenOrder:
             _decimal_text(self.limit_price)
 
 
+_SYMBOL = re.compile(r"[A-Z][A-Z0-9.\-]{0,14}\Z", re.ASCII)
+
+
+@dataclass(frozen=True)
+class SymbolPosition:
+    """A position keyed by SYMBOL rather than numeric contract id.
+
+    Broker account snapshots expose equity positions by symbol (no contract
+    id), so this is the form the pre-dispatch gate fingerprints against the
+    live AccountSnapshot. Quantity is signed whole shares (long is positive).
+    """
+
+    symbol: str
+    quantity: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.symbol, str) or _SYMBOL.fullmatch(self.symbol) is None:
+            _fail("SYMBOL_INVALID")
+        _whole(self.quantity)
+
+
+@dataclass(frozen=True)
+class SymbolOpenOrder:
+    """An open order keyed by its broker identity, contract by SYMBOL."""
+
+    order_identity: str
+    symbol: str
+    side: str
+    quantity: int
+    limit_price: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.order_identity, str) or _TOKEN.fullmatch(self.order_identity) is None:
+            _fail("ORDER_IDENTITY_INVALID")
+        if not isinstance(self.symbol, str) or _SYMBOL.fullmatch(self.symbol) is None:
+            _fail("SYMBOL_INVALID")
+        if self.side not in ("BUY", "SELL"):
+            _fail("SIDE_INVALID")
+        if _whole(self.quantity) <= 0:
+            _fail("QUANTITY_INVALID")
+        if self.limit_price is not None:
+            _decimal_text(self.limit_price)
+
+
+def account_exposure_fingerprint(
+    positions: tuple[SymbolPosition, ...],
+    open_orders: tuple[SymbolOpenOrder, ...],
+) -> str:
+    """Deterministic SHA-256 of symbol-keyed account exposure.
+
+    The symbol-keyed sibling of exposure_fingerprint, for fingerprinting a
+    broker AccountSnapshot (whose equity positions carry a symbol, not a
+    numeric contract id). Order-independent; duplicate symbols or duplicate
+    order identities fail closed. A different domain tag from the contract-id
+    fingerprint prevents the two schemes from ever colliding.
+    """
+    if type(positions) is not tuple or type(open_orders) is not tuple:
+        _fail("EXPOSURE_INVALID")
+    syms = [p.symbol for p in positions]
+    if len(set(syms)) != len(syms):
+        _fail("DUPLICATE_POSITION")
+    ord_ids = [o.order_identity for o in open_orders]
+    if len(set(ord_ids)) != len(ord_ids):
+        _fail("DUPLICATE_ORDER")
+    body = {
+        "scheme": "symbol_keyed_account_exposure_v1",
+        "positions": sorted(
+            ({"symbol": p.symbol, "quantity": p.quantity} for p in positions),
+            key=lambda row: row["symbol"],
+        ),
+        "open_orders": sorted(
+            (
+                {
+                    "order_identity": o.order_identity,
+                    "symbol": o.symbol,
+                    "side": o.side,
+                    "quantity": o.quantity,
+                    "limit_price": None if o.limit_price is None else _decimal_text(o.limit_price),
+                }
+                for o in open_orders
+            ),
+            key=lambda row: row["order_identity"],
+        ),
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def exposure_fingerprint(
     positions: tuple[ObservedPosition, ...],
     open_orders: tuple[ObservedOpenOrder, ...],
