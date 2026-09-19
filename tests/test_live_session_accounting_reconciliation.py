@@ -247,5 +247,50 @@ class SessionAccountingReconciliationTests(unittest.TestCase):
         self.assertFalse(hasattr(result, "to_measurement"))
 
 
+    def test_replay_on_identical_inputs_is_deterministic_across_decimal_contexts(self):
+        """Area 3: replay produces the SAME P&L and capacity.
+
+        The reconciler is called repeatedly on identical inputs while the
+        caller's decimal context is perturbed between calls. Every field of the
+        result — including the canonical evidence_sha256 that binds the outcome
+        — must be identical, so a replay can never drift the trading cash flow,
+        the expected cash, the residual, or the evidence hash.
+        """
+        sell = fixtures.execution("sell", side="SELL", price=D(52),
+                                  source_executed_at=FROZEN + timedelta(minutes=6))
+        value = current("10198", executions=(fixtures.execution(), sell), positions=())
+        adjustments = (adjustment(),)
+
+        results = []
+        for prec in (80, 50, 34, 18, 6):
+            with localcontext() as context:
+                context.prec = prec
+                results.append(self.reconcile(value, adjustments=adjustments))
+
+        first = results[0]
+        for other in results[1:]:
+            self.assertEqual(other, first)
+            self.assertEqual(other.evidence_sha256, first.evidence_sha256)
+            self.assertEqual(other.trading_cash_flow, first.trading_cash_flow)
+            self.assertEqual(other.expected_cash, first.expected_cash)
+            self.assertEqual(other.unexplained_cash_residual, first.unexplained_cash_residual)
+            self.assertEqual(other.material_blockers, first.material_blockers)
+
+    def test_replay_determinism_holds_for_a_blocked_outcome(self):
+        """A blocked (material) outcome replays identically too — the evidence
+        hash of a refusal is as stable as that of a clean identity."""
+        # An unexplained residual: closing cash does not match the identity.
+        value = current("9999", executions=(fixtures.execution(),), positions=())
+        results = []
+        for prec in (80, 28, 9):
+            with localcontext() as context:
+                context.prec = prec
+                results.append(self.reconcile(value))
+        for other in results[1:]:
+            self.assertEqual(other.evidence_sha256, results[0].evidence_sha256)
+            self.assertEqual(other.material_blockers, results[0].material_blockers)
+            self.assertEqual(other.observed_cash_identity_matched, results[0].observed_cash_identity_matched)
+
+
 if __name__ == "__main__":
     unittest.main()
