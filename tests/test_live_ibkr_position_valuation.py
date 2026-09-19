@@ -268,6 +268,33 @@ class RemainingRiskArithmeticTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.calculate(**changes)
 
+    def test_incurred_fees_have_no_input_so_cannot_be_double_charged(self):
+        """Area 4: incurred fees (already in account equity) and FUTURE fee
+        obligations are distinct — the downside arithmetic accepts ONLY the
+        forward remaining_fee_reserve and has no parameter through which an
+        already-incurred fee could be added a second time."""
+        import inspect
+        params = set(inspect.signature(remaining_position_stop_downside).parameters)
+        self.assertEqual(
+            params,
+            {"quantity", "current_market_value", "stop_allocations",
+             "execution_reserve", "remaining_fee_reserve"},
+        )
+        # There is no incurred/past-fee keyword; passing one is a TypeError,
+        # not a silent double-charge.
+        with self.assertRaises(TypeError):
+            remaining_position_stop_downside(
+                quantity=10, current_market_value="200",
+                stop_allocations=(("stop-a", 4, "18"), ("stop-b", 6, "19")),
+                execution_reserve="2", remaining_fee_reserve="3",
+                incurred_fees="5",  # not a real parameter
+            )
+        # The result depends only on the FORWARD reserve: raising it raises the
+        # downside by exactly that delta; there is no incurred-fee term.
+        base = self.calculate(remaining_fee_reserve="3")
+        higher = self.calculate(remaining_fee_reserve="8")
+        self.assertEqual(higher - base, Decimal("5"))
+
 
 if __name__ == "__main__":
     unittest.main()
