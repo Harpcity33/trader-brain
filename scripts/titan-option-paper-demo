@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Runnable end-to-end PAPER demonstration of the attended-options lifecycle.
+
+Milestone 9 part b of the attended-options plan.
+
+This drives the milestone-9a orchestrator through a battery of PAPER scenarios,
+including fault injection, and prints a JSON report.  It is the owner-facing
+"end-to-end paper demonstration" deliverable: a real broker-qualified option
+shape flows through analysis, attended approval, SIMULATED execution, and
+reconciled P&L -- with faults (stale data, insufficient funds, partial fill,
+unknown submission, manual intervention) each handled by failing closed.
+
+It is entirely offline and synthetic: no broker connection, no real order, no
+credentials, no account data.  All inputs below are fabricated.  A passing run
+demonstrates the lifecycle and the fail-closed behaviour; it is NOT evidence of
+live readiness, liquidity, permission, or fee accuracy.
+
+Run from the repository root with Python 3.11+:
+
+    python3 -I -S -B scripts/titan-option-paper-demo
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import sys
+from pathlib import Path
+
+if __name__ == "__main__" and __package__ is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from titan_brain.option_paper_orchestrator import (
+    PaperFillResult,
+    run_paper_trade,
+    simulate_paper_fill,
+)
+from titan_brain.option_risk_policy import OptionsRiskPolicy, POLICY_VERSION
+from titan_brain.option_attended_ticket import AttendedOptionTicket
+from titan_brain.option_reconciliation_gate import CaptureHealth, ReconciliationInput
+
+
+NOW = datetime(2026, 10, 5, 16, 0, 5, tzinfo=timezone.utc)
+
+
+def _payload(**contract_overrides):
+    contract = {"con_id": 987654321, "symbol": "DEMO", "right": "CALL", "strike": "100",
+                "expiry": "2026-10-14", "multiplier": 100, "currency": "USD"}
+    contract.update(contract_overrides)
+    return {
+        "schema_version": "attended_option_analysis_input_v1",
+        "account": {"currency": "USD", "observed_at": "2026-10-05T16:00:00+00:00",
+                    "equity": "100000", "cash": "100000", "settled_cash": "100000",
+                    "available_funds": "100000", "pending_debits_not_in_balances": "0"},
+        "contract": contract,
+        "quote": {"observed_at": "2026-10-05T16:00:00+00:00", "bid": "1.55", "ask": "1.65"},
+        "trade": {"quantity": 2, "entry_limit": "1.65", "latest_exit_at": "2026-10-13T16:00:00+00:00",
+                  "thesis": "synthetic demo thesis", "invalidation": "synthetic invalidation"},
+        "fees": {"entry_per_order": "1", "entry_per_contract": "0.65",
+                 "exit_per_order": "1", "exit_per_contract": "0.65"},
+        "budgets": {"planned_loss": "5000", "stress_loss": "5000", "premium_exposure": "50000"},
+        "scenarios": [
+            {"name": "planned", "kind": "planned", "exit_bid": "1.55", "assumptions": "synthetic"},
+            {"name": "stress", "kind": "stress", "exit_bid": "0.15", "assumptions": "synthetic"},
+        ],
+    }
+
+
+def _policy(**o):
+    f = dict(version=POLICY_VERSION, max_planned_loss="5000", max_stress_loss="5000",
+             max_premium_exposure="50000", account_equity_ceiling_fraction="0.9")
+    f.update(o)
+    return OptionsRiskPolicy(**f)
+
+
+def _ticket():
+    return AttendedOptionTicket(
+        contract_wire_fingerprint="d" * 64, account_exposure_fingerprint="e" * 64,
+        material_facts={"symbol": "DEMO", "quantity": 2, "limit_price": "1.65"},
+        issued_at=NOW, validity_seconds=60)
+
+
+def _recon(**o):
+    f = dict(expected_positions={}, observed_positions={}, expected_orders={}, observed_orders={},
+             capture=CaptureHealth(reporting_scope_account_wide=True, capture_continuous=True,
+                                   subscription_active=True, history_complete=True,
+                                   duplicate_or_late_events_detected=False))
+    f.update(o)
+    return ReconciliationInput(**f)
+
+
+def _run(**o):
+    f = dict(analyzer_payload=_payload(), now=NOW, policy=_policy(), account_equity="100000",
+             ticket=_ticket(), reconciliation=_recon(),
+             paper_fill=PaperFillResult(filled_quantity=2, fill_price="1.65", status="FILLED"),
+             pretrade_baseline_cash="100000")
+    f.update(o)
+    return run_paper_trade(**f)
+
+
+def scenarios():
+    fills = {
+        "filled": PaperFillResult(filled_quantity=2, fill_price="1.65", status="FILLED"),
+        "partial": simulate_paper_fill(requested_quantity=2, limit_price="1.65",
+                                       available_liquidity=1, marketable=True),
+        "rejected": PaperFillResult(filled_quantity=0, fill_price="0", status="REJECTED"),
+        "unknown": PaperFillResult(filled_quantity=0, fill_price="0", status="UNKNOWN"),
+    }
+    return [
+        ("happy_path", _run()),
+        ("stale_quote_data", _run(now=datetime(2026, 10, 5, 16, 5, 0, tzinfo=timezone.utc))),
+        ("insufficient_budget", _run(policy=_policy(max_premium_exposure="10"))),
+        ("manual_intervention", _run(reconciliation=_recon(observed_positions={"other": 3}))),
+        ("partial_fill", _run(paper_fill=fills["partial"])),
+        ("rejected_fill", _run(paper_fill=fills["rejected"])),
+        ("unknown_submission", _run(paper_fill=fills["unknown"])),
+    ]
+
+
+def main() -> int:
+    report = {"demo": "attended_option_paper_lifecycle", "paper_only": True,
+              "live_authority": False, "disclaimer":
+              "synthetic offline demonstration; not live readiness, liquidity, or permission",
+              "scenarios": []}
+    for name, result in scenarios():
+        report["scenarios"].append({
+            "scenario": name, "ok": result.ok, "stopped_at": result.stopped_at,
+            "blockers": list(result.blockers), "fill_status": result.fill_status,
+            "lifecycle": dict(result.lifecycle),
+        })
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
