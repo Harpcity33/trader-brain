@@ -1,0 +1,64 @@
+{
+  "schema_version": "attended_option_analysis_input_v1",
+  "account": {
+    "currency": "USD",
+    "observed_at": "2026-10-05T16:00:00+00:00",
+    "equity": "1000",
+    "cash": "1000",
+    "settled_cash": "1000",
+    "available_funds": "1000",
+    "pending_debits_not_in_balances": "100"
+  },
+  "contract": {
+    "con_id": 123456,
+    "symbol": "DEMO",
+    "right": "CALL",
+    "strike": "50",
+    "expiry": "2026-10-09",
+    "multiplier": 100,
+    "currency": "USD"
+  },
+  "quote": {
+    "observed_at": "2026-10-05T16:00:00+00:00",
+    "bid": "1.95",
+    "ask": "2.00"
+  },
+  "trade": {
+    "quantity": 1,
+    "entry_limit": "2.00",
+    "latest_exit_at": "2026-10-08T19:00:00+00:00",
+    "thesis": "Synthetic example only: hypothetical underlying recovery.",
+    "invalidation": "Synthetic price/time invalidation supplied by the caller."
+  },
+  "fees": {
+    "entry_per_order": "1",
+    "entry_per_contract": "0",
+    "exit_per_order": "1",
+    "exit_per_contract": "0"
+  },
+  "budgets": {
+    "planned_loss": "150",
+    "stress_loss": "350",
+    "premium_exposure": "600"
+  },
+  "scenarios": [
+    {
+      "name": "Thesis invalidation",
+      "kind": "planned",
+      "exit_bid": "1.50",
+      "assumptions": "Invented liquidation bid, not a pricing-model forecast or future executable quote."
+    },
+    {
+      "name": "Adverse overnight outcome",
+      "kind": "stress",
+      "exit_bid": "0.50",
+      "assumptions": "Invented joint gap, IV, decay and liquidity scenario; not a worst-case guarantee."
+    },
+    {
+      "name": "Thesis succeeds",
+      "kind": "upside",
+      "exit_bid": "3.00",
+      "assumptions": "Invented favorable outcome, not a return expectation or recommendation."
+    }
+  ]
+}
