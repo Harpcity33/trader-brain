@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Local scenario arithmetic only: never connects to a broker or places orders."""
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from titan_brain.option_trade_analysis import analyze_option_trade
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate input field")
+        result[key] = value
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", type=Path, help="Private local JSON input; never uploaded")
+    parser.add_argument("--now", help="Explicit simulation clock, timezone-aware ISO timestamp")
+    args = parser.parse_args()
+    try:
+        with args.input.open("rb") as handle:
+            data = handle.read(1_048_577)
+        if len(data) > 1_048_576:
+            raise ValueError("input too large")
+        payload = json.loads(data, object_pairs_hook=unique_object)
+        now = datetime.fromisoformat(args.now) if args.now else datetime.now(timezone.utc)
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("aware clock required")
+        report = analyze_option_trade(payload, now=now)
+        report["clock_mode"] = "simulation" if args.now else "current_time"
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
+        report = {
+            "analysis_only": True,
+            "analysis_complete": False,
+            "live_authority": False,
+            "executable": False,
+            "reasons": ["INPUT_OR_CLOCK_INVALID"],
+        }
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0 if report.get("analysis_complete") else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
