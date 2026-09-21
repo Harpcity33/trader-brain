@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Read-only: print the MECHANICAL hashes for the attended authority record.
+
+These are the derived, non-attestation fields of
+``control/ibkr/attended-command-authority.json``:
+
+  release_manifest_hash   (from the installed release manifest)
+  config_hash, policy_hash (computed by the system's own PolicyBundle.load)
+  account_key, account_masked (from the loaded policy)
+
+It computes config_hash / policy_hash via ``PolicyBundle.load`` -- the SAME code
+path the installer and the authority loader use -- so the values cannot drift
+from what the system expects. It reads only; it writes nothing, opens no socket,
+contacts no broker, and produces NONE of the three authority-binding receipts
+(authorization_binding_id / account_binding_fingerprint / provider_contract_id)
+-- those are the owner's genuine attestations and are deliberately NOT emitted
+here.
+
+Usage (from a repo checkout, Python 3.11+):
+
+    python3 -I -S -B scripts/titan-attended-authority-hashes \
+        --release-root  /path/to/checkout-or-installed-release \
+        --config        config/full_live_ibkr_attended.json \
+        [--install-root "$HOME/Library/Application Support/Titan Momentum/full-live-ibkr-ending-3103"]
+
+Point --release-root at the exact release you intend to authorize. If
+--install-root is given, the installed release-manifest.json under it is read
+for release_manifest_hash; otherwise that field is reported as
+"(provide --install-root to read the installed release manifest)".
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+
+if __name__ == "__main__" and __package__ is None:
+    # Resolve src/ relative to the release root passed on the CLI later; for the
+    # common case of running inside a checkout, add the sibling src/.
+    here = Path(__file__).resolve().parents[1]
+    if (here / "src").is_dir():
+        sys.path.insert(0, str(here / "src"))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--release-root", type=Path, required=True)
+    parser.add_argument("--config", default="config/full_live_ibkr_attended.json")
+    parser.add_argument("--install-root", type=Path, default=None)
+    args = parser.parse_args(argv)
+
+    release_root = args.release_root.expanduser().resolve()
+    src = release_root / "src"
+    if src.is_dir() and str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+
+    try:
+        from titan_brain.live.policy import PolicyBundle
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"ok": False, "error": f"cannot import policy: {exc}"}))
+        return 1
+
+    result: dict[str, object] = {"ok": True, "read_only": True,
+                                 "note": "authority-binding receipts are NOT emitted; they are the owner's attestations"}
+    try:
+        policy = PolicyBundle.load(release_root, config_relative=args.config)
+    except Exception as exc:  # noqa: BLE001
+        # A fail-closed template (sentinel bindings) will RAISE here -- that is
+        # expected and is reported, not worked around.
+        print(json.dumps({"ok": False, "read_only": True,
+                          "error": f"PolicyBundle.load failed (expected if bindings are still sentinels): {exc}"},
+                         indent=2))
+        return 1
+
+    result["config_hash"] = policy.config_hash
+    result["policy_hash"] = policy.policy_hash
+    result["account_key"] = policy.config.get("account", {}).get("account_key")
+    last4 = policy.config.get("account", {}).get("required_last4")
+    result["account_masked"] = f"****{last4}" if last4 else None
+
+    if args.install_root is not None:
+        manifest_path = args.install_root.expanduser() / "release-manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                result["release_manifest_hash"] = manifest.get("release_manifest_hash")
+            except Exception as exc:  # noqa: BLE001
+                result["release_manifest_hash"] = f"(unreadable: {exc})"
+        else:
+            result["release_manifest_hash"] = "(no release-manifest.json at --install-root)"
+    else:
+        result["release_manifest_hash"] = "(provide --install-root to read the installed release manifest)"
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
