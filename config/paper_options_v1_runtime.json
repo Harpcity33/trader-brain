@@ -1,0 +1,29 @@
+{
+  "mode": "paper_only",
+  "starting_equity_usd": 1000,
+  "market_timezone": "America/New_York",
+  "research": {"start": "07:00", "end": "08:00", "reasoning": "high", "primary_market_data": "Massive"},
+  "heartbeat": {"cadence_seconds": 120, "reasoning": "instant", "entries_from_heartbeat_only": false},
+  "lanes": {
+    "options_15m": {"enabled": true, "confirmation_minutes": 15},
+    "momentum_5m": {"enabled": true, "confirmation_minutes": 5}
+  },
+  "decision_escalation": {"reasoning": "high", "freeze_trigger_snapshot": true, "fail_closed": true},
+  "risk": {
+    "weekly_drawdown_pct_of_monday_equity": 10,
+    "normal_trade_risk_pct": [2, 3],
+    "exceptional_trade_risk_pct_max": 4,
+    "expand_weekly_budget_with_intrawweek_profits": false,
+    "stop_new_entries_when_weekly_limit_hit": true
+  },
+  "notifications": {
+    "premarket_brief": true,
+    "buy_signals_only_intraday": true,
+    "intervention_faults": true,
+    "end_of_market_report": true,
+    "heartbeat_chatter": false,
+    "near_signals": false
+  },
+  "premarket_watchlist_counts": {"options_15m": 3, "momentum_5m": 3},
+  "runtime_status": "NOT_STARTED_REQUIRES_PERSISTENT_SCHEDULER"
+}
