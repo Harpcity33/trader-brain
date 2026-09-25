@@ -1,173 +1,93 @@
 # Trader Brain Paper Options v1
 
 Date: 2026-09-25
-Status: PAPER-ONLY DESIGN
+Status: PAPER-ONLY DESIGN / READY FOR RUNTIME IMPLEMENTATION
 
 ## Objective
-
-Test whether Trader Brain can produce a repeatable positive-expectancy options process before any live autonomous deployment. The system must learn from every session, grade itself daily, and measure results net of realistic execution assumptions.
+Test whether Trader Brain can produce repeatable positive expectancy before any live autonomous deployment. Hunt aggressively for opportunity, never force a trade, grade every session, and learn from misses as well as entries.
 
 ## Capital and Instruments
-
 - Starting paper capital: $1,000.
-- Options only.
-- Initial authority: long calls and long puts only.
+- Options only: long calls and long puts.
+- Regular U.S. market hours for entries.
 - No naked short options, spreads, exercise, or assignment handling in v1.
-- Regular U.S. market hours only for signal confirmation and paper entries.
 
-## Daily Research Window
+## Risk Budget
+- Weekly drawdown stop: 10% of Monday starting equity. Week-one maximum loss: $100.
+- Weekly limit does not expand with intrawweek profits. Once hit, no new entries until the next trading week and a review is required.
+- Normal planned loss per trade: 2-3% of current account equity.
+- Exceptional setup ceiling: 4%, only when all strategy and liquidity gates pass.
+- Aggregate open risk must remain inside the remaining weekly loss budget.
+- Risk limits may never be loosened automatically during market hours.
 
-Target window: 07:00-08:00 America/New_York on trading days.
+## Daily Research — 07:00-08:00 America/New_York
+Massive is the primary quantitative market-data source wherever the subscribed feed supplies the field. Missing Massive data is labeled unavailable, never guessed or silently replaced.
 
-Massive is the primary market-data source of truth wherever the subscribed feed provides the required field. Missing or unavailable Massive data must be labeled unavailable; the system must not silently substitute stale or guessed values.
+Research evaluates market regime, index trend, premarket movers, catalysts, prior/multi-day momentum, liquidity, option-chain bid/ask, volume, open interest, IV, greeks, expiration/strike suitability, and historical context.
 
-The research pass should evaluate:
+### Pre-market brief
+Publish one unified Trader Brain pre-market brief containing:
+- Top 3 options candidates for the 15-minute confirmation lane.
+- Top 3 fast day-trade candidates for the 5-minute momentum lane.
+- For each: direction, thesis, key price level, volume requirement, confirmation window, invalidation, preferred contract profile where applicable, and exact condition that promotes WATCH to BUY.
 
-1. Broad market regime and index trend.
-2. Premarket leaders/laggards and unusual movement.
-3. Prior-day and multi-day momentum/mean-reversion context.
-4. News/catalyst candidates when available from approved sources.
-5. Underlying liquidity and price behavior.
-6. Options-chain liquidity, bid/ask spread, volume, open interest, implied volatility, and greeks using Massive snapshots.
-7. Candidate expirations and strikes suitable for a $1,000 paper account.
-8. A ranked research watchlist for intraday monitoring.
-
-Research does not itself create a BUY signal.
+These are watch candidates, not BUY signals.
 
 ## Intraday Heartbeat
+- Target cadence: every 2 minutes during the active market monitoring window.
+- Heartbeat is observation/state update only; no 2-minute-only entries.
+- Search broadly and aggressively. No valid setup is an acceptable outcome; forced trades are prohibited.
 
-- Heartbeat target: every 2 minutes during the active monitoring window.
-- The 2-minute heartbeat observes and updates candidate state only.
-- The strategy decision timeframe is 15 minutes.
-- A BUY signal may be emitted only after the relevant 15-minute bar/setup confirms.
-- No 2-minute-only entries.
+### Lane A — 15-minute options confirmation
+A BUY may be emitted only after the relevant completed 15-minute setup confirms and final validation passes.
+
+### Lane B — 5-minute fast momentum/day-trade
+The heartbeat may detect developing spikes, but a BUY may be emitted only after a completed 5-minute bar confirms. Require abnormal/relative volume evidence, price/volume momentum, adequate option liquidity, acceptable spread, clear underlying breakout/continuation structure, and defined invalidation.
+
+Grade Lane A and Lane B separately.
+
+## Model/Reasoning Escalation
+- Routine 2-minute heartbeat: GPT-5.6 Sol Instant / lowest appropriate reasoning effort.
+- 07:00 research: High reasoning.
+- Trigger candidate: freeze the triggering market-data snapshot and escalate that candidate to High reasoning for final BUY/NO-BUY validation.
+- End-of-day grading and learning: High reasoning.
+- After the decision, routine heartbeat returns to Instant.
+- If escalation fails, times out, or required data becomes stale: NO TRADE.
+- The final reviewer must evaluate the same triggering snapshot plus clearly timestamped newer data; it may not silently judge a materially different market state.
 
 ## Notification Policy
+Notify the user only for:
+1. the unified pre-market brief,
+2. actionable 5-minute or 15-minute BUY signals,
+3. true intervention-required faults,
+4. the unified end-of-market report.
 
-The user should receive notifications only for actionable 15-minute BUY signals or a true intervention-required fault.
+Do not notify for heartbeat success, ordinary scans, near-signals, rejected candidates, routine monitoring, or watchlist churn.
 
-Do not notify for:
-
-- heartbeat success,
-- ordinary scans,
-- watchlist updates,
-- near-signals,
-- rejected candidates,
-- routine position monitoring,
-- routine end-of-day logging.
-
-A BUY notification must contain:
-
-- underlying ticker,
-- CALL or PUT,
-- exact option contract,
-- expiration and strike,
-- current bid/ask and intended paper limit entry,
-- paper allocation / contract count,
-- invalidation or stop condition,
-- target / exit plan,
-- 15-minute confirmation evidence,
-- concise setup rationale,
-- timestamp and data freshness.
-
-No qualifying setup means silence.
+A BUY alert must include underlying, CALL/PUT, exact contract, expiration/strike, bid/ask, intended paper limit entry, allocation/contract count, invalidation/stop, target/exit plan, confirmation evidence, concise rationale, lane (5m or 15m), timestamp, and data freshness.
 
 ## Paper Execution
+After a valid BUY signal, record a simulated order/fill using explicit assumptions. Manage the paper position according to predefined exits without repeatedly asking the user. Log every action, source timestamp, assumption, and outcome.
 
-After a valid signal, the paper engine records a simulated order and simulated fill using explicit fill assumptions. The engine then manages the paper position according to the predefined exit rules without repeatedly asking the user what to do.
+## Data and Safety Controls
+Enforce stale-data rejection, duplicate-order rejection, no-entry when required Massive data is unavailable, persistent state, maximum simultaneous risk, and a disable-new-entries kill state.
 
-Every paper action must be logged with source timestamps and assumptions.
+Massive is canonical for quantitative market fields it supplies. A future broker connection is canonical for account state, broker eligibility, positions, executable reviews, orders, and fills.
 
-## Risk Controls
+## End-of-Market Report and Grading
+Publish one unified Trader Brain end-of-market report. Grade the system even if no trades occurred.
 
-The implementation must define and enforce, before activation:
+Track researched candidates; 5m and 15m valid signals separately; paper entries; wins/losses/breakevens; gross and net paper P&L; estimated slippage/fees; win rate; average winner/loser; profit factor; expectancy; intraday and weekly drawdown; MAE/MFE; realized risk/reward; rule violations; stale/missing-data events; false positives; missed valid setups; remaining weekly risk budget; and performance of all six pre-market watch candidates.
 
-- maximum capital allocated per position,
-- maximum simultaneous exposure,
-- maximum daily loss,
-- maximum number of new trades per day,
-- stale-data rejection,
-- duplicate-order rejection,
-- no-entry behavior when required Massive data is unavailable,
-- a kill switch / disable-new-entries state.
-
-Risk limits may not be loosened automatically during market hours.
-
-## Massive Data Requirements
-
-Preferred Massive capabilities for v1 include:
-
-- option-chain snapshots for pricing, greeks, IV, open interest, latest quotes/trades, and underlying price,
-- custom aggregate bars for 15-minute confirmation,
-- option contract snapshots for final candidate validation,
-- historical aggregates for setup review and backtesting.
-
-Massive data is the canonical quantitative market source for fields it supplies. Broker data, when later introduced, remains canonical for account state, executable broker review, positions, and fills.
-
-## End-of-Day Grading
-
-At the end of each trading day, grade the system even if no trades occurred.
-
-### Daily scorecard
-
-Record:
-
-- number of researched candidates,
-- number of valid 15-minute signals,
-- number of paper entries,
-- wins,
-- losses,
-- breakevens,
-- gross paper P&L,
-- estimated slippage/fees,
-- net paper P&L,
-- win rate,
-- average winner,
-- average loser,
-- profit factor,
-- expectancy per trade,
-- maximum intraday drawdown,
-- maximum adverse excursion,
-- maximum favorable excursion,
-- average risk/reward realized,
-- rule violations,
-- stale/missing-data events,
-- missed valid setups,
-- false-positive signals.
-
-### Grade dimensions
-
-Assign A-F grades separately for:
-
-1. Signal quality.
-2. Entry quality.
-3. Risk discipline.
-4. Exit quality.
-5. Data integrity.
-6. Process adherence.
-
-Do not collapse these into a single grade without retaining the individual dimensions.
+Assign separate A-F grades for signal quality, entry quality, risk discipline, exit quality, data integrity, and process adherence. Also grade whether inactivity was correct or whether a qualifying opportunity was missed.
 
 ## Learning Loop
+After grading: identify what worked/failed; separate regime effects from process errors; record false positives, missed setups, and exit mistakes; compare the 5m and 15m lanes; propose parameter changes only from accumulated evidence; never change session risk automatically; store proposed changes for later testing; and carry validated lessons into the next 07:00 research pass.
 
-After grading:
-
-1. Identify what worked and what failed.
-2. Separate market-regime effects from process errors.
-3. Record false positives, missed setups, and exit mistakes.
-4. Propose parameter changes only from accumulated evidence, not one isolated trade.
-5. Never modify live-session risk limits automatically.
-6. Store proposed strategy changes for later review/testing.
-7. Carry validated lessons into the next day's 07:00 research pass.
-
-The system should maintain an auditable history of predictions, paper trades, grades, and subsequent rule changes so improvements can be measured rather than assumed.
+Maintain an auditable history of predictions, paper trades, grades, missed opportunities, and rule changes.
 
 ## Promotion Gate Toward Live Autonomy
+Paper v1 authorizes no live trading. Promotion requires a predefined sufficient sample, positive net expectancy, acceptable drawdown, zero material rule violations, reliable data freshness, and stable execution behavior. Thresholds must be defined before promotion rather than after favorable results are observed.
 
-Paper v1 does not authorize live trading.
-
-Promotion should require a sufficient sample with positive net expectancy, acceptable drawdown, zero material rule violations, reliable data freshness, and stable execution behavior. The exact statistical and risk thresholds must be defined before promotion; they must not be invented after seeing favorable results.
-
-## Scheduler Constraint
-
-The 07:00 research pass and 2-minute heartbeat require an external scheduler/runtime capable of recurring execution. This repository specification does not itself schedule or execute jobs. The chosen runtime must persist state across heartbeats and trading days.
+## Runtime / Scheduler Requirement
+The repository specification does not itself wake up or send recurring notifications. A persistent runtime/scheduler must implement the 07:00 research job, 2-minute heartbeat, reasoning escalation, state persistence, BUY notifications, and end-of-market report. Keep this paper runtime isolated from the stopped legacy Codex heartbeat and avoid duplicate pre-market/end-of-day notifications.
