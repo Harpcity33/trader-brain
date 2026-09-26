@@ -1,0 +1,73 @@
+name: Remote Mac Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - remote-control/deploy-request.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trader-brain-mac-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Dedicated runner label; do not use a generic self-hosted runner.
+    runs-on: [self-hosted, macOS, ARM64, trader-brain-mac]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout tested source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Refuse unsafe event sources
+        shell: zsh
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "Unsupported event source"; exit 10 ;;
+          esac
+
+      - name: Verify paper-only configuration
+        shell: zsh
+        run: |
+          set -euo pipefail
+          python3 -B scripts/paper_options_runtime.py check
+
+      - name: Deploy isolated paper runtime
+        shell: zsh
+        run: |
+          set -euo pipefail
+          chmod +x deploy/install_paper_options_macos.sh
+          ./deploy/install_paper_options_macos.sh
+
+      - name: Verify launched service
+        shell: zsh
+        run: |
+          set -euo pipefail
+          SCOPE="gui/$(id -u)"
+          launchctl print "$SCOPE/com.harpcity.traderbrain.paper-options" | grep -E 'state =|pid =|last exit code' || true
+          sleep 3
+          LOG="$HOME/.local/state/trader-brain/paper-options.out.log"
+          ERR="$HOME/.local/state/trader-brain/paper-options.err.log"
+          test -f "$LOG"
+          tail -n 10 "$LOG"
+          if [[ -f "$ERR" ]]; then tail -n 10 "$ERR"; fi
+          grep -q '"runtime_version": "paper-v1.1-safety"' "$LOG"
+          grep -q '"broker_write_authority": false' "$LOG"
+
+      - name: Record deployed revision
+        shell: zsh
+        run: |
+          set -euo pipefail
+          STATE_DIR="$HOME/.local/state/trader-brain"
+          mkdir -p "$STATE_DIR"
+          printf '%s\n' "$GITHUB_SHA" > "$STATE_DIR/deployed-github-sha"
+          chmod 600 "$STATE_DIR/deployed-github-sha"
