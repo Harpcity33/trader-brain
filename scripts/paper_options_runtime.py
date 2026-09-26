@@ -113,31 +113,6 @@ def probe_massive() -> dict[str, Any]:
     }
 
 
-def probe_openai() -> dict[str, Any]:
-    key = require_env("OPENAI_API_KEY")
-    model = os.environ.get("OPENAI_MODEL", "gpt-5.6-sol")
-    effort = os.environ.get("OPENAI_REASONING_EFFORT", "high")
-    body = json.dumps({
-        "model": model,
-        "reasoning": {"effort": effort},
-        "input": "Return exactly the word READY.",
-        "max_output_tokens": 16,
-    }).encode("utf-8")
-    req = urlrequest.Request(
-        "https://api.openai.com/v1/responses",
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "User-Agent": "TraderBrain/1.0",
-        },
-    )
-    data = _json_request(req, timeout=30)
-    if not data.get("id"):
-        raise RuntimeError("OpenAI probe returned no response id")
-    return {"ok": True, "model": data.get("model", model), "response_id_present": True}
-
 
 def probe_gmail(*, send_test: bool = False) -> dict[str, Any]:
     sender = require_env("TB_GMAIL_SENDER")
@@ -163,10 +138,7 @@ def probe_gmail(*, send_test: bool = False) -> dict[str, Any]:
 def doctor(*, send_test_email: bool = False) -> dict[str, Any]:
     checks: dict[str, Any] = {}
     ok = True
-    for name, fn in (
-        ("massive", probe_massive),
-        ("openai", probe_openai),
-    ):
+    for name, fn in (("massive", probe_massive),):
         try:
             checks[name] = fn()
         except Exception as exc:
@@ -188,9 +160,7 @@ def doctor(*, send_test_email: bool = False) -> dict[str, Any]:
 def heartbeat_once(cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
     """One fail-closed orchestration tick.
 
-    Full Massive scanning and High-reasoning decision adapters are activated only
-    after dependency doctor passes. Until signal logic is connected, this remains
-    NO_TRADE rather than manufacturing a candidate.
+    Massive scanning and deterministic decision logic are the runtime path.\n    ChatGPT can still be used interactively for research/review, but the local daemon\n    does not depend on paid OpenAI API calls.
     """
     local = now.astimezone(NY)
     return {
@@ -200,7 +170,7 @@ def heartbeat_once(cfg: dict[str, Any], now: datetime) -> dict[str, Any]:
         "cadence_seconds": cfg["heartbeat"]["cadence_seconds"],
         "lanes": cfg["lanes"],
         "decision": "NO_TRADE",
-        "reason": "signal adapters not yet activated; dependency doctor must pass first",
+        "reason": "deterministic signal engine active path requires Massive data; no paid OpenAI API dependency",
         "fail_closed": True,
     }
 
