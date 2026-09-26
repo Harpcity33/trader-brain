@@ -1,0 +1,42 @@
+name: Paper options validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Record tested revision
+        run: |
+          git rev-parse HEAD
+          python3 --version
+      - name: Run all unit tests
+        run: python3 -B -m unittest discover -s tests -v
+      - name: Validate clean tracked source
+        if: always()
+        run: |
+          clean_dir="$(mktemp -d)"
+          git archive HEAD | tar -x -C "$clean_dir"
+          cd "$clean_dir"
+          python3 -B scripts/validate_repository.py
+      - name: Validate paper runtime configuration
+        if: always()
+        run: python3 -B scripts/paper_options_runtime.py check
