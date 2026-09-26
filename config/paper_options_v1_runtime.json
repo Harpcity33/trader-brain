@@ -55,5 +55,5 @@
     "options_15m": 3,
     "momentum_5m": 3
   },
-  "runtime_status": "NOT_STARTED_REQUIRES_PERSISTENT_SCHEDULER"
+  "runtime_status": "ENGINE_IMPLEMENTED_RESTART_REQUIRED"
 }
