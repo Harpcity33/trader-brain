@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "universe": ["SPY","QQQ","IWM","AAPL","MSFT","NVDA","AMD","AMZN","META","GOOGL","TSLA","NFLX","AVGO","MU","PLTR","COIN","HOOD","MARA","RIVN","SOFI","BAC","JPM","XOM","CVX","LLY","UNH","BA","CAT","DIS","UBER"],
+  "max_candidates_per_lane": 3,
+  "max_open_positions": 2,
+  "signal": {
+    "five_minute": {
+      "minimum_relative_volume": 1.5,
+      "minimum_bars": 6,
+      "breakout_lookback_bars": 3,
+      "minimum_setup_score": 72
+    },
+    "fifteen_minute": {
+      "minimum_relative_volume": 1.25,
+      "minimum_bars": 4,
+      "breakout_lookback_bars": 2,
+      "minimum_setup_score": 74
+    }
+  },
+  "options": {
+    "min_dte": 7,
+    "max_dte": 21,
+    "min_abs_delta": 0.40,
+    "max_abs_delta": 0.70,
+    "max_spread_pct": 0.15,
+    "min_open_interest": 100,
+    "min_volume": 20,
+    "max_contracts": 1
+  },
+  "paper_execution": {
+    "entry_slippage_fraction_of_spread": 0.25,
+    "exit_slippage_fraction_of_spread": 0.25,
+    "stop_loss_pct_of_premium": 0.25,
+    "take_profit_pct_of_premium": 0.50,
+    "stale_quote_seconds": 180
+  }
+}
