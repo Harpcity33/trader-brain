@@ -1,37 +1,13 @@
 {
-  "version": 1,
+  "version": 2,
   "universe": ["SPY","QQQ","IWM","AAPL","MSFT","NVDA","AMD","AMZN","META","GOOGL","TSLA","NFLX","AVGO","MU","PLTR","COIN","HOOD","MARA","RIVN","SOFI","BAC","JPM","XOM","CVX","LLY","UNH","BA","CAT","DIS","UBER"],
   "max_candidates_per_lane": 3,
   "max_open_positions": 2,
   "signal": {
-    "five_minute": {
-      "minimum_relative_volume": 1.5,
-      "minimum_bars": 6,
-      "breakout_lookback_bars": 3,
-      "minimum_setup_score": 72
-    },
-    "fifteen_minute": {
-      "minimum_relative_volume": 1.25,
-      "minimum_bars": 4,
-      "breakout_lookback_bars": 2,
-      "minimum_setup_score": 74
-    }
+    "five_minute": {"minimum_relative_volume": 1.5, "minimum_bars": 6, "breakout_lookback_bars": 3, "minimum_setup_score": 72},
+    "fifteen_minute": {"minimum_relative_volume": 1.25, "minimum_bars": 4, "breakout_lookback_bars": 2, "minimum_setup_score": 74}
   },
-  "options": {
-    "min_dte": 7,
-    "max_dte": 21,
-    "min_abs_delta": 0.40,
-    "max_abs_delta": 0.70,
-    "max_spread_pct": 0.15,
-    "min_open_interest": 100,
-    "min_volume": 20,
-    "max_contracts": 1
-  },
-  "paper_execution": {
-    "entry_slippage_fraction_of_spread": 0.25,
-    "exit_slippage_fraction_of_spread": 0.25,
-    "stop_loss_pct_of_premium": 0.25,
-    "take_profit_pct_of_premium": 0.50,
-    "stale_quote_seconds": 180
-  }
+  "options": {"min_dte": 7, "max_dte": 21, "min_abs_delta": 0.40, "max_abs_delta": 0.70, "max_spread_pct": 0.15, "min_open_interest": 100, "min_volume": 20, "max_contracts": 1},
+  "paper_execution": {"entry_slippage_fraction_of_spread": 0.25, "exit_slippage_fraction_of_spread": 0.25, "stop_loss_pct_of_premium": 0.25, "take_profit_pct_of_premium": 0.50, "stale_quote_seconds": 30, "fee_per_contract_per_side": 0.65},
+  "assumptions": {"fees": "Illustrative paper fee, not a broker quote", "fills": "Observed ask plus slippage in; bid minus slippage out; not a guaranteed limit fill", "volume_ratio": "Latest completed candle divided by recent candle median, not time-of-day historical RVOL", "weekly_capacity": "Reserve full remaining value of all open options; weekly allowance never expands above Monday's 10 percent budget"}
 }

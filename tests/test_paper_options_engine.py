@@ -26,8 +26,9 @@ class DummyContract:
 
 class PaperOptionsEngineTests(unittest.TestCase):
     def test_five_minute_breakout_signal(self):
-        now = datetime(2026, 9, 28, 10, 5, tzinfo=timezone.utc)
-        base = int(datetime(2026, 9, 28, 9, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        # Six completed bars from 09:30 to 10:00 New York; never premarket data.
+        now = datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc)
+        base = int(datetime(2026, 9, 28, 13, 30, tzinfo=timezone.utc).timestamp() * 1000)
         bars = []
         for i in range(6):
             bars.append(
