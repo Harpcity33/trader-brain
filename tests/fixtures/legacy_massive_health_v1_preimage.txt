@@ -1,0 +1,121 @@
+
+# next exact legacy patch seam
+from zoneinfo import ZoneInfo
+
+from .config import RuntimeConfig
+from .policy import evaluate_shadow_candidate
+from .ranking import apply_weighted_opportunity_scale, build_preliminary_trade_plan
+from .signals import Bar, compute_market_signal, trigger_cross_payload
+
+# next exact legacy patch seam
+            config, api_key, self.stop_event, self.logger
+        )
+        self.client: MinimalWebSocket | None = None
+        self.dynamic_symbols: set[str] = set()
+        self.crossed_triggers: dict[str, float] = {}
+        self.bars: dict[str, deque[Bar]] = defaultdict(lambda: deque(maxlen=30))
+
+# next exact legacy patch seam
+                f"luld:{symbol}:{event.get('t')}:{indicator}",
+            )
+
+    def _handle_status(self, event: dict[str, Any]) -> None:
+        status = event.get("status")
+        message = str(event.get("message") or "")
+        if status in ("connected", "auth_success", "success"):
+            self.store.set_health("massive_websocket", "healthy", {"status": status})
+        elif status:
+            self.store.set_health("massive_websocket", "degraded", {"status": status, "message": message})
+            self.logger.warning("websocket_status status=%s message=%s", status, message)
+            if status == "error" and "access real-time data" in message.lower():
+                payload = {
+                    "schema_version": 1,
+                    "message": message,
+                    "required_action": (
+                        "Confirm Stocks Advanced and e-sign the stock exchange agreements in the "
+                        "Massive dashboard. Do not fall back to delayed data for live decisions."
+                    ),
+                }
+                self.emit(
+                    "DATA_ENTITLEMENT_MISSING", None, 100, payload,
+                    f"entitlement:{datetime.now(self.et).date().isoformat()}",
+                )
+                self.stop_event.set()
+
+    def _process_message(self, message: Any) -> None:
+        events = message if isinstance(message, list) else [message]
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get("ev")
+            if event_type == "AM":
+                self._handle_minute(event)
+            elif event_type == "A":
+                self._handle_second(event)
+            elif event_type == "Q":
+                self._handle_quote(event)
+            elif event_type == "LULD":
+                self._handle_luld(event)
+            elif event_type == "status":
+                self._handle_status(event)
+
+    def _refresh_dynamic_subscriptions(self) -> None:
+        if not self.client:
+            return
+        desired = set(self.store.all_candidate_symbols())
+        additions = desired - self.dynamic_symbols
+        removals = self.dynamic_symbols - desired
+        def chunks(symbols: set[str], size: int = 200):
+            ordered = sorted(symbols)
+            for start in range(0, len(ordered), size):
+                yield ordered[start:start + size]
+        for batch in chunks(additions):
+            params = ",".join([*(f"Q.{symbol}" for symbol in batch), *(f"A.{symbol}" for symbol in batch)])
+            self.client.send_json({"action": "subscribe", "params": params})
+        for batch in chunks(removals):
+            params = ",".join([*(f"Q.{symbol}" for symbol in batch), *(f"A.{symbol}" for symbol in batch)])
+            self.client.send_json({"action": "unsubscribe", "params": params})
+        if additions or removals:
+            self.dynamic_symbols = desired
+            status = "healthy" if len(desired) <= self.config.quote_watch_count else "capacity_warning"
+            self.store.set_health(
+                "promoted_candidate_coverage",
+                status,
+                {
+                    "promoted_candidates": len(desired),
+                    "quote_and_second_subscriptions": len(desired),
+                    "coverage_pct": 100.0,
+                    "attention_budget": self.config.quote_watch_count,
+                    "warning": (
+                        "All promoted candidates remain subscribed, but count exceeds the tested attention budget."
+                        if status != "healthy" else None
+                    ),
+                },
+            )
+            self.logger.info("dynamic_universe size=%d added=%d removed=%d", len(desired), len(additions), len(removals))
+
+    def _connect(self) -> None:
+        client = MinimalWebSocket(self.config.websocket_url)
+        client.connect()
+        connected = client.recv_json(timeout=10)
+        self._process_message(connected)
+        client.send_json({"action": "auth", "params": self.api_key})
+        auth = client.recv_json(timeout=10)
+        self._process_message(auth)
+        auth_events = auth if isinstance(auth, list) else [auth]
+        if not any(isinstance(item, dict) and item.get("status") == "auth_success" for item in auth_events):
+            client.close()
+            raise WebSocketError("Massive WebSocket authentication did not succeed")
+        client.send_json({"action": "subscribe", "params": ",".join(self.BASE_SUBSCRIPTIONS)})
+        self.client = client
+        self.dynamic_symbols.clear()
+        self._refresh_dynamic_subscriptions()
+        self.last_message_monotonic = time_module.monotonic()
+        self.logger.info("websocket_authenticated subscription_request=%s", ",".join(self.BASE_SUBSCRIPTIONS))
+
+    def _disconnect(self) -> None:
+        if self.client:
+            self.client.close()
+            self.client = None
+
+# End exact legacy seam.
