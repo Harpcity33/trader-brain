@@ -1,0 +1,88 @@
+{
+  "schema_version": "titan_robinhood_route_decision_v1",
+  "generated_at": "2026-09-08T07:18:52.364Z",
+  "decision": "UNATTENDED_UNSUPPORTED_ON_VERIFIED_ROUTE",
+  "decision_scope": "The currently configured and authenticated Codex Streamable HTTP connection only; this is not a claim about undocumented or future Robinhood products.",
+  "documented_endpoint": "https://agent.robinhood.com/mcp/trading",
+  "configured_endpoint": "https://agent.robinhood.com/mcp/trading",
+  "endpoint_match": true,
+  "transport": "streamable_http",
+  "authorization": {
+    "method": "OAuth",
+    "status": "authenticated",
+    "granted_scopes": "NOT_EXPOSED_BY_CLIENT_STATUS",
+    "credential_exported": false,
+    "credential_reused_by_daemon": false,
+    "metadata_provenance": "authenticated Codex app-server view of the configured Robinhood route",
+    "origin_initialize_and_tools_list_cursor": "NOT_EXPOSED_BY_CODEX_APP_SERVER"
+  },
+  "versions": {
+    "client": "codex-cli 0.151.0-alpha.7.2",
+    "advertised_server_name": "robinhood-trading",
+    "advertised_server_version": "1.4.0"
+  },
+  "inventory": {
+    "configured_tool_count": 45,
+    "authenticated_discovered_tool_count": 44,
+    "configured_not_discovered": [
+      "get_advanced_orders"
+    ],
+    "client_status_page_count": 6,
+    "local_helper_page_count": 7,
+    "local_helper_inventory_complete": true,
+    "local_helper_inventory_sha256": "7fa1cca40e44864aceeec4929228d55a8f5541dc9bdd3d3d89ebab0bb4ba45c9",
+    "pagination_result": "NO_CLIENT_STATUS_DIVERGENCE_OBSERVED_ORIGIN_CURSOR_NOT_EXPOSED",
+    "pagination_bug_assumed": false
+  },
+  "server_advertised_confirmation_contract": [
+    {
+      "tool": "place_equity_order",
+      "source": "description.workflow",
+      "exact_text": "get explicit user confirmation before calling this tool",
+      "additional_semantics": "The description permits skipping review only after an explicit owner request to bypass it; no such request has been made and the approved Titan policy independently requires exact review and confirmation."
+    },
+    {
+      "tool": "cancel_equity_order",
+      "source": "description",
+      "exact_text": "Always confirm with the user before calling",
+      "additional_semantics": "No unattended cancellation mode is advertised."
+    },
+    {
+      "tool": "review_equity_order",
+      "source": "outputSchema.guide.description",
+      "exact_text": "get explicit confirmation before calling place_equity_order"
+    },
+    {
+      "tool": "place_option_order",
+      "source": "description.workflow",
+      "exact_text": "get explicit user confirmation before calling this tool"
+    },
+    {
+      "tool": "cancel_option_order",
+      "source": "description",
+      "exact_text": "Always confirm with the user before calling"
+    }
+  ],
+  "authenticated_read_health": {
+    "checked_at": "2026-09-08T07:18:52.364Z",
+    "account_binding": "ending-7153",
+    "account_type": "limited_margin",
+    "brokerage_account_type": "individual",
+    "account_state": "active",
+    "agent_accessible": true,
+    "get_portfolio": "SUCCEEDED",
+    "get_equity_positions": "SUCCEEDED_FIRST_AND_ONLY_PAGE",
+    "get_option_positions_nonzero": "SUCCEEDED_FIRST_AND_ONLY_PAGE",
+    "get_equity_orders_since_2026_09_01": "SUCCEEDED_FIRST_AND_ONLY_PAGE",
+    "get_option_orders_since_2026_09_01": "SUCCEEDED_FIRST_AND_ONLY_PAGE",
+    "broker_mutation_invoked": false,
+    "broker_review_invoked": false
+  },
+  "public_documentation": {
+    "connection_source": "https://robinhood.com/us/en/support/articles/agentic-trading-overview/",
+    "trading_source": "https://robinhood.com/us/en/support/articles/trading-with-your-agent/",
+    "observed_discrepancy": "Robinhood's public overview describes agents acting without transaction-by-transaction approval, while this authenticated tool contract and the preserved Titan policy require attended confirmation for the full order lifecycle."
+  },
+  "conclusion": "The supported endpoint is resolved and genuinely authenticated for reads. It cannot be used as the unattended full-live execution adapter while preserving the current mandatory confirmation policy, and its advertised cancel contract independently prevents unattended lifecycle control. No confirmation was bypassed and no credential was copied into the local daemon.",
+  "remaining_provider_decision": "Robinhood must identify a separately supported local-client authorization/contract with unattended place, cancel, exact-reference lookup, exhaustive conditional-order coverage, and durable renewal semantics; otherwise the owner must explicitly select and authorize a different supported broker."
+}

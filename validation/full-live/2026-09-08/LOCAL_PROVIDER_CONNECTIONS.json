@@ -1,0 +1,81 @@
+{
+  "schema_version": "titan_local_provider_connection_report_2026-09-08_v1",
+  "checked_at": "2026-09-08T08:21:03.887540+00:00",
+  "probe_network": true,
+  "broker_mutations_invoked": [],
+  "broker_reviews_invoked": [],
+  "notification_messages_sent": [],
+  "connections": [
+    {
+      "component": "massive_rest",
+      "implementation_id": "titan.massive.standard_library.rest_wss.keychain.v1",
+      "credential_source_label": "macos-keychain:titan-massive-api",
+      "provider_binding_id": "e98f0191aaeaff9f41cd5f498bd943235d03da91391032884203f1b642804ff1",
+      "endpoint": "https://api.massive.com",
+      "status": "CONNECTED",
+      "authenticated": true,
+      "last_successful_check": "2026-09-08T08:21:04.042552+00:00",
+      "check_kind": "authenticated_market_status_read",
+      "error_code": null,
+      "action_required": null,
+      "account_or_destination_binding": null
+    },
+    {
+      "component": "massive_stream",
+      "implementation_id": "titan.massive.standard_library.rest_wss.keychain.v1",
+      "credential_source_label": "macos-keychain:titan-massive-api",
+      "provider_binding_id": "e98f0191aaeaff9f41cd5f498bd943235d03da91391032884203f1b642804ff1",
+      "endpoint": "wss://socket.massive.com/stocks",
+      "status": "CONNECTED",
+      "authenticated": true,
+      "last_successful_check": "2026-09-08T08:21:04.187123+00:00",
+      "check_kind": "authenticated_wss_handshake",
+      "error_code": null,
+      "action_required": null,
+      "account_or_destination_binding": null
+    },
+    {
+      "component": "robinhood_broker_and_tradability",
+      "implementation_id": "titan.robinhood.agentic_mcp.verified_attended_contract.v1",
+      "credential_source_label": "codex-managed-oauth-not-exportable",
+      "provider_binding_id": null,
+      "endpoint": "https://agent.robinhood.com/mcp/trading",
+      "status": "BLOCKED",
+      "authenticated": false,
+      "last_successful_check": null,
+      "check_kind": "verified_client_contract",
+      "error_code": "UNATTENDED_UNSUPPORTED_ON_VERIFIED_ROUTE",
+      "action_required": "provider-supported standalone daemon authorization and unattended lifecycle contract required",
+      "account_or_destination_binding": "ending-7153",
+      "related_authenticated_attended_read": "See ROBINHOOD_ROUTE_DECISION.json; the Codex route successfully read the bound account and all current equity/option position and order pages."
+    },
+    {
+      "component": "deterministic_local_quality",
+      "implementation_id": "titan.deterministic_local_quality.massive_evidence.v1",
+      "credential_source_label": "none-release-contained",
+      "provider_binding_id": null,
+      "endpoint": null,
+      "status": "BLOCKED",
+      "authenticated": false,
+      "last_successful_check": null,
+      "check_kind": "release_implementation_present",
+      "error_code": "OWNER_QUALITY_THRESHOLDS_AND_BROKER_CAPACITY_JOIN_REQUIRED",
+      "action_required": "approve or amend the one proposed owner policy, then bind fresh broker capacity at the final gate",
+      "account_or_destination_binding": null
+    },
+    {
+      "component": "gmail_notification",
+      "implementation_id": "titan.gmail_api.desktop_oauth.keychain_refresh.v1",
+      "credential_source_label": "macos-keychain labels in config/provider_bindings.json",
+      "provider_binding_id": null,
+      "endpoint": "https://oauth2.googleapis.com/token",
+      "status": "NOT_CONFIGURED",
+      "authenticated": false,
+      "last_successful_check": null,
+      "check_kind": "configuration",
+      "error_code": "GMAIL_OWNER_ROUTE_NOT_CONFIGURED",
+      "action_required": "owner must authorize durable desktop OAuth gmail.send and bind the exact destination; one delivery test is then required",
+      "account_or_destination_binding": null
+    }
+  ]
+}

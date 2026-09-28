@@ -1,0 +1,66 @@
+{
+  "schema_version": "titan_authenticated_read_only_broker_snapshot_v1",
+  "observed_at_utc": "2026-09-08T02:30:09.669Z",
+  "account_masked": "ending-7153",
+  "read_only": true,
+  "broker_mutation_tools_invoked": [],
+  "target_account": {
+    "state": "active",
+    "brokerage_account_type": "individual",
+    "trading_type": "limited_margin",
+    "management_type": "self_directed",
+    "accessible_to_authenticated_agent": true
+  },
+  "portfolio_redacted": {
+    "exact_dollar_values_committed": false,
+    "cash_nonnegative": true,
+    "buying_power_nonnegative": true,
+    "unleveraged_buying_power_nonnegative": true,
+    "cash_equals_unleveraged_buying_power": true,
+    "equity_value_zero": true,
+    "options_value_zero": true,
+    "pending_deposits_zero": true,
+    "sizing_ceiling_verified": "unleveraged_buying_power"
+  },
+  "exposed_order_and_position_pages": {
+    "equity_positions": {
+      "pages_consumed": 1,
+      "next_was_empty": true,
+      "count": 0
+    },
+    "equity_orders": {
+      "pages_consumed": 1,
+      "next_was_empty": true,
+      "count": 16,
+      "nonterminal_count": 0,
+      "states": [
+        "cancelled",
+        "filled"
+      ]
+    },
+    "nonzero_option_positions": {
+      "pages_consumed": 1,
+      "next_was_empty": true,
+      "count": 0
+    },
+    "option_orders": {
+      "pages_consumed": 1,
+      "next_was_empty": true,
+      "count": 0,
+      "nonterminal_count": 0,
+      "states": []
+    }
+  },
+  "equity_realized_pnl_day": {
+    "window": "day",
+    "total_returns": "0",
+    "bucket_count": 1,
+    "closing_trade_count": 0
+  },
+  "coverage_limits": {
+    "advanced_order_tool_advertised": false,
+    "broker_preserved_client_reference_in_equity_order_schema": false,
+    "whole_broker_flatness_proven": false,
+    "reason": "Every page exposed by the standard-equity and option tools was consumed, but the authenticated server did not advertise advanced-order reads and its equity-order schema omitted a broker-preserved client reference."
+  }
+}

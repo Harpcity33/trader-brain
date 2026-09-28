@@ -8,14 +8,32 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
 from .models import Instrument, RiskRecord, Session
 
 
+def _finite(name: str, value: float) -> float:
+    """Return one finite numeric value or fail closed.
+
+    IEEE-754 ``NaN`` and infinities make ordinary comparison-based guards
+    unreliable.  Money and risk inputs cross a production safety boundary, so
+    they are rejected before any arithmetic is attempted.
+    """
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return value
+
+
 def _non_negative(name: str, value: float) -> float:
-    value = float(value)
+    value = _finite(name, value)
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
     return value
@@ -52,12 +70,14 @@ class RiskLimits:
             "weekly_loss_lock_pct",
             "live_drawdown_review_pct",
         ):
-            value = float(getattr(self, name))
+            value = _finite(name, getattr(self, name))
             if not 0 < value <= 1:
                 raise ValueError(f"{name} must be in (0, 1]")
         for name, value in self.absolute_dollar_ceilings.items():
-            if value is not None and float(value) <= 0:
-                raise ValueError(f"{name} must be positive or null")
+            if value is not None:
+                ceiling = _finite(name, value)
+                if ceiling <= 0:
+                    raise ValueError(f"{name} must be positive or null")
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "RiskLimits":
@@ -102,7 +122,7 @@ class RiskLimits:
         pct_field: str,
         absolute_field: str,
     ) -> float:
-        usable_equity = float(usable_equity)
+        usable_equity = _finite("usable_equity", usable_equity)
         if usable_equity <= 0:
             raise ValueError("usable_equity must be broker-confirmed and positive")
         percentage_cap = usable_equity * float(getattr(self, pct_field))
@@ -127,8 +147,12 @@ class RiskContext:
     existing_execution_reserve_dollars: float = 0.0
 
     def __post_init__(self) -> None:
-        if float(self.current_usable_equity) <= 0:
+        if _finite("current_usable_equity", self.current_usable_equity) <= 0:
             raise ValueError("current_usable_equity must be positive")
+        for name in ("daily_realized_pnl", "weekly_realized_pnl"):
+            value = getattr(self, name)
+            if value is not None:
+                _finite(name, value)
         for name in (
             "open_planned_risk_dollars",
             "pending_planned_risk_dollars",
@@ -137,26 +161,31 @@ class RiskContext:
             "existing_execution_reserve_dollars",
         ):
             _non_negative(name, getattr(self, name))
-        if self.peak_equity is not None and float(self.peak_equity) <= 0:
-            raise ValueError("peak_equity must be positive when supplied")
+        if self.peak_equity is not None:
+            if _finite("peak_equity", self.peak_equity) <= 0:
+                raise ValueError("peak_equity must be positive when supplied")
 
     @property
     def daily_realized_loss_dollars(self) -> float | None:
         if self.daily_realized_pnl is None:
             return None
-        return max(0.0, -float(self.daily_realized_pnl))
+        return max(0.0, -_finite("daily_realized_pnl", self.daily_realized_pnl))
 
     @property
     def weekly_realized_loss_dollars(self) -> float | None:
         if self.weekly_realized_pnl is None:
             return None
-        return max(0.0, -float(self.weekly_realized_pnl))
+        return max(0.0, -_finite("weekly_realized_pnl", self.weekly_realized_pnl))
 
     @property
     def drawdown_dollars(self) -> float | None:
         if self.peak_equity is None:
             return None
-        return max(0.0, float(self.peak_equity) - float(self.current_usable_equity))
+        return max(
+            0.0,
+            _finite("peak_equity", self.peak_equity)
+            - _finite("current_usable_equity", self.current_usable_equity),
+        )
 
 
 @dataclass(frozen=True)
@@ -178,9 +207,12 @@ def calculate_equity_risk(
 
     if isinstance(shares, bool) or int(shares) != shares or shares <= 0:
         raise ValueError("shares must be a positive whole number")
-    entry_price = float(entry_price)
-    structural_stop = float(structural_stop)
-    reserve_per_share = float(liquidity_slippage_reserve_per_share)
+    entry_price = _finite("entry_price", entry_price)
+    structural_stop = _finite("structural_stop", structural_stop)
+    reserve_per_share = _finite(
+        "liquidity_slippage_reserve_per_share",
+        liquidity_slippage_reserve_per_share,
+    )
     if entry_price <= 0 or structural_stop <= 0:
         raise ValueError("entry_price and structural_stop must be positive")
     if structural_stop >= entry_price:
@@ -211,11 +243,11 @@ def calculate_long_option_risk(
         raise ValueError("contracts must be a positive whole number")
     if contract_multiplier <= 0:
         raise ValueError("contract_multiplier must be positive")
-    premium = float(premium_per_share) * contracts * contract_multiplier
+    premium = _finite("premium_per_share", premium_per_share) * contracts * contract_multiplier
     fees = _non_negative("fees_dollars", fees_dollars)
     full_premium_loss = premium + fees
-    tactical_loss = float(tactical_loss_dollars)
-    reserve = float(execution_reserve_dollars)
+    tactical_loss = _finite("tactical_loss_dollars", tactical_loss_dollars)
+    reserve = _finite("execution_reserve_dollars", execution_reserve_dollars)
     if premium <= 0:
         raise ValueError("premium_per_share must be positive")
     if tactical_loss <= 0 or tactical_loss > full_premium_loss:
@@ -252,7 +284,7 @@ def calculate_debit_spread_risk(
 
 
 def _round_money(value: float) -> float:
-    return round(float(value) + 0.0, 2)
+    return round(_finite("money", value) + 0.0, 2)
 
 
 def assess_new_trade(

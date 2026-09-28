@@ -1,0 +1,203 @@
+{
+  "schema_version": "titan_full_live_config_2026-09-08_v1",
+  "runtime_id": "titan_full_live_ibkr_2026-09-14_v1",
+  "strategy_id": "titan_live_attended_regular_hours_2026-09-14_v1",
+  "owner_policy_approval": {
+    "state": "approved_operational_values_applied_activation_not_authorized",
+    "proposal_path": "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+    "proposal_sha256": "cc9de013e880864b8d7400837a71c8742b3116a2fe7269f252cfc88bd50617cf",
+    "approval_record_path": "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    "approval_record_sha256": "d27a1cc0c79629292f1353652440c984d3c7d510bcf3e08c4c595f25da7f4aae"
+  },
+  "owner_risk_policy_amendment": {
+    "amendment_path": "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
+    "amendment_sha256": "78571bb3f19157d5f2a8d81976ba7a4a4f0bdc782683b276130b59ca1627c2ad"
+  },
+  "deployment": {
+    "profile_id": "ibkr-local-live-ending-3103-v1",
+    "install_subtree": "Application Support/Titan Momentum/full-live-ibkr-ending-3103",
+    "coordinator_launchd_label": "com.harpcity.trader-brain-full-live-ibkr-3103",
+    "notification_launchd_label": "com.harpcity.trader-brain-full-live-ibkr-3103-notifications"
+  },
+  "account": {
+    "account_key": "ibkr-live-ending-3103",
+    "masked_identifier": "ending-3103",
+    "required_last4": "3103",
+    "allowed_type": "no_borrow_margin",
+    "margin_debit_allowed": false
+  },
+  "local_provider_profile": {
+    "schema_version": "titan_ibkr_local_provider_profile_v2",
+    "profile_id": "ibkr-local-live-ending-3103-v1",
+    "provider": "interactive_brokers",
+    "environment": "live",
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 4001,
+      "loopback_only": true
+    },
+    "read_client_id": 19735,
+    "command_client_id": 19736,
+    "account_binding_source": "managed_accounts_runtime_last4_match",
+    "persist_full_account_identifier": false,
+    "sdk": {
+      "distribution": "official_tws_python_api",
+      "ibapi_version": "10.50.2",
+      "protobuf_version": "5.29.5",
+      "expected_inventory_sha256": "3869276715cc00367a2927bfeda3b8c9741b9d81f6df25a3d6f93aae52b70ddc",
+      "installation_mode": "installer_attested_snapshot"
+    }
+  },
+  "scope": {
+    "allowed_instruments": ["stock"],
+    "allowed_direction": "long",
+    "whole_shares_only": true,
+    "minimum_price_exclusive": "5.00",
+    "minimum_session_volume_inclusive": 750000,
+    "options_enabled": false,
+    "shorting_enabled": false,
+    "fractional_enabled": false,
+    "averaging_down_enabled": false,
+    "add_enabled": false,
+    "reentry_enabled": false,
+    "stop_widening_enabled": false,
+    "overnight_enabled": false
+  },
+  "sessions": {
+    "timezone": "America/New_York",
+    "premarket_start": "07:00",
+    "premarket_analysis_interval_minutes": 30,
+    "premarket_mode": "analysis_only",
+    "premarket_orders_enabled": false,
+    "regular_entry_start": "09:35",
+    "regular_entry_cutoff": "15:30",
+    "closeout_start_minutes_before_close": 10,
+    "flat_deadline_minutes_before_close": 5
+  },
+  "risk": {
+    "model": "account_day_starting_equity_percentage",
+    "limits_path": "config/risk_limits_ibkr_daily_starting_equity.json",
+    "limits_live_provenance_verified": false,
+    "limits_provenance_state": "owner_approved_daily_starting_equity_amendment_bound_to_2026-09-14_artifact",
+    "daily_loss_fraction": "0.10",
+    "daily_profit_aspiration_fraction": "0.15",
+    "post_goal_floor": null,
+    "positive_execution_reserve_required": true,
+    "loss_lock_is_irreversible_for_session": true,
+    "daily_loss_requires_guarded_closeout": true,
+    "authenticated_daily_starting_equity_required": true,
+    "authenticated_daily_external_cash_flow_required": true
+  },
+  "exits": {
+    "target_exit_mode": "first_target_completed_minute_full_exit",
+    "target_index": 0,
+    "target_trigger": "fresh_aligned_completed_one_minute_close_at_or_above_target",
+    "quantity": "full_broker_confirmed_sellable_position",
+    "cancel_working_sells_before_exit": true,
+    "require_strictly_newer_cancel_evidence": true,
+    "deadline_feasibility_gate": true
+  },
+  "evidence": {
+    "broker_snapshot_max_age_seconds": 5,
+    "quote_max_age_seconds": 5,
+    "completed_bar_max_age_seconds": 120,
+    "plan_ttl_seconds": 30,
+    "require_completed_bar_causality": true,
+    "require_robinhood_tradability": false,
+    "require_broker_contract_tradability": true,
+    "require_displayed_depth": true,
+    "require_advanced_order_reconciliation": true,
+    "max_spread_bps": 25.0,
+    "spread_denominator": "executable_nbbo_midpoint",
+    "minimum_depth_multiple": 5.0,
+    "depth_source": "fresh_executable_side_top_of_book",
+    "quote_size_unit": "shares"
+  },
+  "market_data": {
+    "adapter": "local_titan_massive_sqlite_read_only",
+    "database_path": "~/Library/Application Support/Titan Momentum/runtime/titan-intelligence.sqlite3",
+    "producer_pilot_id": "titan_momentum_equity",
+    "producer_book_mode": "SHADOW",
+    "producer_decision_contract_hash": "0b1cfbd1fb9524f7dbda47a046422258c23978e396d0f9d4b150ede888128350",
+    "health_max_age_seconds": 15,
+    "candidate_max_age_seconds": 120,
+    "max_active_candidates": 64,
+    "source_is_execution_authority": false
+  },
+  "discovery": {
+    "adapter": "local_massive_full_live_pipeline",
+    "pipeline_configured": false,
+    "instrument_evidence_provider": "ibkr_contract_details_staged",
+    "quality_revalidation_provider": "unavailable",
+    "score_policy": "ranking_only",
+    "minimum_setup_score": null,
+    "minimum_execution_score": null,
+    "a_plus_enabled": false,
+    "a_plus_setup_score": null,
+    "a_plus_execution_score": null
+  },
+  "execution": {
+    "execution_authority_mode": "attended_only",
+    "ibkr_daily_risk_baseline_schema": "titan_ibkr_daily_starting_equity_risk_baseline_2026-09-14_v1",
+    "order_ack_timeout_seconds": 10,
+    "reconcile_interval_seconds": 2,
+    "unknown_reconcile_interval_seconds": 1,
+    "protection_mode": "sequential_verified",
+    "protection_order_type": "stop_market",
+    "protection_time_in_force": "gtc",
+    "protection_market_hours": "regular_hours",
+    "block_new_entries_while_unprotected_or_unresolved": true,
+    "order_precaution_bypass_allowed": false,
+    "one_account_writer_required": true,
+    "durable_intent_before_submit": true,
+    "automatic_retry_unknown_submission": false,
+    "unknown_submission_behavior": "reconcile_without_retry",
+    "ambiguous_cancel_behavior": "positive_working_evidence_then_new_bounded_intent",
+    "ambiguous_cancel_absence_is_retry_evidence": false,
+    "ambiguous_cancel_resolving_receipt_can_dispatch": false,
+    "minimum_commission_reserve_per_order_dollars": 1.0,
+    "minimum_entry_lifecycle_fee_reserve_dollars": 2.0,
+    "local_mutation_interlock_enabled": false,
+    "broker_adapter": "ibkr_local_gateway_staged",
+    "supported_unattended_mutation": false,
+    "per_mutation_user_confirmation_required": true
+  },
+  "notifications": {
+    "durable_outbox_required": true,
+    "delivery_sink": "local_jsonl_staging",
+    "intended_delivery_sink": "gmail_api",
+    "intended_destination": "owner_authorized_gmail_binding_required",
+    "provider": "gmail",
+    "provider_composition_id": "titan.gmail_api.rfc2822.oauth_injected.v1",
+    "destination_bridge_configured": false,
+    "owner_destination_consent_required": true,
+    "route_bound_visible_test_required": true,
+    "pause_new_entries_on_delivery_failure": true,
+    "continue_reconciliation_protection_exits_and_closeout": true,
+    "suppress_scan_chatter": true,
+    "redact_account_to_last4": true,
+    "additional_paid_services": 0
+  },
+  "authority": {
+    "live_entries_enabled": false,
+    "owner_activation_required": true,
+    "activation_record_required": true,
+    "blockers": [
+      "IBKR_RUNTIME_AUTHENTICATION_RECHECK_REQUIRED",
+      "IBKR_UNCHANGED_PRECAUTION_SETTINGS_RECHECK_REQUIRED",
+      "IBKR_EXTERNAL_DATA_NO_BYPASS_TRANSMIT_CONTRACT_UNRESOLVED",
+      "IBKR_MARKET_DATA_API_ACKNOWLEDGEMENT_INCOMPLETE",
+      "IBKR_API_MARKET_DATA_ENTITLEMENT_UNVERIFIED",
+      "IBKR_TIERED_ALL_IN_FEE_BOUND_NOT_VERIFIED",
+      "SUPPORTED_IBKR_TRANSPORT_NOT_SELECTED",
+      "LOCAL_MUTATION_INTERLOCK_DISABLED",
+      "SUPPORTED_LIVE_DISCOVERY_NOT_SELECTED",
+      "AUTHENTICATED_DAILY_STARTING_EQUITY_AND_CASH_FLOW_EVIDENCE_REQUIRED",
+      "IBKR_ALL_CLIENT_EXECUTION_COVERAGE_UNVERIFIED",
+      "NOTIFICATION_DESTINATION_BRIDGE_UNPROVEN",
+      "IBKR_MANAGED_CONTROL_KEY_NOT_PROVISIONED",
+      "IBKR_COMMAND_AUTHORITY_ARTIFACT_NOT_ISSUED",
+      "IBKR_PLAN_ARTIFACT_PIPELINE_NOT_ACTIVATED"
+    ]
+  }
+}

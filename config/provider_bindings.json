@@ -1,0 +1,75 @@
+{
+  "schema_version": "titan_local_provider_bindings_2026-09-08_v1",
+  "massive": {
+    "implementation_id": "titan.massive.standard_library.rest_wss.keychain.v1",
+    "credential_backend": "macos_keychain",
+    "credential_service": "titan-massive-api",
+    "credential_account": null,
+    "rest_base_url": "https://api.massive.com",
+    "websocket_url": "wss://socket.massive.com/stocks",
+    "scopes": ["stocks:read"],
+    "request_timeout_seconds": 3.0,
+    "stream_connect_timeout_seconds": 5.0,
+    "backfill_concurrency": 4
+  },
+  "robinhood": {
+    "implementation_id": "titan.robinhood.agentic_mcp.verified_attended_contract.v1",
+    "endpoint": "https://agent.robinhood.com/mcp/trading",
+    "configured_server": "robinhood_trading",
+    "server_version": "1.4.0",
+    "authorization_source": "codex-managed-oauth-not-exportable",
+    "account_binding": "ending-7153",
+    "standalone_daemon_authorized": false,
+    "unattended_mutations_supported": false,
+    "per_mutation_confirmation_required": true,
+    "advanced_order_inventory_advertised": false,
+    "decision": "UNATTENDED_UNSUPPORTED_ON_VERIFIED_ROUTE"
+  },
+  "quality": {
+    "implementation_id": "titan.deterministic_local_quality.massive_evidence.v1",
+    "source": "release-code-plus-fresh-massive-evidence",
+    "external_model_required": false
+  },
+  "gmail": {
+    "implementation_id": "titan.gmail_api.desktop_oauth.keychain_refresh.v1",
+    "enabled": false,
+    "credential_backend": "macos_keychain",
+    "desktop_client_service": "titan-full-live-gmail-desktop-client",
+    "refresh_token_service": "titan-full-live-gmail-refresh-token",
+    "consent_status_service": "titan-full-live-gmail-consent-status",
+    "sender_service": "titan-full-live-gmail-sender",
+    "destination_service": "titan-full-live-gmail-destination",
+    "credential_account": "ending-7153",
+    "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+    "durable_consent_status_required": ["production", "internal"],
+    "send_probe_authorized": false
+  },
+  "ibkr_gmail": {
+    "implementation_id": "titan.gmail_api.desktop_oauth.keychain_refresh.v1",
+    "enabled": false,
+    "credential_backend": "macos_keychain",
+    "desktop_client_service": "titan-full-live-ibkr-ending-3103-gmail-desktop-client",
+    "refresh_token_service": "titan-full-live-ibkr-ending-3103-gmail-refresh-token",
+    "consent_status_service": "titan-full-live-ibkr-ending-3103-gmail-consent-status",
+    "sender_service": "titan-full-live-ibkr-ending-3103-gmail-sender",
+    "destination_service": "titan-full-live-ibkr-ending-3103-gmail-destination",
+    "credential_account": "ibkr-live-ending-3103",
+    "account_key": "ibkr-live-ending-3103",
+    "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+    "durable_consent_status_required": ["production", "internal"],
+    "send_probe_authorized": false
+  },
+  "control": {
+    "credential_backend": "macos_keychain",
+    "authentication_key_service": "titan-full-live-control-authentication-key",
+    "credential_account": "ending-7153"
+  },
+  "ibkr_control": {
+    "implementation_id": "titan.hmac_control.ibkr.keychain.v1",
+    "credential_backend": "macos_keychain",
+    "authentication_key_service": "titan-full-live-ibkr-ending-3103-control-authentication-key",
+    "credential_account": "ibkr-live-ending-3103",
+    "account_key": "ibkr-live-ending-3103",
+    "authorization_binding_source": "signed_execution.production_authorization_binding_id"
+  }
+}

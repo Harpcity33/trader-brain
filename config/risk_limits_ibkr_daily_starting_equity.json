@@ -1,0 +1,35 @@
+{
+  "schema_version": "titan_account_day_starting_equity_percentage_2026-09-14_v1",
+  "model": "account_day_starting_equity_percentage",
+  "currency": "USD",
+  "daily_loss_fraction": "0.10",
+  "daily_profit_aspiration_fraction": "0.15",
+  "post_goal_floor": null,
+  "capacity_basis": "authenticated_fixed_account_day_starting_total_equity",
+  "daily_start_time": "00:00",
+  "daily_start_timezone": "America/New_York",
+  "daily_performance_basis": "current_total_equity_minus_external_net_cash_flow_minus_daily_starting_equity",
+  "daily_loss_action": "irreversible_entry_lock_and_guarded_closeout",
+  "profit_goal_action": "aspirational_only_no_forced_trade_or_profit_floor",
+  "maximum_entry_risk_capacity": "min_daily_loss_budget_and_remaining_adjusted_equity_headroom",
+  "includes_open_pnl": true,
+  "includes_incurred_fees": true,
+  "authenticated_daily_starting_equity_required": true,
+  "authenticated_daily_external_cash_flow_required": true,
+  "intraday_baseline_reset_allowed": false,
+  "all_open_pending_uncovered_unresolved_downside_required": true,
+  "positive_execution_reserve_required": true,
+  "commission_reserve_required": true,
+  "unleveraged_cash_and_buying_power_required": true,
+  "loss_lock_is_irreversible_for_session": true,
+  "owner_approval": {
+    "proposal_path": "validation/full-live/2026-09-14/PROPOSED_OWNER_POLICY_2026-09-14.md",
+    "proposal_sha256": "cc9de013e880864b8d7400837a71c8742b3116a2fe7269f252cfc88bd50617cf",
+    "approval_record_path": "validation/full-live/2026-09-14/OWNER_POLICY_APPROVAL_2026-09-14.md",
+    "approval_record_sha256": "d27a1cc0c79629292f1353652440c984d3c7d510bcf3e08c4c595f25da7f4aae"
+  },
+  "owner_risk_amendment": {
+    "amendment_path": "validation/full-live/2026-09-14/OWNER_DAILY_STARTING_EQUITY_POLICY_AMENDMENT_2026-09-14.md",
+    "amendment_sha256": "78571bb3f19157d5f2a8d81976ba7a4a4f0bdc782683b276130b59ca1627c2ad"
+  }
+}

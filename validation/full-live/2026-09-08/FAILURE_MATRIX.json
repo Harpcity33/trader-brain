@@ -1,0 +1,167 @@
+{
+  "schema_version": "titan_full_live_failure_matrix_2026-09-08_v1",
+  "target_date": "2026-09-08",
+  "evidence_class": "SYNTHETIC_AUTOMATED_SIMULATION_ONLY",
+  "live_broker_proof": false,
+  "live_market_proof": false,
+  "description": "Offline deterministic failure coverage. Passing these cases is not certification of a live or unattended broker integration.",
+  "cases": [
+    {
+      "id": "unknown-submission-after-acceptance",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Possible broker acceptance remains UNKNOWN and reserved; replay never resubmits.",
+      "test_refs": [
+        "tests.test_live_execution.EntryExecutionTests.test_response_lost_after_acceptance_is_unknown_reserved_and_never_retried"
+      ]
+    },
+    {
+      "id": "partial-fills",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Partial deltas and partial-rest-cancelled states remain explicit and recalculate exposure.",
+      "test_refs": [
+        "tests.test_live_broker.BrokerBoundaryTests.test_fake_is_protocol_compatible_and_ids_are_deterministic",
+        "tests.test_live_reconcile_protection.FillProtectionTests.test_duplicate_and_out_of_order_fills_create_one_obligation_per_delta"
+      ]
+    },
+    {
+      "id": "rejected-protection",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "A known protection rejection is not counted as working and requires reconciliation/risk reduction.",
+      "test_refs": [
+        "tests.test_live_execution.SafetyExecutionTests.test_known_safety_rejection_is_distinct_from_unknown",
+        "tests.test_live_reconcile_protection.FillProtectionTests.test_missing_protection_is_created_before_rejection_requires_safe_close"
+      ]
+    },
+    {
+      "id": "cancel-fill-race",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "A cancel acknowledgement is nonterminal and newer fill evidence wins the race before replacement sizing.",
+      "test_refs": [
+        "tests.test_live_execution.SafetyExecutionTests.test_cancel_rejection_with_fill_race_is_known_not_unknown",
+        "tests.test_live_reconcile_protection.ExitLifecycleTests.test_cancel_fill_race_and_partial_rest_cancel_force_recalculation"
+      ]
+    },
+    {
+      "id": "duplicate-process-events",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "One account writer owns authority and duplicate market events are idempotent.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_duplicate_process_and_market_events_cannot_create_duplicate_authority"
+      ]
+    },
+    {
+      "id": "restart-with-exposure",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Restart reconciles persisted/broker state and routes unprotected exposure before discovery.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_restart_with_unowned_exposure_reconciles_then_invokes_protection_before_discovery"
+      ]
+    },
+    {
+      "id": "manual-activity",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Unowned manual broker activity is identified and blocks new entries.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_manual_broker_activity_is_identified_and_blocks_entries"
+      ]
+    },
+    {
+      "id": "broker-429-5xx",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "A proven no-accept HTTP failure is distinct from an ambiguous post-send failure; ambiguity is never retried.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_broker_429_known_no_accept_is_not_confused_with_503_unknown_side_effect"
+      ]
+    },
+    {
+      "id": "revoked-credentials",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Authentication loss moves armed runtime to INCIDENT, not to an auth bypass or discovery.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_revoked_credentials_force_armed_runtime_into_incident_without_discovery"
+      ]
+    },
+    {
+      "id": "stale-crossed-invalid-quotes",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Crossed quotes are rejected structurally and stale quotes fail the entry-evidence gate.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_stale_crossed_quotes_and_market_data_loss_all_block_entry",
+        "tests.test_live_market_data.MarketDataTests.test_invalid_crossed_future_and_nonfinite_quotes_fail"
+      ]
+    },
+    {
+      "id": "market-data-loss",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Disconnects and sequence gaps poison entry evidence without disabling broker-side risk management.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_stale_crossed_quotes_and_market_data_loss_all_block_entry"
+      ]
+    },
+    {
+      "id": "storage-failure",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "A rejected SQLite write leaves no partial audit success and an fsync failure cannot mark notification delivery successful.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_storage_write_and_notification_fsync_failures_leave_no_false_success"
+      ]
+    },
+    {
+      "id": "notification-failure",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Failed delivery remains durably pending, obeys backoff, and later records one deduplicated delivery receipt.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_notification_failure_retries_after_backoff_and_dedupes_delivery"
+      ]
+    },
+    {
+      "id": "model-unavailability",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Broker reconciliation and deterministic session risk run before research; research failure pauses entries.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_model_or_research_failure_occurs_only_after_reconciliation_and_risk_latch"
+      ]
+    },
+    {
+      "id": "market-halt",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "A halted symbol is ineligible for entry even with otherwise fresh evidence.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_market_halt_is_a_hard_entry_gate"
+      ]
+    },
+    {
+      "id": "early-close",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "Entry cutoff, closeout, and flat-deadline lanes move relative to the verified early close.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_early_close_and_dst_change_lanes_from_verified_calendar"
+      ]
+    },
+    {
+      "id": "daylight-saving-time",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "America/New_York session clocks preserve local times while UTC offsets change across DST.",
+      "test_refs": [
+        "tests.test_live_failure_matrix.FullLiveFailureMatrixTests.test_early_close_and_dst_change_lanes_from_verified_calendar"
+      ]
+    },
+    {
+      "id": "account-policy-mismatch",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "An account mismatch fails closed before an entry tuple can reach execution.",
+      "test_refs": [
+        "tests.test_live_policy_calendar.PolicyCalendarTests.test_account_mismatch_fails_closed"
+      ]
+    },
+    {
+      "id": "non-finite-numerics",
+      "coverage_status": "COVERED_BY_SYNTHETIC_TEST",
+      "invariant": "NaN and infinity cannot enter risk, money, plan, or quote calculations.",
+      "test_refs": [
+        "tests.test_risk_nonfinite.NonFiniteRiskTests",
+        "tests.test_live_state.ExactNumericTests.test_nonfinite_and_boolean_values_fail_closed"
+      ]
+    }
+  ]
+}

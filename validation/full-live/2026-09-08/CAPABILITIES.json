@@ -1,0 +1,176 @@
+{
+  "schema_version": 2,
+  "document_type": "broker_capability_and_authority_evidence",
+  "generated_at_utc": "2026-09-08T02:47:04.212751Z",
+  "target_date": "2026-09-08",
+  "account_masked": "ending-7153",
+  "authenticated_inventory": {
+    "source": "installed Codex app-server mcpServerStatus/list using the existing local OAuth connection",
+    "read_only": true,
+    "broker_tools_invoked": [],
+    "installed_client_version": "codex-cli 0.151.0-alpha.7.2",
+    "codex_user_agent_version": "0.151.0-alpha.7.2",
+    "server_name": "robinhood-trading",
+    "server_version": "1.4.0",
+    "auth_status": "oAuth",
+    "configured_tool_count": 45,
+    "authenticated_advertised_tool_count": 44,
+    "current_model_visible_tool_count": 44,
+    "advertised_and_model_visible_names_match": true,
+    "configured_but_not_advertised": [
+      "get_advanced_orders"
+    ],
+    "inventory_sha256": "7fa1cca40e44864aceeec4929228d55a8f5541dc9bdd3d3d89ebab0bb4ba45c9",
+    "complete_inventory_artifact": "AUTHENTICATED_MCP_INVENTORY.json",
+    "client_visible_comparison_artifact": "CLIENT_VISIBLE_ROBINHOOD_TOOLS.json",
+    "pagination_evidence": {
+      "repository_helper_cursor_suite": "PASS",
+      "helper_pages_over_locally_sliced_authenticated_definitions": 7,
+      "codex_server_status_pages": 6,
+      "client_status_divergence_observed": false,
+      "origin_server_tool_cursor_observed": false,
+      "origin_server_result": "NOT_DIRECTLY_OBSERVABLE_THROUGH_APP_SERVER_STATUS",
+      "conclusion": "The reported first-page-only defect was not assumed. Helper pagination and client/status-map parity were tested, but the origin Robinhood tools/list cursor was not exposed, so this evidence neither reproduces nor rules out origin-server pagination. The configured-only advanced-order name is not classified as a pagination defect."
+    }
+  },
+  "attended_restriction_provenance": {
+    "platform_layer": "authenticated Robinhood MCP server contract presented through Codex",
+    "owner_policy_layer": "existing Titan attended strategy independently requires exact current review and confirmation for every mutation",
+    "not_proven": "a limitation of every Robinhood API or a provider-supported separately authorized daemon transport",
+    "server_contract": [
+      {
+        "tool": "place_equity_order",
+        "source": "server-advertised tool description",
+        "exact_text": "get explicit user confirmation before calling this tool"
+      },
+      {
+        "tool": "cancel_equity_order",
+        "source": "server-advertised tool description",
+        "exact_text": "Always confirm with the user before calling"
+      },
+      {
+        "tool": "review_equity_order",
+        "source": "server-advertised outputSchema.guide.description",
+        "exact_text": "get explicit confirmation before calling place_equity_order"
+      }
+    ],
+    "local_codex_default_tools_approval_mode": "approve",
+    "approval_mode_meaning": "Codex tool-call approval configuration does not erase the server-advertised confirmation contract or owner policy."
+  },
+  "authenticated_read_only_account_evidence": {
+    "artifact": "AUTHENTICATED_READ_ONLY_BROKER_SNAPSHOT.json",
+    "observed_at_utc": "2026-09-08T02:30:09.669Z",
+    "point_in_time_only": true,
+    "account": {
+      "state": "active",
+      "brokerage_account_type": "individual",
+      "trading_type": "limited_margin",
+      "management_type": "self_directed"
+    },
+    "funds": {
+      "exact_values_committed": false,
+      "cash_nonnegative": true,
+      "unleveraged_buying_power_nonnegative": true,
+      "cash_equals_unleveraged_buying_power": true,
+      "margin_debit_permitted_by_policy": false
+    },
+    "positions_and_orders": {
+      "standard_equity_open_positions": 0,
+      "nonzero_option_positions": 0,
+      "standard_equity_history_records_read": 16,
+      "standard_equity_nonterminal_orders": 0,
+      "option_orders": 0,
+      "every_exposed_page_consumed": true,
+      "today_standard_equity_realized_pnl_zero": true,
+      "advanced_orders_read": false,
+      "broker_preserved_client_reference_exposed": false,
+      "whole_broker_flatness_proven": false,
+      "flatness_caveat": "Every page exposed by standard-equity and option tools was consumed. The authenticated server did not advertise advanced-order reads and the equity-order schema omitted a broker-preserved reference, so whole-broker flatness and exact-reference recovery were not inferred."
+    }
+  },
+  "implemented_runtime_contract": {
+    "production_broker_adapter": "release-bound, injected provider transport with exact private account/auth receipts",
+    "order_coverage": "standard, advanced, and option families each require dedicated/general authoritative completeness or provider-backed not-applicable evidence",
+    "pagination": "all required families and pages must share one provider snapshot token; duplicate/page/cursor limits fail closed",
+    "client_reference_recovery": "exact broker-preserved reference through dedicated lookup or exhaustive history; crash-left SUBMITTING and UNKNOWN intents are recovered without blind retry",
+    "protection": "durable obligation per fill delta, verified working GTC regular-hours stop quantity, uncovered-entry freeze, and safe-close escalation",
+    "closeout": "protective cancellation plus strictly newer fill/cancel reconciliation before a remaining-quantity exit; no overlapping exits or oversell",
+    "market_and_tradability": "bounded Massive REST/stream source, completed-bar/quote semantics, Robinhood instrument/tradability evidence, and final mutation-boundary revalidation",
+    "notifications": "transactional outbox plus independently supervised Gmail-capable worker with route-bound receipts, generation-fenced lease, heartbeat, backlog, retry, and continuous entry health gate",
+    "authority": "one fixed per-user/account kernel lock independent of install root, matching database lease, hash-bound exact-scheduler legacy retirement receipt, exact activation record, and HMAC-authenticated managed-closeout control",
+    "secret_handling": "provider credentials, exact account ID, and control secret are injected at runtime and are not committed or discovered by the stock launcher"
+  },
+  "current_authenticated_connector_contract": {
+    "account_reads": true,
+    "standard_equity_positions_and_orders": true,
+    "option_positions_and_orders": true,
+    "tradability_quotes_and_price_book": true,
+    "advanced_order_read_advertised": false,
+    "broker_preserved_client_ref_in_order_read": false,
+    "streaming_order_or_fill_events": false,
+    "review_equity_order": true,
+    "place_after_exact_explicit_confirmation": true,
+    "cancel_after_own_explicit_confirmation": true,
+    "atomic_bracket_oco_oto": false,
+    "safe_for_unattended_stock_launcher": false
+  },
+  "authority": {
+    "user_request_authorizes_build_test_paused_install_and_documented_activation_procedure": true,
+    "user_request_authorizes_live_order_or_cancel_now": false,
+    "connector_native_confirmation_can_be_bypassed": false,
+    "configuration_boolean_is_authority": false,
+    "existing_financial_policy_preserved": true
+  },
+  "production_blockers": [
+    {
+      "code": "ATTENDED_CONFIRMATION_REQUIRED",
+      "blocking": true,
+      "detail": "The authenticated connector and existing strategy require exact current review and explicit user confirmation for every mutation."
+    },
+    {
+      "code": "PROVIDER_SUPPORTED_DAEMON_TRANSPORT_NOT_AUTHENTICATED",
+      "blocking": true,
+      "detail": "The production adapter exists, but no separately authorized provider transport, renewal behavior, exact account binding, or release-bound launcher was supplied or authenticated."
+    },
+    {
+      "code": "CURRENT_CONNECTOR_ORDER_COVERAGE_INCOMPLETE",
+      "blocking": true,
+      "detail": "The authenticated MCP does not advertise advanced-order reads or expose broker-preserved client references, so the stock launcher cannot prove whole-account reconciliation or ambiguous-submission recovery."
+    },
+    {
+      "code": "NON_ATOMIC_PROTECTION_POLICY_DECISION_REQUIRED",
+      "blocking": true,
+      "detail": "Sequential verified protection is implemented but its residual non-atomic halt, gap, outage, and submission-to-ack risk requires the consolidated owner decision."
+    },
+    {
+      "code": "PRODUCTION_PROVIDER_BINDINGS_UNCONFIGURED",
+      "blocking": true,
+      "detail": "Massive, Robinhood instrument/quality, Gmail, and control clients are implemented as release-bound injection seams but are not authenticated in the installed stock launcher."
+    },
+    {
+      "code": "RISK_LIQUIDITY_SCORE_POLICY_DECISIONS_MISSING",
+      "blocking": true,
+      "detail": "The staged percentage overlay and numeric score, spread, depth, A+, sequential-protection, and notification-failure decisions remain unapproved; synthetic test values were not promoted."
+    },
+    {
+      "code": "INDEPENDENT_NOTIFICATION_ROUTE_UNAUTHENTICATED",
+      "blocking": true,
+      "detail": "No production destination, provider authorization, worker health, owner-confirmed route test, or provider receipt exists. Local JSONL cannot satisfy readiness."
+    },
+    {
+      "code": "LEGACY_WRITER_NOT_RETIRED",
+      "blocking": true,
+      "detail": "The existing heartbeat was not disabled or drained, and the stock release has no supported read-only Codex scheduler control-plane adapter to prove its exact runtime identity. A paused TOML file is insufficient, so no fresh hash-bound retirement receipt can be recorded."
+    }
+  ],
+  "claims_not_made": [
+    "ongoing Robinhood authentication",
+    "whole-broker flatness",
+    "unattended order authority",
+    "atomic entry protection",
+    "premarket native stop protection",
+    "provider notification delivery",
+    "live market-session certification",
+    "guaranteed order fill, profit, or loss outcome"
+  ]
+}

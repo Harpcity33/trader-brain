@@ -1,0 +1,37 @@
+{
+  "schema_version": "titan_full_live_latency_evidence_2026-09-08_v1",
+  "recorded_at_utc": "2026-09-08T00:59:02Z",
+  "source_commit": "4e6af86c8e506c0ac588d5d8d03d3d33eee93677",
+  "runtime": {
+    "mode": "PAUSED",
+    "authority_enabled": false,
+    "service_started": false,
+    "live_broker_mutations": 0,
+    "production_latency_samples": 0
+  },
+  "instrumented_stages": [
+    "market_ingest",
+    "signal_compute",
+    "preflight_risk",
+    "durable_intent_write",
+    "submit_to_ack",
+    "ack_to_fill",
+    "fill_to_working_protection",
+    "broker_reconciliation",
+    "notification_delivery"
+  ],
+  "runtime_schedule": {
+    "normal_reconciliation_interval_seconds": 2,
+    "unknown_submission_reconciliation_interval_seconds": 1,
+    "broker_order_ack_timeout_seconds": 10
+  },
+  "test_assertions": [
+    "Durable intent timing completes before broker review.",
+    "Submit-to-ack is recorded only for an exact broker acknowledgement.",
+    "An acknowledgement never fabricates ack-to-fill latency.",
+    "Fill-to-working-protection is recorded only after broker-confirmed working protection.",
+    "Failed notification delivery records no false terminal latency.",
+    "Latency samples are append-only durable records with correlation metadata."
+  ],
+  "claim": "No production p50, p95, p99, fill, protection, or notification latency is claimed because the full-live service was not started and no live mutation was authorized. Synthetic unit timings validate instrumentation semantics, not broker performance."
+}
