@@ -1,0 +1,44 @@
+name: Control center validation
+on:
+  push:
+    branches: [main, control-center-no-spend-v1]
+    paths: ['apps/control_center/**', 'deploy/install_control_center_macos.sh', 'docs/CONTROL_CENTER.md', '.github/workflows/control-center-validation.yml']
+  pull_request:
+    paths: ['apps/control_center/**', 'deploy/install_control_center_macos.sh', 'docs/CONTROL_CENTER.md', '.github/workflows/control-center-validation.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: github.event.repository.private == false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: 'src:.'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: All legacy tests
+        run: python3 -B -m unittest discover -s tests -v
+      - name: Control and integration tests (fake feeds only)
+        run: python3 -B -m unittest discover -s apps/control_center/tests -v
+      - name: JavaScript syntax
+        run: |
+          node --check apps/control_center/web/app.js
+          node --check apps/control_center/web/sw.js
+      - name: Configuration check (no real keys)
+        run: python3 -B -m apps.control_center check
+      - name: Clean tracked source validation
+        run: |
+          clean_dir="$(mktemp -d)"
+          git archive HEAD | tar -xf - -C "$clean_dir"
+          cd "$clean_dir"
+          python3 -B scripts/validate_repository.py
+      - name: Mac installer syntax
+        if: runner.os == 'macOS'
+        run: zsh -n deploy/install_control_center_macos.sh
+# Standard public-repository runners only. No caches/artifact uploads or real credentials.
