@@ -107,6 +107,52 @@ class SafetyAcceptance(unittest.TestCase):
         values[-1]["c"] = float("nan")
         self.assertIsNone(self.make_signal(values))
 
+    def test_partial_scan_gap_is_logged_without_runtime_fault_email(self):
+        class PartialFeed(Feed):
+            def top_movers(self, direction):
+                return ["TEST", "BAD"]
+            def bars(self, ticker, minutes, day):
+                if ticker == "BAD":
+                    raise e.DataUnavailable("NO_INTRADAY_BARS")
+                return super().bars(ticker, minutes, day)
+        cfg = copy.deepcopy(self.cfg)
+        engine = copy.deepcopy(self.engine)
+        engine["universe"] = ["TEST"]
+        state = e.default_state(1000, NOW)
+        sent = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "state.json"
+            e.save_state(path, state)
+            result = r.heartbeat_once(cfg, engine, NOW, client=PartialFeed(),
+                                      path=path, sender=lambda *args: sent.append(args), clock=lambda: NOW)
+            saved = e.load_state(path, 1000, NOW)
+        self.assertGreater(result["scans"]["5m_momentum"]["successful_symbols"], 0)
+        self.assertGreater(result["scans"]["5m_momentum"]["errors"], 0)
+        self.assertNotIn("SCAN_DATA_UNAVAILABLE", saved["daily"][NOW.date().isoformat()]["errors"])
+        self.assertFalse(any("Runtime Fault" in message[0] for message in sent))
+
+    def test_materially_degraded_scan_still_faults_closed(self):
+        class DegradedFeed(Feed):
+            def top_movers(self, direction):
+                return ["BAD1", "BAD2", "BAD3", "BAD4"]
+            def bars(self, ticker, minutes, day):
+                if ticker.startswith("BAD"):
+                    raise e.DataUnavailable("NO_INTRADAY_BARS")
+                return super().bars(ticker, minutes, day)
+        cfg = copy.deepcopy(self.cfg)
+        engine = copy.deepcopy(self.engine)
+        engine["universe"] = ["TEST"]
+        state = e.default_state(1000, NOW)
+        sent = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "state.json"
+            e.save_state(path, state)
+            r.heartbeat_once(cfg, engine, NOW, client=DegradedFeed(),
+                             path=path, sender=lambda *args: sent.append(args), clock=lambda: NOW)
+            saved = e.load_state(path, 1000, NOW)
+        self.assertIn("SCAN_DATA_UNAVAILABLE", saved["daily"][NOW.date().isoformat()]["errors"])
+        self.assertTrue(any("Runtime Fault" in message[0] for message in sent))
+
     def test_weekly_profits_do_not_expand_budget(self):
         self.assertEqual(e.weekly_risk_remaining(self.state, 10, 1150), 100)
 
