@@ -236,7 +236,8 @@ def scan_lane(client: MassiveClient, engine: dict[str, Any], now: datetime, *, m
         outcomes = list(pool.map(one, symbols))
     signals = [s for s, _ in outcomes if s is not None]
     signals.sort(key=lambda s: (s.setup_score, s.relative_volume), reverse=True)
-    return signals, [e for _, e in outcomes if e]
+    errors = [e for _, e in outcomes if e]
+    return signals, errors, len(outcomes) - len(errors)
 
 
 def maybe_enter(client, cfg, engine, state, signal, now, *, clock=None) -> dict[str, Any] | None:
@@ -466,14 +467,24 @@ def heartbeat_once(cfg, engine, now, *, client=None, path=None, sender=send_gmai
                                     continue
                                 if symbols is None:
                                     symbols = discovery_universe(client, engine)
-                                signals, errors = scan_lane(client, engine, local, minutes=minutes, lane=lane, symbols=symbols)
+                                signals, errors, successful_symbols = scan_lane(
+                                    client, engine, local, minutes=minutes, lane=lane, symbols=symbols
+                                )
                                 day[key] = bucket
                                 day["scan_count"] += 1
                                 day["signals_seen"] += len(signals)
-                                scans[lane] = {"symbols": len(symbols), "signals": len(signals), "errors": len(errors)}
+                                scans[lane] = {"symbols": len(symbols), "successful_symbols": successful_symbols,
+                                               "signals": len(signals), "errors": len(errors)}
                                 if errors:
-                                    day["audit"].append({"at": local.isoformat(), "result": "SCAN_DATA_GAP", "details": errors})
-                                    record_fault(state, day, "SCAN_DATA_UNAVAILABLE", local)
+                                    day["audit"].append({"at": local.isoformat(), "result": "SCAN_DATA_GAP",
+                                                         "details": errors, "successful_symbols": successful_symbols})
+                                    # Top-mover discovery can legitimately include an isolated symbol whose
+                                    # intraday aggregates are temporarily unavailable. Log those gaps without
+                                    # paging the owner. Page only when the lane is materially degraded.
+                                    degraded = (successful_symbols == 0
+                                                or (len(errors) >= 3 and len(errors) * 2 > len(symbols)))
+                                    if degraded:
+                                        record_fault(state, day, "SCAN_DATA_UNAVAILABLE", local)
                                 for signal in signals:
                                     pos = maybe_enter(client, cfg, engine, state, signal, clock(), clock=clock)
                                     if pos:
