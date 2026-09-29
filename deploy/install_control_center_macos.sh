@@ -3,7 +3,19 @@
 set -euo pipefail
 umask 077
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-PYTHON="$(command -v python3)"
+# Choose an already installed supported interpreter without changing PATH or installing packages.
+PYTHON=""
+CANDIDATES=("$(command -v python3 || true)" "/opt/homebrew/bin/python3" "/usr/local/bin/python3" "/Library/Frameworks/Python.framework/Versions/Current/bin/python3")
+for candidate in "${CANDIDATES[@]}"; do
+  if [[ -n "$candidate" && -x "$candidate" ]] && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)' 2>/dev/null; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+if [[ -z "$PYTHON" ]]; then
+  echo "Python 3.11+ was not found in the standard local install locations. No service changed."
+  exit 2
+fi
 LABEL="com.harpcity.traderbrain.control"
 STATE="$HOME/.local/state/trader-brain/control-center"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"

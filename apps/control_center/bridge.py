@@ -56,13 +56,15 @@ class Engine:
             raw = HybridFeed(stocks, mcp)
             # Translate provider exceptions into the baseline's credential-safe fault type.
             baseline_error = self.runtime.DataUnavailable
+            class ProviderError(baseline_error, Unavailable):
+                pass
             class Bound:
                 def __getattr__(self, name):
                     attribute = getattr(raw, name)
                     if not callable(attribute): return attribute
                     def invoke(*args, **kwargs):
                         try: return attribute(*args, **kwargs)
-                        except Unavailable as exc: raise baseline_error(str(exc)) from None
+                        except (Unavailable, baseline_error) as exc: raise ProviderError(str(exc)) from None
                     return invoke
             self.feed = Bound()
         return self.feed
@@ -78,6 +80,7 @@ class Engine:
                 self.store.put("paused", True)
                 self.store.put("flatten_requested", True)
             else:
+                if action == "resume": self.store.put("activated", True)
                 self.store.put("paused", action == "pause")
             self.store.finish(command["id"], "applied", "Paper service control applied; this is not a broker fill.")
 
@@ -107,10 +110,29 @@ class Engine:
             if paused:
                 for lane in cfg["lanes"].values(): lane["enabled"] = False
             try:
-                client = self.client()
-                if self.store.get("flatten_requested", False):
-                    self.store.put("flatten_status", self.flatten(now, client))
-                result = self.runtime.heartbeat_once(cfg, self.rules, now, client=client, path=self.path, sender=self.sender, clock=clock)
+                result = None
+                if paused and not self.store.get("activated", False):
+                    with self.runtime.state_lock(self.path):
+                        state = self.runtime.load_state(self.path, 1000, now)
+                        # Fresh parallel installs stay quiet: no duplicate email reports or API scans.
+                        # Never suppress management if an existing portfolio contains positions.
+                        if not state["positions"]:
+                            if self.store.get("flatten_requested", False):
+                                self.store.put("flatten_requested", False)
+                                self.store.put("flatten_status", "NO_OPEN_PAPER_POSITIONS")
+                            self.runtime.save_state(self.path, state)
+                            result = {"runtime_version": self.runtime_version, "timestamp": now.isoformat(),
+                                      "mode": "paper_only", "broker_write_authority": False,
+                                      "openai_api_used": False, "session_open": False,
+                                      "cadence_seconds": 120, "scans": {}, "entries": [], "closed": [],
+                                      "open_positions": 0, "paper_equity": self.runtime.mark_equity(state),
+                                      "weekly_lock": state["weekly_lock"], "data_faults": 0,
+                                      "decision": "PAUSED_NOT_STARTED", "data_readiness": "NOT_TESTED"}
+                if result is None:
+                    client = self.client()
+                    if self.store.get("flatten_requested", False):
+                        self.store.put("flatten_status", self.flatten(now, client))
+                    result = self.runtime.heartbeat_once(cfg, self.rules, now, client=client, path=self.path, sender=self.sender, clock=clock)
                 result.update({"completed_at": utc(), "elapsed_seconds": round(time.monotonic()-started, 3),
                                "control_version": VERSION, "paused": paused})
                 self.store.put("heartbeat", result)

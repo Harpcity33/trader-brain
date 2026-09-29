@@ -77,3 +77,39 @@ class BaselineIntegration(unittest.TestCase):
         self.assertEqual(len(state['positions']),1)
         self.assertEqual(sum('PAPER BUY' in message[0] for message in self.sent),1)
         self.assertGreater(self.store.get('heartbeat')['data_faults'],0)
+
+    def test_new_install_quiet_during_premarket(self):
+        self.engine.feed=Mock();early=self.now.replace(hour=8)
+        self.engine.tick(early,clock=lambda:early)
+        self.assertFalse(self.engine.feed.market_holidays.called)
+        self.assertEqual(self.sent,[])
+        self.assertEqual(self.store.get('heartbeat')['decision'],'PAUSED_NOT_STARTED')
+
+    def test_pause_preserves_existing_position_exit(self):
+        self.store.enqueue('r','resume');self.tick();self.store.enqueue('p','pause')
+        item=self.fixture.snapshot();item['last_quote'].update(bid=.5,ask=.52)
+        self.engine.feed.option_snapshot=lambda *a:{'results':item}
+        self.tick();state=json.loads(self.engine.path.read_text())
+        self.assertEqual(len(state['positions']),0)
+        self.assertEqual(state['closed_trades'][0]['exit_reason'],'STOP')
+        self.assertTrue(self.store.get('paused'))
+
+    def test_provider_diagnostic_remains_specific_and_safe(self):
+        from apps.control_center.transport import Unavailable
+        from apps.control_center.bridge import safe_code
+        self.engine.feed=None
+        with patch.object(self.rt,'massive_client',return_value=Mock()), patch('apps.control_center.bridge.RobinhoodMCP') as m:
+            m.return_value.call.side_effect=Unavailable('ROBINHOOD_SIGN_IN_REQUIRED')
+            with self.assertRaises(self.rt.DataUnavailable) as caught:
+                self.engine.client().option_chain('SPY',self.now.date(),self.now.date())
+        self.assertEqual(safe_code(caught.exception),'ROBINHOOD_SIGN_IN_REQUIRED')
+
+    def test_flatten_before_first_resume_with_empty_book(self):
+        self.engine.feed=Mock()
+        self.store.enqueue('empty-close','flatten');self.tick()
+        self.assertFalse(self.store.get('flatten_requested'))
+        self.assertEqual(self.store.get('flatten_status'),'NO_OPEN_PAPER_POSITIONS')
+        self.assertFalse(self.engine.feed.market_holidays.called)
+        self.assertEqual(self.sent,[])
+        self.store.enqueue('r','resume');self.engine.apply_commands()
+        self.assertFalse(self.store.get('paused'))

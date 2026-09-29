@@ -4,7 +4,7 @@
 
 This release is an independent Python service with an iPhone-sized, Home Screen-capable web dashboard. It is not an App Store binary. It reuses the repository's existing 5-minute/15-minute paper strategy but runs it against a **separate** `control-center/portfolio.json` ledger. It does not overwrite, migrate, reset, pause or replace the baseline paper runtime or its recorded results. Do not compare the separate account's initial $1,000 against today's baseline results as if they were the same ledger.
 
-Default new entries are paused. Resume explicitly in the dashboard only after local data readiness has been checked. Pausing entries preserves exit management. Closing paper positions is a separate confirmed request, not an immediate-fill promise. Runtime commands apply on the worker; a network operation already in progress can delay them. Liquidation retries occur on subsequent heartbeat cycles, using fresh quotes, not stale marks.
+Default new entries are paused. A fresh installation performs no scans or report emails until its first explicit Resume, preventing duplicate reports during parallel installation. Resume explicitly in the dashboard only after local data readiness has been checked. Pausing entries preserves exit management. Closing paper positions is a separate confirmed request, not an immediate-fill promise. Runtime commands apply on the worker; a network operation already in progress can delay them. Liquidation retries occur on subsequent heartbeat cycles, using fresh quotes, not stale marks.
 
 This release does **not** activate real-money trading. It does not bypass platform confirmations, broker approval, exchange entitlements or risk rules. No live broker-write transport is included. There is no autonomous strategy-rewriting or self-promotion mechanism.
 
@@ -35,7 +35,7 @@ zsh deploy/install_control_center_macos.sh
 
 This installs the separate `com.harpcity.traderbrain.control` LaunchAgent at loopback port 8765. It preserves `~/.config/trader-brain/paper-options.env` and does not edit the old LaunchAgent. Re-running the installer resets the new service's network binding to loopback intentionally; custom TLS deployments require their own reviewed service arguments.
 
-The installer validates Python 3.11+, runs offline tests and records the requested service state. **No code in this chat has remotely installed it on the owner's Mac.** A running PID alone does not prove market-data readiness.
+The installer selects an already installed Python 3.11+ from standard Mac locations (without package installation), runs offline tests and records the requested service state. **No code in this chat has remotely installed it on the owner's Mac.** A running PID alone does not prove market-data readiness.
 
 Configure Robinhood from the local project directory with the owner present:
 
