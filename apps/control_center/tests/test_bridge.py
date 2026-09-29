@@ -94,15 +94,13 @@ class BaselineIntegration(unittest.TestCase):
         self.assertEqual(state['closed_trades'][0]['exit_reason'],'STOP')
         self.assertTrue(self.store.get('paused'))
 
-    def test_provider_diagnostic_remains_specific_and_safe(self):
-        from apps.control_center.transport import Unavailable
-        from apps.control_center.bridge import safe_code
-        self.engine.feed=None
-        with patch.object(self.rt,'massive_client',return_value=Mock()), patch('apps.control_center.bridge.RobinhoodMCP') as m:
-            m.return_value.call.side_effect=Unavailable('ROBINHOOD_SIGN_IN_REQUIRED')
-            with self.assertRaises(self.rt.DataUnavailable) as caught:
-                self.engine.client().option_chain('SPY',self.now.date(),self.now.date())
-        self.assertEqual(safe_code(caught.exception),'ROBINHOOD_SIGN_IN_REQUIRED')
+    def test_provider_route_reuses_baseline_market_data_client(self):
+        self.engine.feed = None
+        expected = Mock()
+        with patch.object(self.rt, 'market_data_client', return_value=expected) as factory:
+            self.assertIs(self.engine.client(), expected)
+            self.assertIs(self.engine.client(), expected)
+        factory.assert_called_once_with()
 
     def test_flatten_before_first_resume_with_empty_book(self):
         self.engine.feed=Mock()
