@@ -27,7 +27,16 @@ class BaselineIntegration(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.home=Path(self.tmp.name)
         self.store=Store(self.home/'control.sqlite3');self.sent=[]
         self.rt=load_runtime(ROOT)
-        self.engine=Engine(ROOT,self.home,self.store,runtime=self.rt,feed=self.fixture.Feed(),sender=lambda *a:self.sent.append(a))
+        # The shared baseline fixture intentionally omits 1m exit observations.
+        # Supply them here so a repeat heartbeat tests duplication, not a data fault.
+        class CompleteFeed(self.fixture.Feed):
+            def bars(self, ticker, minutes, day):
+                if minutes == 1:
+                    end=self.now.replace(second=0,microsecond=0)
+                    return [dict(t=int((end-timedelta(minutes=1)).timestamp()*1000),
+                                 o=101.2,h=101.5,l=101.1,c=101.4,v=1000,vw=101.3)]
+                return super().bars(ticker, minutes, day)
+        self.engine=Engine(ROOT,self.home,self.store,runtime=self.rt,feed=CompleteFeed(),sender=lambda *a:self.sent.append(a))
         self.engine.rules=copy.deepcopy(self.engine.rules);self.engine.rules['universe']=['TEST']
         self.now=self.fixture.NOW
     def tearDown(self):self.tmp.cleanup()
@@ -60,3 +69,11 @@ class BaselineIntegration(unittest.TestCase):
     def test_resume_refused_pending_liquidation(self):
         self.store.put('flatten_requested',True);self.store.enqueue('r','resume');self.engine.apply_commands()
         self.assertTrue(self.store.get('paused'));self.assertEqual(self.store.history()[0]['status'],'rejected')
+
+    def test_missing_exit_data_is_a_fault_not_duplicate_buy(self):
+        self.store.enqueue('resume-test','resume');self.tick()
+        self.engine.feed=self.fixture.Feed();self.tick()
+        state=json.loads(self.engine.path.read_text())
+        self.assertEqual(len(state['positions']),1)
+        self.assertEqual(sum('PAPER BUY' in message[0] for message in self.sent),1)
+        self.assertGreater(self.store.get('heartbeat')['data_faults'],0)
