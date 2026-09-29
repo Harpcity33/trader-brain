@@ -1,6 +1,6 @@
 # Paper runtime verification and deployment boundaries
 
-This update remains PAPER ONLY. No OpenAI API calls, brokerage credentials, broker writes, or paid-model dependencies are added. Legacy live automation files and ChatGPT scheduled tasks are unchanged.
+This update remains PAPER ONLY. No OpenAI API calls, broker writes, or paid-model dependencies are added. The local Robinhood MCP connection uses Codex-managed OAuth for read-only options data. Legacy live automation files and ChatGPT scheduled tasks are unchanged.
 
 ## What changed
 
@@ -22,9 +22,9 @@ Offline acceptance tests cover discovery, candle freshness/completion, non-finit
 
 ## Still must be verified on the actual host
 
-A green CI run does not prove that the user's Mac has pulled this revision or restarted its launchd process. Record the actual local revision, running PID, and a new log line with runtime_version=paper-v1.1-safety before claiming deployment.
+A green CI run does not prove that the user's Mac has pulled this revision or restarted its launchd process. Record the actual local revision, running PID, and a new log line with runtime_version=paper-v1.2-robinhood-options before claiming deployment.
 
-The earlier SPY previous-close test did not prove real-time OPTIONS quotes or Greeks are entitled. The revised doctor explicitly inspects option snapshot access; market-open validation must still establish actual quote freshness and service timing. No subscription upgrade is authorized.
+The SPY previous-close test only establishes Massive stock access. The doctor independently checks Robinhood options chains, instruments, prices, and Greeks; market-open validation must still establish actual quote freshness and service timing. No subscription upgrade is authorized.
 
 Premarket output is a deterministic prior-session screen collected from 07:00 onward and delivered after 08:00, not an hour-long GPT research process. Comprehensive catalyst research, validated A-F quality scoring, exhaustive missed-opportunity replay, subscription-cost allocation, and statistical trading-edge validation are not completed by this patch.
 

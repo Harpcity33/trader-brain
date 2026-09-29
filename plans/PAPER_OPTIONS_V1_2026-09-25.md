@@ -21,7 +21,7 @@ Test whether Trader Brain can produce repeatable positive expectancy before any 
 - Risk limits may never be loosened automatically during market hours.
 
 ## Daily Research — 07:00-08:00 America/New_York
-Massive is the primary quantitative market-data source wherever the subscribed feed supplies the field. Missing Massive data is labeled unavailable, never guessed or silently replaced.
+Massive supplies stock data. Robinhood supplies options chains, contracts, quotes, and Greeks through a read-only MCP adapter. No Massive options subscription is required. Missing provider data is labeled unavailable, never guessed or silently replaced.
 
 Research evaluates market regime, index trend, premarket movers, catalysts, prior/multi-day momentum, liquidity, option-chain bid/ask, volume, open interest, IV, greeks, expiration/strike suitability, and historical context.
 
@@ -72,7 +72,7 @@ After a valid BUY signal, record a simulated order/fill using explicit assumptio
 ## Data and Safety Controls
 Enforce stale-data rejection, duplicate-order rejection, no-entry when required Massive data is unavailable, persistent state, maximum simultaneous risk, and a disable-new-entries kill state.
 
-Massive is canonical for quantitative market fields it supplies. A future broker connection is canonical for account state, broker eligibility, positions, executable reviews, orders, and fills.
+Massive is canonical for stock fields; Robinhood is canonical for options market data. A future broker connection is canonical for account state, broker eligibility, positions, executable reviews, orders, and fills.
 
 ## End-of-Market Report and Grading
 Publish one unified Trader Brain end-of-market report. Grade the system even if no trades occurred.
