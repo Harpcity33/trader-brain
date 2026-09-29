@@ -30,11 +30,13 @@ from titan_brain.paper_options_engine import (
     new_entry_capacity, update_weekly_lock, open_paper_position, close_paper_position,
 )
 
+from titan_brain.robinhood_options import PaperMarketData, OptionsUnavailable, probe_robinhood_options
+
 CONFIG_PATH = ROOT / "config/paper_options_v1_runtime.json"
 ENGINE_CONFIG_PATH = ROOT / "config/paper_options_signal_engine.json"
 LOCAL_ENV_PATH = Path.home() / ".config/trader-brain/paper-options.env"
 DEFAULT_STATE_PATH = Path.home() / ".local/state/trader-brain/paper-options-v1.json"
-RUNTIME_VERSION = "paper-v1.1-safety"
+RUNTIME_VERSION = "paper-v1.2-robinhood-options"
 
 
 def load_local_env(path: Path = LOCAL_ENV_PATH) -> None:
@@ -76,6 +78,10 @@ def load_config() -> tuple[dict[str, Any], dict[str, Any]]:
         raise ValueError("normal risk exceeds approved cap")
     if not 0 < cfg["risk"]["exceptional_trade_risk_pct_max"] <= 4:
         raise ValueError("exceptional risk exceeds approved cap")
+    if cfg.get("broker_write_authority") is not False:
+        raise ValueError("broker_write_authority must remain false")
+    if cfg.get("market_data") != {"stocks": "Massive", "options": "Robinhood"}:
+        raise ValueError("Massive stocks and Robinhood options required")
     return cfg, engine
 
 
@@ -88,8 +94,12 @@ def massive_client() -> MassiveClient:
                          os.environ.get("MASSIVE_API_BASE_URL", "https://api.massive.com"))
 
 
+def market_data_client() -> PaperMarketData:
+    return PaperMarketData(massive_client())
+
+
 def safe_error(exc: Exception) -> str:
-    return str(exc) if isinstance(exc, DataUnavailable) else type(exc).__name__
+    return str(exc) if isinstance(exc, (DataUnavailable, OptionsUnavailable)) else type(exc).__name__
 
 
 def send_gmail(subject: str, body: str, message_id: str = "test") -> None:
@@ -114,14 +124,14 @@ def doctor(*, send_test_email: bool = False) -> dict[str, Any]:
         client = massive_client()
         previous = client.previous_bar("SPY")
         checks["massive_stocks"] = {"ok": True, "previous_close_present": "c" in previous}
-        now = datetime.now(NY)
-        chain = client.option_chain("SPY", now.date() + timedelta(days=7), now.date() + timedelta(days=21))
-        quotes = [c for item in chain if (c := contract_from_snapshot(item, "SPY", now.date()))]
-        checks["massive_options"] = {"ok": bool(quotes), "quote_and_greek_records": len(quotes),
-                                      "fresh_quotes_now": sum(quote_is_fresh(c, now) for c in quotes),
-                                      "note": "weekend/overnight quotes are not actionable"}
     except Exception as exc:
-        checks["massive_required_data"] = {"ok": False, "error": safe_error(exc)}
+        checks["massive_stocks"] = {"ok": False, "error": safe_error(exc)}
+    try:
+        if not checks["massive_stocks"]["ok"]:
+            raise DataUnavailable("STOCK_REFERENCE_PRICE_UNAVAILABLE")
+        checks["robinhood_options"] = probe_robinhood_options(number(previous["c"]))
+    except Exception as exc:
+        checks["robinhood_options"] = {"ok": False, "error": safe_error(exc)}
     try:
         sender, recipient = require_env("TB_GMAIL_SENDER"), require_env("TB_GMAIL_RECIPIENT")
         if sender.casefold() != recipient.casefold():
@@ -133,11 +143,11 @@ def doctor(*, send_test_email: bool = False) -> dict[str, Any]:
         if send_test_email:
             send_gmail("Trader Brain — Local Runtime Test", "PAPER ONLY. SMTP transport test; no order placed.",
                        datetime.now(NY).isoformat())
-        checks["gmail"] = {"ok": True, "test_email_sent": send_test_email}
+        checks["gmail"] = {"ok": True, "authenticated": True, "test_email_sent": send_test_email}
     except Exception as exc:
         checks["gmail"] = {"ok": False, "error": safe_error(exc)}
     return {"status": "DEPENDENCIES_OK" if all(c["ok"] for c in checks.values()) else "NOT_READY",
-            "paper_only": True, "broker_write_authority": False, "checks": checks}
+            "runtime_version": RUNTIME_VERSION, "paper_only": True, "broker_write_authority": False, "checks": checks}
 
 
 def daily_bucket(state: dict[str, Any], day: date) -> dict[str, Any]:
@@ -257,8 +267,9 @@ def maybe_enter(client, cfg, engine, state, signal, now, *, clock=None) -> dict[
     fee = float(execution.get("fee_per_contract_per_side", .65))  # explicit simulation assumption
     capacity = new_entry_capacity(state, cfg["risk"]["weekly_drawdown_pct_of_monday_equity"], fee)
     try:
+        chain_kwargs = {"reference_price": signal.trigger_price} if isinstance(client, PaperMarketData) else {}
         chain = client.option_chain(signal.ticker, now.date() + timedelta(days=option["min_dte"]),
-                                    now.date() + timedelta(days=option["max_dte"]))
+                                    now.date() + timedelta(days=option["max_dte"]), **chain_kwargs)
         fresh_now = clock().astimezone(NY)
         if not 0 <= (fresh_now - datetime.fromisoformat(signal.timestamp)).total_seconds() <= 180:
             return reject("STALE_SIGNAL")
@@ -444,7 +455,7 @@ def heartbeat_once(cfg, engine, now, *, client=None, path=None, sender=send_gmai
         day = daily_bucket(state, local.date())
         # Weekends do not call market-data or SMTP, even during an offline CI smoke test.
         if local.weekday() < 5:
-            client = client or massive_client()
+            client = client or market_data_client()
             try:
                 bounds = session_bounds(local, client.market_holidays())
                 if bounds:
@@ -501,7 +512,8 @@ def heartbeat_once(cfg, engine, now, *, client=None, path=None, sender=send_gmai
         save_state(path, state)
         if local.weekday() < 5:
             flush_outbox(state, path, clock(), sender)
-        return {"runtime_version": RUNTIME_VERSION, "timestamp": local.isoformat(), "mode": "paper_only",
+        return {"runtime_version": RUNTIME_VERSION, "pid": os.getpid(), "python_version": sys.version.split()[0],
+                "market_data": cfg["market_data"], "timestamp": local.isoformat(), "mode": "paper_only",
                 "broker_write_authority": False, "openai_api_used": False, "session_open": session,
                 "cadence_seconds": 120, "scans": scans, "entries": entries,
                 "closed": [p["trade_id"] for p in closed], "open_positions": len(state["positions"]),
@@ -517,7 +529,7 @@ def main() -> int:
     cfg, engine = load_config()
     if args.command == "check":
         print(json.dumps({"status": "ENGINE_CONFIGURED", "runtime_version": RUNTIME_VERSION,
-                          "paper_only": True, "broker_write_authority": False,
+                          "paper_only": True, "broker_write_authority": False, "market_data": cfg["market_data"],
                           "openai_api_used": False, "state_path": str(state_path()),
                           "note": "configuration only; not a running-service attestation"}))
         return 0

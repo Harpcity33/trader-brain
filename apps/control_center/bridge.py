@@ -12,9 +12,7 @@ import threading
 import time
 
 from . import VERSION
-from .auth import TokenStore
-from .providers import HybridFeed
-from .transport import RobinhoodMCP, Unavailable
+from .transport import Unavailable
 from .store import utc
 
 
@@ -51,22 +49,13 @@ class Engine:
 
     def client(self):
         if self.feed is None:
-            stocks = self.runtime.massive_client()
-            mcp = RobinhoodMCP(TokenStore(self.home / "robinhood-oauth.json"))
-            raw = HybridFeed(stocks, mcp)
-            # Translate provider exceptions into the baseline's credential-safe fault type.
-            baseline_error = self.runtime.DataUnavailable
-            class ProviderError(baseline_error, Unavailable):
-                pass
-            class Bound:
-                def __getattr__(self, name):
-                    attribute = getattr(raw, name)
-                    if not callable(attribute): return attribute
-                    def invoke(*args, **kwargs):
-                        try: return attribute(*args, **kwargs)
-                        except (Unavailable, baseline_error) as exc: raise ProviderError(str(exc)) from None
-                    return invoke
-            self.feed = Bound()
+            # Reuse the baseline's already-authenticated, read-only market-data route.
+            # This avoids a second Robinhood OAuth/token store and keeps one source of truth:
+            # Massive for stocks/calendar, Robinhood for options.
+            factory = getattr(self.runtime, "market_data_client", None)
+            if not callable(factory):
+                raise Unavailable("BASELINE_MARKET_DATA_CLIENT_UNAVAILABLE")
+            self.feed = factory()
         return self.feed
 
     def apply_commands(self):

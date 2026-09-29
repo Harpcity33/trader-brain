@@ -11,7 +11,7 @@ This release does **not** activate real-money trading. It does not bypass platfo
 ## Components
 
 - `apps/control_center/transport.py`: bounded HTTPS and Streamable HTTP MCP; exactly three permitted Robinhood tools (`get_option_chains`, `get_option_instruments`, `get_option_quotes`). Every other tool is blocked before authentication or HTTP.
-- `auth.py`: app-specific local OAuth discovery, authorization-code PKCE S256, browser callback, refresh and private token storage. The app enforces read-only tool use; it does not claim that Robinhood granted a separately read-only OAuth scope. It never reads Codex auth files, browser cookies or ChatGPT connector tokens. Robinhood must advertise compatible discovery/public-client registration. An unsupported login flow stops with an explicit diagnostic, never a credential workaround.
+- `bridge.py` reuses the baseline runtime's authenticated market-data client, so Control Center and the baseline share one Robinhood read-only route. It does not maintain a second brokerage token store or second options provider session.
 - `providers.py`: Massive stocks/calendar plus Robinhood option metadata, quotes, Greeks, activity and source timestamps. No paid Massive options fallback. Source times remain unchanged and baseline freshness gates remain in force. Candidate discovery samples the first two eligible expirations and up to 100 contracts nearest the prior stock close; it is not an exhaustive option-chain ranking.
 - `bridge.py`: independent worker around the existing tested strategy. No LLM, chat timer or Codex executable is required. Target heartbeat is 120 seconds, not an operating-system scheduling guarantee. The Mac must stay awake and logged in.
 - `store.py`: SQLite commands, idempotency, control state and bounded event history. Existing strategy file-locking and private atomic portfolio persistence are preserved.
@@ -37,14 +37,7 @@ This installs the separate `com.harpcity.traderbrain.control` LaunchAgent at loo
 
 The installer selects an already installed Python 3.11+ from standard Mac locations (without package installation), runs offline tests and records the requested service state. **No code in this chat has remotely installed it on the owner's Mac.** A running PID alone does not prove market-data readiness.
 
-Configure Robinhood from the local project directory with the owner present:
-
-```sh
-python3 -m apps.control_center login-robinhood
-python3 -m apps.control_center doctor
-```
-
-The browser displays Robinhood's actual consent screen. Credentials are written only to `~/.local/state/trader-brain/control-center/robinhood-oauth.json` with owner-only permissions. Failure codes such as `OAUTH_CLIENT_REGISTRATION_REQUIRED` mean a compatible public OAuth client must be supplied using the provider's supported process. Do not copy ChatGPT tokens or use a password scraper.
+The baseline runtime owns the authenticated Robinhood MCP route. Verify it first with `python3 scripts/paper_options_runtime.py doctor`, then verify Control Center with `python3 -m apps.control_center doctor`. No second Robinhood sign-in is required for Control Center.
 
 The server generates a private `control-center/dashboard-token`. Open it locally, copy only into the dashboard's pairing form, and close it. Never paste it into chat or commit it. Broker keys and OAuth refresh tokens must never enter the dashboard. Initial entries stay paused until the owner chooses **Resume paper**. That switch cannot override the strategy's weekly loss lock, stale-data rejection or closed-session gates.
 
