@@ -12,6 +12,7 @@ import ssl
 import sys
 import threading
 
+from . import VERSION
 from .auth import login
 from .bridge import Engine, safe_code
 from .server import serve
@@ -31,6 +32,7 @@ def main():
     parser.add_argument("--cert")
     parser.add_argument("--key")
     parser.add_argument("--oauth-client-id")
+    parser.add_argument("--tailnet-origin", help="Exact private HTTPS .ts.net origin; adds a loopback-only listener on 8766")
     args = parser.parse_args()
     os.umask(0o077)
     args.home.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -40,7 +42,7 @@ def main():
     store = Store(args.home/"control.sqlite3")
     engine = Engine(REPO,args.home,store)
     if args.command == "check":
-        print(json.dumps({"status":"CONFIGURED_NOT_DEPLOYED","version":"control-v1.0",
+        print(json.dumps({"status":"CONFIGURED_NOT_DEPLOYED","version":VERSION,
                           "paper_only":True,"broker_write_authority":False,"openai_api_used":False,
                           "baseline_modified":False,"paused":store.get("paused"),
                           "strategy_version":engine.runtime_version}))
@@ -82,17 +84,31 @@ def main():
     except BlockingIOError:
         os.close(descriptor)
         raise ValueError("control service already running")
+    proxy = None
+    if args.tailnet_origin:
+        try:
+            proxy=serve(engine,token,host="127.0.0.1",port=8766,
+                        origin=args.tailnet_origin,tailnet_proxy=True)
+        except Exception:
+            server.server_close()
+            os.close(descriptor)
+            raise
     worker=threading.Thread(target=engine.run,name="paper-engine",daemon=True)
     worker.start()
+    if proxy:
+        threading.Thread(target=proxy.serve_forever,name="private-tailnet-http",daemon=True).start()
     def stop(signum, frame):
         engine.stop.set();engine.wake.set()
         threading.Thread(target=server.shutdown,daemon=True).start()
+        if proxy: threading.Thread(target=proxy.shutdown,daemon=True).start()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-    print(json.dumps({"status":"CONTROL_LISTENING","pid":os.getpid(),"version":"control-v1.0",
-                      "origin":server.origin,"paper_only":True,"baseline_modified":False}),flush=True)
+    print(json.dumps({"status":"CONTROL_LISTENING","pid":os.getpid(),"version":VERSION,
+                      "origin":server.origin,"tailnet_origin":proxy.origin if proxy else None,"paper_only":True,"baseline_modified":False}),flush=True)
     try: server.serve_forever(poll_interval=.5)
     finally:
-        engine.stop.set();engine.wake.set();worker.join(timeout=15);server.server_close();os.close(descriptor)
+        engine.stop.set();engine.wake.set();worker.join(timeout=15)
+        if proxy: proxy.shutdown();proxy.server_close()
+        server.server_close();os.close(descriptor)
     return 0
 
 if __name__ == "__main__":

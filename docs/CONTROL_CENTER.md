@@ -33,7 +33,7 @@ Run from a checked-out, tested revision on the actual Mac:
 zsh deploy/install_control_center_macos.sh
 ```
 
-This installs the separate `com.harpcity.traderbrain.control` LaunchAgent at loopback port 8765. It preserves `~/.config/trader-brain/paper-options.env` and does not edit the old LaunchAgent. Re-running the installer resets the new service's network binding to loopback intentionally; custom TLS deployments require their own reviewed service arguments.
+This installs the separate `com.harpcity.traderbrain.control` LaunchAgent at loopback port 8765. It preserves `~/.config/trader-brain/paper-options.env` and does not edit the old LaunchAgent. Re-running the installer preserves recognized HTTPS and private Tailscale listener arguments; unfamiliar existing arguments stop installation for review. See COMMAND_DECK_REMOTE_ACCESS.md for the private remote route.
 
 The installer selects an already installed Python 3.11+ from standard Mac locations (without package installation), runs offline tests and records the requested service state. **No code in this chat has remotely installed it on the owner's Mac.** A running PID alone does not prove market-data readiness.
 

@@ -29,17 +29,28 @@ PYTHONDONTWRITEBYTECODE=1 "$PYTHON" -m unittest discover -s apps/control_center/
 "$PYTHON" - "$REPO" "$STATE" "$PLIST" <<'PY'
 import pathlib, plistlib, sys
 repo,state,plist=map(pathlib.Path,sys.argv[1:])
+network=[]
+if plist.exists():
+ old=plistlib.loads(plist.read_bytes()).get("ProgramArguments",[])
+ if old[1:5] != ["-B","-m","apps.control_center","serve"]:
+  raise SystemExit("Existing service arguments differ; left unchanged for review.")
+ network=old[5:]
+ allowed={"--host","--port","--origin","--cert","--key","--tailnet-origin"}
+ if len(network)%2 or any(network[i] not in allowed for i in range(0,len(network),2)):
+  raise SystemExit("Unknown existing settings; left unchanged for review.")
 content={"Label":"com.harpcity.traderbrain.control",
- "ProgramArguments":[sys.executable,"-B","-m","apps.control_center","serve"],
+ "ProgramArguments":[sys.executable,"-B","-m","apps.control_center","serve"]+network,
  "WorkingDirectory":str(repo),"RunAtLoad":True,"KeepAlive":True,"ThrottleInterval":30,
  "StandardOutPath":str(state/"service.out.log"),"StandardErrorPath":str(state/"service.err.log")}
 plist.write_bytes(plistlib.dumps(content));plist.chmod(0o600)
 PY
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+# launchd may need a moment to finish bootout before bootstrap.
+sleep 1
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 sleep 3
 launchctl print "gui/$(id -u)/$LABEL" | grep -E 'state =|pid =|last exit code'
-echo "Control center requested at http://127.0.0.1:8765 (this Mac only)."
+echo "Control center requested; existing HTTPS/Tailscale network settings preserved."
 echo "Baseline paper service and credentials were not changed. New app entries default to paused."
-echo "Phone access requires private HTTPS; no port forwarding or public tunnel was enabled."
+echo "For a new install, phone access requires private HTTPS. No public route was enabled."
 echo "Verify the service log before claiming deployment: $STATE/service.out.log"
