@@ -4,6 +4,7 @@ from __future__ import annotations
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 from pathlib import Path
 import secrets
 import ssl
@@ -20,7 +21,12 @@ ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.css": ("app.css", "text/css"),
           "/sw.js": ("sw.js", "application/javascript"),
           "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
-          "/icon.svg": ("icon.svg", "image/svg+xml")}
+          "/icon.svg": ("icon.svg", "image/svg+xml"),
+          "/deck.js": ("deck.js", "application/javascript"),
+          "/brand-mark.png": ("brand-mark.png", "image/png"),
+          "/brand-full.png": ("brand-full.png", "image/png"),
+          "/icon-192.png": ("icon-192.png", "image/png"),
+          "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png")}
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
@@ -136,13 +142,23 @@ class Handler(BaseHTTPRequestHandler):
         return self.respond(202, command)
 
 
-def serve(engine, token, *, host="127.0.0.1", port=8765, origin=None, cert=None, key=None):
+def serve(engine, token, *, host="127.0.0.1", port=8765, origin=None, cert=None, key=None, tailnet_proxy=False):
     if host not in {"127.0.0.1", "localhost", "::1"} and (not cert or not key):
         raise Unavailable("LAN_REQUIRES_TLS_CERTIFICATE")
     if bool(cert) != bool(key): raise Unavailable("TLS_CERT_AND_KEY_REQUIRED")
     origin = origin or f"{'https' if cert else 'http'}://{host}:{port}"
     parts = parse.urlsplit(origin)
-    if (parts.scheme != ("https" if cert else "http") or not parts.hostname or parts.path or parts.query
+    if tailnet_proxy:
+        # This listener is reachable only on literal loopback, behind Tailscale Serve TLS.
+        # External Host and Origin remain exact; forwarding headers grant no authority.
+        label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        domain = rf"{label}\.{label}\.ts\.net"
+        if (host != "127.0.0.1" or cert or key or parts.scheme != "https"
+                or not re.fullmatch(domain, parts.hostname or "")
+                or parts.port is not None or parts.path or parts.query
+                or parts.fragment or parts.username or parts.password):
+            raise Unavailable("INVALID_PRIVATE_TAILNET_PROXY")
+    elif (parts.scheme != ("https" if cert else "http") or not parts.hostname or parts.path or parts.query
             or parts.fragment or parts.username or parts.password):
         raise Unavailable("INVALID_DASHBOARD_ORIGIN")
     server = Server((host, port), engine, token, origin)
