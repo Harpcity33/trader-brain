@@ -1,5 +1,12 @@
 # Titan Momentum Live Upgrade v1
 
+## Current paper-report integrity status
+
+The $1,000 experiment is **QUARANTINED for official reporting and learning**
+until its independently funded state stores and host-only stock history are
+reconciled. Local evidence is preserved; no balance is selected or combined.
+See [the reconciliation boundary and read-only diagnostic](validation/PAPER_REPORT_RECONCILIATION.md).
+
 Additive deterministic risk, daily research, instrument routing, R-based
 metrics, and a separate live-attended options lane for Trader Brain.
 
@@ -59,3 +66,4 @@ access. The doctor does not send email unless explicitly run as `doctor-email`.
 A successful weekend access check does not establish market-open quote freshness.
 Install/restart with `deploy/install_paper_options_macos.sh`, which validates all
 connections first and preserves the contents of the local secrets file.
+

@@ -114,7 +114,8 @@ class Engine:
                                       "mode": "paper_only", "broker_write_authority": False,
                                       "openai_api_used": False, "session_open": False,
                                       "cadence_seconds": 120, "scans": {}, "entries": [], "closed": [],
-                                      "open_positions": 0, "paper_equity": self.runtime.mark_equity(state),
+                                      "open_positions": 0, "paper_equity": None, "learning_eligible": False,
+                                      "reporting": self.runtime.audit_snapshot(state, source_path=self.path, trading_date=now.date()),
                                       "weekly_lock": state["weekly_lock"], "data_faults": 0,
                                       "decision": "PAUSED_NOT_STARTED", "data_readiness": "NOT_TESTED"}
                 if result is None:
@@ -147,11 +148,21 @@ class Engine:
 
     def snapshot(self):
         rt = self.runtime
-        heartbeat = self.store.get("heartbeat")
+        heartbeat = copy.deepcopy(self.store.get("heartbeat"))
+        if heartbeat:
+            # Also sanitize cached pre-fix heartbeat totals; do not rewrite the evidence.
+            heartbeat["paper_equity"] = None
+            heartbeat["learning_eligible"] = False
+            heartbeat["reporting_status"] = "QUARANTINED"
         state, state_error = None, None
         if self.path.exists():
-            try: state = json.loads(self.path.read_text())
-            except Exception: state_error = "PORTFOLIO_UNREADABLE"
+            try:
+                state = json.loads(self.path.read_text())
+                if not isinstance(state, dict):
+                    raise ValueError("invalid portfolio root")
+            except Exception:
+                state_error = "PORTFOLIO_UNREADABLE"
+                state = None
         now = datetime.now(timezone.utc)
         age = None
         if heartbeat:
@@ -161,26 +172,33 @@ class Engine:
         capacity = None
         weekly = {"percent": 10, "starting_equity": None, "limit": None, "locked": None}
         lane_stats = []
+        reporting = {"status": "QUARANTINED", "learning_eligible": False,
+                     "official_equity": None, "official_daily_return_pct": None,
+                     "faults": [state_error or "SOURCE_NOT_AVAILABLE"]}
+        if state is not None:
+            reporting = rt.audit_snapshot(state, source_path=self.path, trading_date=now.astimezone(rt.NY).date())
+            if not isinstance(state.get("positions"), list) or not isinstance(state.get("closed_trades"), list):
+                state_error = "PORTFOLIO_SCHEMA_INVALID"
+                state = None
         if state:
-            equity = rt.mark_equity(state)
-            capacity = rt.new_entry_capacity(state, 10, .65)
-            weekly.update({"starting_equity": state.get("week_start_equity"),
-                           "limit": round(state.get("week_start_equity", 1000)*.1,2),
-                           "locked": bool(state.get("weekly_lock"))})
+            weekly["locked"] = bool(state.get("weekly_lock"))
             allowed = {"trade_id", "ticker", "lane", "direction", "contract", "expiration", "strike", "quantity",
                        "entry_fill", "last_mark", "stop_price", "target_price", "planned_risk_dollars", "premium_cost",
                        "opened_at", "closed_at", "pnl", "exit_reason", "exit_fill"}
-            positions = [{k:v for k,v in p.items() if k in allowed} for p in state.get("positions", [])]
-            trades = [{k:v for k,v in p.items() if k in allowed} for p in state.get("closed_trades", [])[-50:]]
+            positions = [{k:v for k,v in p.items() if k in allowed} for p in state.get("positions", []) if isinstance(p, dict)]
+            trades = [{k:v for k,v in p.items() if k in allowed} for p in state.get("closed_trades", [])[-50:] if isinstance(p, dict)]
             days = state.get("daily", {})
+            days = days if isinstance(days, dict) else {}
             latest = days[sorted(days)[-1]] if days else {}
-            watches = latest.get("research", {}).get("watches", [])[:6]
+            latest = latest if isinstance(latest, dict) else {}
+            research = latest.get("research", {})
+            research = research if isinstance(research, dict) else {}
+            watches = research.get("watches", [])
+            watches = watches[:6] if isinstance(watches, list) else []
+            audit = latest.get("audit", [])
+            audit = audit if isinstance(audit, list) else []
             from collections import Counter
-            rejections = dict(Counter(a.get("result", "UNKNOWN") for a in latest.get("audit", [])))
-            for lane in ("5m_momentum", "15m_options"):
-                rows = [r for r in state.get("closed_trades", []) if r["lane"] == lane]
-                lane_stats.append({"lane":lane,"closed":len(rows),"pnl":round(sum(r.get("pnl",0) for r in rows),2),
-                                   "expectancy":round(sum(r.get("pnl",0) for r in rows)/len(rows),2) if rows else None})
+            rejections = dict(Counter(str(a.get("result", "UNKNOWN")) for a in audit if isinstance(a, dict)))
         return {"version":VERSION, "strategy_version": self.runtime_version, "mode":"PAPER ONLY",
                 "live_trading_enabled":False, "openai_api_used":False, "additional_subscriptions":False,
                 "paused":self.store.get("paused",True), "flatten_requested":self.store.get("flatten_requested",False),
@@ -188,9 +206,11 @@ class Engine:
                 "healthy":bool(age is not None and age < 150 and not self.error and not state_error and not heartbeat.get("data_faults",0)),
                 "error":state_error or self.error, "last_error":self.store.get("last_error"),
                 "paper_equity":equity, "weekly":weekly, "remaining_entry_capacity":capacity,
+                "reporting":reporting, "learning_eligible":False,
                 "positions":positions,"closed_trades":trades,"watches":watches,"rejections":rejections,
                 "lane_stats":lane_stats,"commands":self.store.history(),
                 "data_sources":{"stocks":"Massive (existing subscription)","options":"Robinhood read-only MCP",
                                 "alpaca":"Paper adapter available; not connected or executing"},
-                "coverage_note":"Independent paper ledger; existing baseline is unchanged. Quote readiness is not implied by heartbeat.",
+                "coverage_note":"QUARANTINED: independent $1,000 stores are unreconciled. Official equity, returns and learning statistics are unavailable. Trade rows are local evidence only.",
                 "grading":"Quality grades unassessed. Paper results are not evidence of a live trading edge."}
+
