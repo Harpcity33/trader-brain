@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "experiment_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "legacy_experiment_excluded": {
+    "id": "LEGACY_PAPER_500",
+    "retired_date": "2026-10-06"
+  },
+  "checkpoint": "2026-10-23T09:15:00-04:00",
+  "archival_only": true,
+  "authoritative_portfolio_mutated": false,
+  "official_equity": null,
+  "reconciliation_status": "FROZEN_QUARANTINED",
+  "source": "Control Center /Users/harp/.local/state/trader-brain/control-center/portfolio.json (read-only)",
+  "source_observations": {
+    "starting_principal": 1000,
+    "recorded_cash": 784.03,
+    "separately_verified_settled_buying_power": null,
+    "open_positions": [
+      {
+        "ticker": "XLAB",
+        "direction": "LONG",
+        "asset_type": "STOCK",
+        "designation": "SWING",
+        "quantity": 10,
+        "paper_entry_fill": 2.6825,
+        "stop": 2.13,
+        "target": 3.7875,
+        "deadline": "2026-10-26T15:50:00-04:00",
+        "price_at_checkpoint": 4.54,
+        "market_value": 45.4,
+        "unrealized_pnl": 18.575,
+        "status": "OPEN_NOT_EXIT_CONFIRMED"
+      }
+    ],
+    "realized_pnl": -189.14,
+    "reconstructed_unrealized_pnl": 18.575,
+    "reconstructed_mark_to_market_equity": 829.43,
+    "cumulative_marked_pnl": -170.57,
+    "return_pct": -17.057,
+    "completed_paper_trades": 78,
+    "winning_trades": 13,
+    "losing_trades": 65,
+    "win_rate_pct": 16.67,
+    "profit_factor": 0.2629,
+    "weekly_lock": true,
+    "stored_week_start": "2026-10-12",
+    "current_week_risk_utilization": null,
+    "settled_buying_power": null,
+    "adaptive_stock_risk_multiplier": 0.25,
+    "session_learning_status": "FROZEN_QUARANTINED",
+    "quarantine_reason": "AUTHORITATIVE_LEDGER_AND_HISTORY_UNRESOLVED",
+    "prior_exit_monitor_fault": "STOCK_EXIT_DATA_UNAVAILABLE",
+    "notes": [
+      "Latest host reconciliation review does not verify official equity.",
+      "Original XLAB target exceeded in premarket, but no official paper exit recorded; do not invent retroactive execution.",
+      "Stored weekly start is stale; do not reuse last week's capacity as current-week risk."
+    ]
+  },
+  "authorized_new_entries": 0,
+  "authorized_new_shares": 0,
+  "authorized_new_contracts": 0,
+  "authorized_allocation": 0,
+  "authorized_new_risk": 0,
+  "candidate_board": [
+    {
+      "ticker": "CCI",
+      "price": 90.06,
+      "move_pct": 14.25,
+      "pm_vol": 106073,
+      "rv_full_day": 0.023,
+      "move_consumed_pct": 97.1,
+      "remaining_move_capacity": 34,
+      "catalyst_grade": "B+",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "AMT",
+      "price": 201.99,
+      "move_pct": 11.25,
+      "pm_vol": 74465,
+      "rv_full_day": 0.024,
+      "move_consumed_pct": 100,
+      "remaining_move_capacity": 30,
+      "catalyst_grade": "B",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "DECK",
+      "price": 78.4,
+      "move_pct": -8.07,
+      "pm_vol": 66577,
+      "rv_full_day": 0.02,
+      "move_consumed_pct": 81.1,
+      "remaining_move_capacity": 42,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "AXP",
+      "price": 317.38,
+      "move_pct": -2.4,
+      "pm_vol": 55467,
+      "rv_full_day": 0.017,
+      "move_consumed_pct": 79.9,
+      "remaining_move_capacity": 55,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "T",
+      "price": 21.54,
+      "move_pct": -5.28,
+      "pm_vol": 928246,
+      "rv_full_day": 0.02,
+      "move_consumed_pct": 95.2,
+      "remaining_move_capacity": 23,
+      "catalyst_grade": "B+",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "LUCD",
+      "price": 0.4122,
+      "move_pct": 25.79,
+      "pm_vol": 18574940,
+      "rv_full_day": 5.126,
+      "move_consumed_pct": 55.5,
+      "remaining_move_capacity": 15,
+      "catalyst_grade": "B+",
+      "status": "STRUCTURAL_REJECT"
+    },
+    {
+      "ticker": "XXII",
+      "price": 0.3,
+      "move_pct": 39.08,
+      "pm_vol": 50829620,
+      "rv_full_day": 9.404,
+      "move_consumed_pct": 15.9,
+      "remaining_move_capacity": 2,
+      "catalyst_grade": "D",
+      "status": "STRUCTURAL_REJECT"
+    }
+  ],
+  "under_five_approved": false,
+  "future_research_only": "2026-10-23 10:05 ET: RTH opening range, liquidity and fresh risk policy reconfirmation required before any candidate can ever become eligible.",
+  "learning": {
+    "A001": "HURT_IMPLEMENTATION",
+    "A002": "INCONCLUSIVE",
+    "A003": "INCONCLUSIVE",
+    "A004": "HURT_IMPLEMENTATION",
+    "A005": "HELPED_OPERATIONAL_DISCOVERY_PROFIT_INCONCLUSIVE",
+    "A006": "HELPED_OPERATIONALLY",
+    "A007": "HURT_IMPLEMENTATION_RETURNS_INCONCLUSIVE",
+    "A008": "HURT_UNRESOLVED"
+  },
+  "provenance_note": "Static read-only 9:15 paper checkpoint; full qualitative report and granular archival JSON are attached in the chat, not written to the official Control Center. This file contains no paper execution event."
+}
