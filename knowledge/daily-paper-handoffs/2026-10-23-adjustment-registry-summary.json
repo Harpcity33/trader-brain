@@ -1,0 +1,356 @@
+{
+  "schema": "trader-brain-cumulative-adjustment-index-v1",
+  "date": "2026-10-23",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "quarantined": true,
+  "measurement_rule": "No prior adjustment promoted to HELPED or HURT without prospective confirmed evidence",
+  "learning_eligible": false,
+  "adjustments": [
+    {
+      "id": "A001",
+      "title": "Catalyst quality gate for scores >90",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A002",
+      "title": "Remaining Move Capacity penalty",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A003",
+      "title": "Same ticker attempt limit",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A004",
+      "title": "Institutional catalyst priority",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A005",
+      "title": "Fresh 9:15 rebuild",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A006",
+      "title": "Discovery vs execution separation",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A007",
+      "title": "Meaningful allocation",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A008",
+      "title": "Exact ledger integrity",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A009",
+      "title": "Catalyst-direction validation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A010",
+      "title": "Corporate-action / reverse-split structure penalty",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A011",
+      "title": "Authoritative state isolation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A012",
+      "title": "Immutable scanner snapshots",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A013",
+      "title": "Premarket fresh-news coverage",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A014",
+      "title": "Overnight quote health",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A015",
+      "title": "Decision-time catalyst direction and corporate-action gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A016",
+      "title": "Immutable fresh-news / 9:15 / first-detection snapshots",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A017",
+      "title": "Authoritative ledger identity and cash settlement reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A018",
+      "title": "Overnight quote health, partial fill and stop-overrun logging",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A019",
+      "title": "Decision-time high-score evidence quarantine",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A020",
+      "title": "Institutional event sector adjacency discovery",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A021",
+      "title": "Stop-overshoot and quote-health emergency guard",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A022",
+      "title": "Explicit new-impulse reentry gating",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A023",
+      "title": "Canonical-only cash-account journal and GitHub learning ingest",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A024",
+      "title": "Stop-loss sequence breaker",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A025",
+      "title": "Market-regime long-only gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A026",
+      "title": "Pre-market catalyst coverage reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A027",
+      "title": "As-converted supply and transaction structure gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A028",
+      "title": "Immutable 09:15 catalyst sweep and mover timestamping",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A029",
+      "title": "Overnight quote-health fail-closed review",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A030",
+      "title": "Same-ticker repeat-entry counterfactual",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A031",
+      "title": "Quarantine-aware canonical ledger and exact decimal settlement journal",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A032",
+      "title": "Recent reverse split and ADS-ratio structural veto for extreme-score speculative longs",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A033",
+      "title": "Fresh institutional catalyst and market breadth ranking experiment",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A034",
+      "title": "Stop overshoot and quote-data-health pre-entry veto",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A035",
+      "title": "Separate discovered mover, validated watch, and executed edge attribution",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A036",
+      "title": "Hard catalyst-polarity gate for adverse guidance",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A037",
+      "title": "Security-type normalization for warrants and rights",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A038",
+      "title": "Quote-unavailability severity gate and stop reconstruction",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A039",
+      "title": "Resilient immutable canonical EOD snapshot independent of desktop availability",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A040",
+      "title": "Attribute every paper trade notification to an experiment and immutable ledger entry",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A041",
+      "title": "Fail-closed EOD missing-source alert and catch-up reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A042",
+      "title": "Immutable 9:15 primary-source catalyst sweep across stock sectors",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A043",
+      "title": "Fixed-cash takeover price ceiling and remaining-move gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A044",
+      "title": "Replace paid-only market-data dependency with permissioned free/read-only provider chain",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A045",
+      "title": "Fail-closed swing quote-health and independent reference-mark provenance",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A046",
+      "title": "Weekly risk lock calendar rollover and identity invariant",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A047",
+      "title": "Provider entitlement and rate-limit circuit breaker",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A048",
+      "title": "Bounded quote-retry budget and timely swing-monitor outage escalation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A049",
+      "title": "Certified recovery gate and preauthorized swing-deadline fail-closed protocol",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    }
+  ],
+  "full_details": "see historical daily handoff records and attached full local registry",
+  "latest_complete_patch": "knowledge/daily-paper-handoffs/2026-10-23-TRADER_BRAIN_PAPER_1000.json"
+}
