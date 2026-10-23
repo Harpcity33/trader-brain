@@ -1,0 +1,277 @@
+{
+  "schema": "trader-brain-codex-eod-handoff/2026-10-23-v1",
+  "date": "2026-10-23",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "retired_legacy_experiment": {
+    "balance": 500,
+    "end": "2026-10-06",
+    "never_score_or_update": true
+  },
+  "canonical_source": {
+    "id": "411e4c42cc3587b3149a",
+    "designation": "OFFICIAL_EXPERIMENT",
+    "certification": "QUARANTINED",
+    "ledger_id": null,
+    "eod_sha256": "3c2fcca8d612cc8b8fd978e07f361b3e0d92b522782e0ded3990c8cc40763a6b",
+    "report_time_et": "2026-10-23T16:06:05-04:00"
+  },
+  "comparison_source": {
+    "id": "d2c862aeb1c6e713e72f",
+    "designation": "COMPARISON_ONLY",
+    "equity_indicative_usd": "879.95",
+    "exclude": true
+  },
+  "official": {
+    "daily_return_pct": null,
+    "daily_pnl_usd": null,
+    "ending_equity_usd": null,
+    "learning_eligible": false
+  },
+  "diagnostic_not_official": {
+    "last_mark_date": "2026-10-19",
+    "indicative_equity_usd": "814.33",
+    "starting_balance_usd": "1000.00",
+    "last_indicative_cumulative_return_pct": "-18.567",
+    "stored_cash_usd": "784.03",
+    "decimal_reconstructed_cash_usd": "784.07",
+    "cash_discrepancy_usd": "-0.04",
+    "daily_realized_pnl_usd": "0.00",
+    "lifetime_closed_realized_pnl_usd": "-189.14",
+    "settled_cash_usd": null,
+    "unsettled_proceeds_usd": null
+  },
+  "research_0700": {
+    "time_et": "07:01:34",
+    "watch_only": true,
+    "data_source_failures": 25,
+    "options_only_source_failures": 30,
+    "references": [
+      [
+        "MSFT",
+        "PUT",
+        520.3,
+        533.6
+      ],
+      [
+        "QQQ",
+        "PUT",
+        701.9,
+        715.43
+      ],
+      [
+        "AAPL",
+        "CALL",
+        348.36,
+        342.28
+      ],
+      [
+        "IWM",
+        "CALL",
+        277.28,
+        274.49
+      ],
+      [
+        "SPY",
+        "PUT",
+        761.16,
+        767.71
+      ]
+    ]
+  },
+  "final_board_0915": {
+    "status": "NOT_RECOVERED",
+    "approved_entries": null
+  },
+  "intraday": {
+    "completed_scans": 0,
+    "signal_events": 0,
+    "recorded_audit_events": 717,
+    "exit_data_unavailable": 716,
+    "exit_monitor_faults": 1,
+    "source_errors": [
+      "MASSIVE_HTTP_403",
+      "MASSIVE_HTTP_429"
+    ],
+    "realized_or_filled_trade_credit": 0
+  },
+  "close_1600": {
+    "new_entries": 0,
+    "new_exits": 0,
+    "gross_new_entry_notional_usd": "0.00",
+    "open_swing_count": 1,
+    "current_mark_certified": false,
+    "official_return_certified": false
+  },
+  "daily_ledger": {
+    "entries": [],
+    "exits": [],
+    "open_authorized_swing": {
+      "ticker": "XLAB",
+      "structure": "LONG_COMMON_STOCK",
+      "opened_at_et": "2026-10-16T10:05:17-04:00",
+      "entry_price": "2.6825",
+      "quantity": 10,
+      "entry_notional_usd": "26.8250",
+      "score": 87.86,
+      "catalyst_grade": null,
+      "stop": "2.1300",
+      "T1": "3.7875",
+      "T2": null,
+      "partial_exits": [],
+      "last_stale_mark": "3.0300",
+      "mark_date": "2026-10-19",
+      "stale_unrealized_pnl_usd": "3.4750",
+      "current_unrealized_pnl_usd": null,
+      "realized_pnl_usd": null,
+      "simulated_planned_risk_recorded": "5.55",
+      "stop_risk_by_exact_arithmetic": "5.5250",
+      "exit_deadline_et": "2026-10-26T15:50:00-04:00",
+      "quote_health": "UNHEALTHY"
+    },
+    "current_equity_usd": null,
+    "current_daily_return_pct": null,
+    "new_capital_utilization_pct": 0,
+    "settled_cash_usd": null,
+    "unsettled_proceeds_usd": null
+  },
+  "market_benchmarks_not_trade_credit": [
+    {
+      "ticker": "RNG",
+      "catalyst": "Oct 22 post-close earnings beat and raised guidance",
+      "observed_move": "~14% premarket",
+      "eligible": "UNKNOWN"
+    },
+    {
+      "ticker": "CCI",
+      "catalyst": "Oct 22 evening SpaceX tower discussions, unsigned",
+      "observed_move": "~9-15% premarket",
+      "eligible": "UNKNOWN"
+    },
+    {
+      "ticker": "LYCA",
+      "catalyst": "Oct 22 IPO pricing $18, Oct 23 debut $28.55 open",
+      "eligible": "UNKNOWN; opening premium not an executable assumed gain"
+    },
+    {
+      "ticker": "NAUT",
+      "catalyst": "no verified Oct 23 company catalyst",
+      "observed_move": "~23% reported intraday, under $5",
+      "eligible": "UNKNOWN"
+    },
+    {
+      "ticker": "WTI",
+      "company": "W&T Offshore",
+      "catalyst": "oil sector strength",
+      "observed_move": "~8% reported intraday, ~$4.21",
+      "best_under_5": "EXTERNAL_RESEARCH_WATCH_NOT_TRADED"
+    }
+  ],
+  "discovery_alpha": "UNMEASURABLE",
+  "execution_alpha": "NO_NEW_TRADES",
+  "late_and_missed_executable_movers": null,
+  "decision_time_rvol_volume_spread_float_dilution_vwap_openingrange_history_extension_remaining_capacity": null,
+  "scoreboard_last_observed_nonofficial": {
+    "equity_usd": "814.33",
+    "closed_trades": 78,
+    "wins": 13,
+    "losses": 65,
+    "win_rate_pct": "16.6667",
+    "profit_factor": "0.262928",
+    "expectancy_usd": "-2.4248717949",
+    "cum_return_pct": "-18.567",
+    "max_drawdown_certified": null,
+    "mover_win_rate": null,
+    "mover_avg_return": null,
+    "capital_utilization_history_certified": null
+  },
+  "grades": {
+    "analysis": "F input unavailable",
+    "discovery": "F availability",
+    "execution": "NOT_GRADABLE",
+    "allocation": "B avoided new exposure",
+    "risk_control": "C- swing unmonitored",
+    "risk_adjusted": "NOT_GRADABLE",
+    "integrity": "F",
+    "hindsight": "A",
+    "daily_process": "F",
+    "daily_price_jumps": "F"
+  },
+  "learning": {
+    "worked": [
+      "No new unverified entries",
+      "Quarantine prevented fabricated daily returns",
+      "Comparison state kept separate"
+    ],
+    "lost_opportunity": [
+      "No scanner results on earnings and telecom moves",
+      "XLAB swing exposed to monitoring uncertainty"
+    ],
+    "scanner_misses": "Unverified executable status, not counted",
+    "scoring_defects": "Feature-vector collection absent",
+    "allocation_risk_defects": [
+      "XLAB monitoring unhealthy",
+      "weekly_lock true with stale week_start 2026-10-12",
+      "cash and settlement unverified"
+    ],
+    "prior_A001_to_A048": "PRESERVE ALL; causal effectiveness INCONCLUSIVE; no reset",
+    "new_adjustment": {
+      "id": "A049",
+      "status": "INCONCLUSIVE",
+      "stage": "PROPOSED_SHADOW_ONLY",
+      "implementation_verified": false,
+      "title": "Certified recovery gate and swing-deadline fail-closed protocol",
+      "targets": [
+        "canonical ledger reconciliation",
+        "market-data adapter",
+        "exit monitor state machine",
+        "EOD auditor",
+        "immutable 9:15 board"
+      ],
+      "patch": {
+        "execution_authority": "PAPER_ONLY",
+        "unfreeze_requires": [
+          "unique verified canonical ledger_id and experiment_id",
+          "Decimal cash bridge unexplained drift <=0.01 USD",
+          "authorized fresh quotes and healthy exit monitor"
+        ],
+        "quote_freshness_max_seconds": 30,
+        "healthy_scan_coverage_min_pct": 95,
+        "no_quote_at_swing_deadline": "EXIT_DUE_UNPRICED; ALERT; retain unresolved paper position; no retrospective fill",
+        "swing_deadline_et": "2026-10-26T15:50:00-04:00",
+        "provider_403": "open circuit, do not retry without reauthorization",
+        "provider_429": "honor Retry-After and bounded backoff",
+        "preserve_risk_and_settlement_rules": true,
+        "prohibit_comparison_source_merges": true
+      },
+      "tests": [
+        "20 injected outage/recovery/deadline replays",
+        "5 healthy observation sessions",
+        "30 primary-source benchmark catalysts for early recall",
+        "20 instrument-aware exact decimal ledger cases"
+      ],
+      "success": {
+        "fabricated_fills": 0,
+        "risk_lock_bypasses": 0,
+        "ledger_cash_drift_max_usd": 0.01,
+        "healthy_scan_coverage_pct_min": 95,
+        "quote_age_max_seconds": 30,
+        "source_role_contamination": 0,
+        "deadline_event_provenance_pct": 100
+      },
+      "evidence": "October 23: zero scans, 716 exit-data unavailable events, 1 exit monitor fault, Massive 403 and 429, XLAB mark stale since October 19."
+    },
+    "unresolved_integrity": [
+      "missing canonical ledger ID",
+      "experiment metadata mismatch",
+      "0.04 cash discrepancy",
+      "unverified same-source baseline",
+      "stale quote",
+      "Massive 403/429",
+      "9:15 board missing",
+      "legacy option row missing type"
+    ],
+    "stop_auto_learning": true
+  },
+  "next_priority": "Restore authorized data and XLAB quote-health; certify ledger before entries. For Monday October 26 swing deadline, no retroactive exit if quote missing."
+}
