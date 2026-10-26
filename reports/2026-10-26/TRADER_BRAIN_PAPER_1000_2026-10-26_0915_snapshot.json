@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "experiment_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "checkpoint_et": "2026-10-26T09:15:00-04:00",
+  "legacy_paper_500_retired_on": "2026-10-06",
+  "legacy_experiment_excluded": true,
+  "archival_only": true,
+  "official_portfolio_mutated": false,
+  "official_ledger_source": "/Users/harp/.local/state/trader-brain/control-center/portfolio.json",
+  "verified_official_reconciled_equity": null,
+  "ledger": {
+    "starting_principal": 1000,
+    "recorded_cash": 784.03,
+    "settled_buying_power": null,
+    "open_positions": [
+      {
+        "ticker": "XLAB",
+        "direction": "LONG",
+        "asset": "STOCK",
+        "swing": true,
+        "quantity": 10,
+        "entry_paper": 2.6825,
+        "stop": 2.13,
+        "target": 3.7875,
+        "exit_deadline_et": "2026-10-26T15:50:00-04:00",
+        "checkpoint_mark": 3.61,
+        "unrealized_pnl": 9.275,
+        "confirmed_paper_exit": false
+      }
+    ],
+    "cumulative_realized_pnl": -189.14,
+    "reconstructed_marked_equity": 820.13,
+    "cumulative_marked_pnl": -179.87,
+    "cumulative_return_pct": -17.987,
+    "completed_paper_trades": 78,
+    "wins": 13,
+    "losses": 65,
+    "win_rate_pct": 16.67,
+    "weekly_lock": true,
+    "stored_week_start": "2026-10-12",
+    "current_week_risk_utilization": null,
+    "daily_execution_status": "FROZEN_QUARANTINED",
+    "daily_execution_reason": "AUTHORITATIVE_LEDGER_AND_HISTORY_UNRESOLVED",
+    "exit_monitor_last_status": "MONITOR_DATA_UNAVAILABLE / MASSIVE_HTTP_429",
+    "new_approved_allocations": 0,
+    "approved_new_stock_shares": 0,
+    "approved_new_option_contracts": 0,
+    "approved_new_stop_defined_risk_dollars": 0
+  },
+  "candidates": [
+    {
+      "ticker": "XNCR",
+      "p": 32.72,
+      "pct": 29.94,
+      "pm_volume": 751832,
+      "rvol_to_full_day_30": 0.5164,
+      "move_consumed_pct": 73,
+      "remaining_move_capacity": 43,
+      "catalyst": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "RRC",
+      "p": 50.8,
+      "pct": 11.6,
+      "pm_volume": 211157,
+      "move_consumed_pct": 75.6,
+      "remaining_move_capacity": 14,
+      "catalyst": "A (0.987x EQT all-stock merger)",
+      "status": "STRUCTURAL_REJECT"
+    },
+    {
+      "ticker": "SGRY",
+      "p": 19.46,
+      "pct": 23.56,
+      "pm_volume": 86237,
+      "move_consumed_pct": 93.7,
+      "remaining_move_capacity": 8,
+      "catalyst": "A go-private agreement near reported $20",
+      "status": "STRUCTURAL_REJECT"
+    },
+    {
+      "ticker": "EQT",
+      "p": 52.17,
+      "pct": -6.22,
+      "pm_volume": 218534,
+      "move_consumed_pct": 66.8,
+      "remaining_move_capacity": 35,
+      "catalyst": "A acquisition",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "RENT",
+      "p": 2.9591,
+      "pct": 28.66,
+      "pm_volume": 5053438,
+      "move_consumed_pct": 55.4,
+      "remaining_move_capacity": 18,
+      "catalyst": "UNVERIFIED",
+      "status": "STRUCTURAL_REJECT"
+    }
+  ],
+  "under_five_approved": false,
+  "codex_adjustment_evaluations": {
+    "A001": "HURT implementation",
+    "A002": "INCONCLUSIVE",
+    "A003": "INCONCLUSIVE",
+    "A004": "HURT prior execution",
+    "A005": "HELPED operational discovery, return INCONCLUSIVE",
+    "A006": "HELPED operational separation",
+    "A007": "HURT implementation, return INCONCLUSIVE",
+    "A008": "HURT unresolved"
+  },
+  "research_notes": [
+    "9:15 bars reconstructed from last completed premarket 5minute bar, after cutoff; not claimed detected at 9:15",
+    "XLAB target exceeded Fri October23 but position still OPEN in authoritative state; no modeled exit event confirmed; deadline Oct26 15:50",
+    "Market data scanner raw Volume differs materially from premarket bar cumulative shares",
+    "Settlement status unverified; no liquidity-adjusted option spread verified; all watch setups have $0 authorization",
+    "Only observational archive, not competing ledger or trading execution."
+  ]
+}
