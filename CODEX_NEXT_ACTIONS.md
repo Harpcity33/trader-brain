@@ -1,4 +1,14 @@
-# Current priority — Full-Live Autonomy for September 8, 2026
+# Current priority — Paper report reconciliation, October 13, 2026
+
+The active task is to repair conflicting $1,000 paper reports. Read
+`knowledge/CODEX_ADJUSTMENT_REGISTRY.md` and
+`validation/PAPER_REPORT_RECONCILIATION.md` first. Official results and learning
+remain quarantined pending source/history reconciliation. Preserve both stores;
+do not average totals, invent a baseline, or choose an authoritative book from
+its current balance. This task grants no merge, deployment, live-trading or
+credential-change authority. The historical priority below does not activate it.
+
+# Historical priority — Full-Live Autonomy for September 8, 2026
 
 **Read [CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md](CODEX_FULL_LIVE_AUTONOMY_2026-09-08.md) before beginning the next implementation task.**
 
@@ -207,3 +217,4 @@ Do not mark validation complete until repository evidence demonstrates that:
 - Meaningful changes and session outputs are committed, with secrets excluded.
 
 If any item fails, leave the system status as **not yet validated**, record the exact evidence and remediation, and continue from the repository state in the next Codex session.
+
