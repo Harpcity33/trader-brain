@@ -1,0 +1,313 @@
+{
+  "schema": "trader-brain-codex-eod-handoff/2026-10-26-v1",
+  "date": "2026-10-26",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "real_broker_fills": 0,
+  "active": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "activated_at_et": "2026-10-26T11:30:06-04:00",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "simulated_seed_cash": "1000.00",
+    "latest_persisted_cash": "1000.00",
+    "positions": 0,
+    "closed_trades": 0,
+    "new_entries": 0,
+    "new_exits": 0,
+    "gross_entry_notional": "0.00",
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "certified_eod": false,
+    "official_equity": null,
+    "official_daily_return_pct": null
+  },
+  "historical": {
+    "old_source": "411e4c42cc3587b3149a",
+    "role": "RETIRED_AND_ARCHIVED_NOT_ACTIVE",
+    "archived_at_et": "2026-10-26T11:30:06-04:00",
+    "sha256": "8ba510be951c77471d181e39613885effbfb9baf27a7cb793ecc89b7cc193a96",
+    "legacy_cash": "784.03",
+    "decimal_cash": "784.07",
+    "cash_discrepancy": "-0.04",
+    "last_indicative_equity": "814.33",
+    "historical_closed": 78,
+    "wins": 13,
+    "losses": 65,
+    "observed_historical_return_pct": "-18.567",
+    "profit_factor": "0.2629",
+    "not_cumulative_with_new_seed": true
+  },
+  "xlab_unresolved": {
+    "old_source_only": true,
+    "ticker": "XLAB",
+    "instrument": "LONG_COMMON_STOCK",
+    "entry_time_et": "2026-10-16T10:05:17-04:00",
+    "entry_price": "2.6825",
+    "shares": 10,
+    "notional": "26.8250",
+    "score": "87.86",
+    "stop": "2.1300",
+    "T1": "3.7875",
+    "T2": null,
+    "partial_exits": [],
+    "stale_mark": "3.0300",
+    "stale_mark_date": "2026-10-19",
+    "stale_unrealized_pnl": "3.4750",
+    "exit_deadline_et": "2026-10-26T15:50:00-04:00",
+    "old_monitor_retired_before_deadline": true,
+    "exit_fill": null,
+    "action": "APPEND_UNRESOLVED_HISTORICAL_DEADLINE_EXCEPTION; NO_RETROACTIVE_FILL"
+  },
+  "research_0700": {
+    "source": "retired pre-cutover",
+    "collected_et": "07:01:55",
+    "missing_source_records": 25,
+    "watch_only": [
+      [
+        "MSFT",
+        "CALL",
+        "525.77",
+        "515.70"
+      ],
+      [
+        "AAPL",
+        "PUT",
+        "345.75",
+        "351.73"
+      ],
+      [
+        "QQQ",
+        "CALL",
+        "709.30",
+        "701.16"
+      ],
+      [
+        "IWM",
+        "CALL",
+        "276.24",
+        "273.345"
+      ],
+      [
+        "SPY",
+        "CALL",
+        "763.47",
+        "758.68"
+      ]
+    ]
+  },
+  "final_plan_0915": "NOT_RECOVERED",
+  "intraday": {
+    "retired_through_1130": {
+      "scans": 0,
+      "entries": 0,
+      "exits": 0,
+      "exit_data_unavailable": 180,
+      "monitor_faults": 1,
+      "provider_errors": [
+        "MASSIVE_HTTP_403",
+        "MASSIVE_HTTP_429"
+      ]
+    },
+    "new_research_at_1555": {
+      "mode": "READ_ONLY_RESEARCH",
+      "symbols": [
+        "ABTC",
+        "ABTS",
+        "ABUS",
+        "ABVC"
+      ],
+      "lanes": 2,
+      "rejected_rows": 8,
+      "rejection_reason": "IEX_BAR_COVERAGE_GAP_OR_VWAP_MISSING_AND_ATOMIC_QUOTE_UNVERIFIED",
+      "catalog_symbols": 13260,
+      "resolved_equity_symbols": 64,
+      "whole_market_covered": false,
+      "account_eligible": false,
+      "new_approved_signals": 0
+    }
+  },
+  "close_1600": {
+    "eod_artifact": null,
+    "last_research_heartbeat_et": "15:58:55",
+    "new_trades": 0,
+    "swings": 0,
+    "certified_return": null
+  },
+  "official_ledger": {
+    "rows": [],
+    "gross_entry_notional_usd": "0.00",
+    "capital_utilization_pct": null,
+    "settled_cash": null,
+    "unsettled_proceeds": null,
+    "current_equity": null,
+    "daily_pnl": null,
+    "daily_return_pct": null,
+    "no_retroactive_fills": true
+  },
+  "scoreboard_new_episode": {
+    "initial_seed": "1000.00",
+    "certified_equity": null,
+    "return_pct": null,
+    "closed": 0,
+    "wins": 0,
+    "losses": 0,
+    "profit_factor": null,
+    "expectancy": null,
+    "max_drawdown": null,
+    "capital_utilization": null,
+    "mover_win_rate": null,
+    "mover_avg_return": null,
+    "discovery_alpha": null,
+    "execution_alpha": null
+  },
+  "external_mover_audit": [
+    {
+      "ticker": "RRC",
+      "event": "EQT definitive 0.987-for-1 stock merger announced premarket",
+      "grade": "A-",
+      "decision_time_features": "UNAVAILABLE",
+      "credit": 0
+    },
+    {
+      "ticker": "XNCR",
+      "event": "XmAb819 Phase1 kidney cancer data, published Oct25 with Oct26 7AM webcast",
+      "grade": "B+",
+      "decision_time_features": "UNAVAILABLE",
+      "credit": 0
+    },
+    {
+      "ticker": "SGRY",
+      "event": "HealthSpan definitive $23.50 cash deal announced Oct26 9AM",
+      "grade": "A",
+      "decision_time_features": "UNAVAILABLE",
+      "credit": 0
+    },
+    {
+      "ticker": "SRTM",
+      "event": "Oct26 7:30 non-binding offshore data-center LOI",
+      "grade": "C",
+      "under_5_external_watch": true,
+      "decision_time_features": "UNAVAILABLE",
+      "credit": 0
+    },
+    {
+      "ticker": "PRSO",
+      "event": "Oct26 9AM $10m NantCapital financing, material warrants/dilution",
+      "grade": "B issuer event / low long quality",
+      "decision_time_features": "UNAVAILABLE",
+      "credit": 0
+    }
+  ],
+  "incomplete_mover_features": [
+    "catalyst_first_seen_by_scanner",
+    "decision_time_volume",
+    "rvol",
+    "spread",
+    "float",
+    "dilution_and_reverse_split",
+    "sector_breadth",
+    "VWAP",
+    "opening_range",
+    "90_day_gap_fade",
+    "extension",
+    "consumed_move",
+    "remaining_move_capacity"
+  ],
+  "best_under_5": "SRTM external watch only; no qualifying paper trade; LOI nonbinding",
+  "grades": {
+    "analysis": "D",
+    "discovery": "F",
+    "execution": "NOT_GRADABLE",
+    "allocation": "B",
+    "risk_control": "C",
+    "risk_adjusted": "NOT_GRADABLE",
+    "data_integrity": "D",
+    "hindsight": "A",
+    "daily_process": "D-",
+    "daily_price_jumps": "F"
+  },
+  "codex_learning": {
+    "worked": [
+      "Clean one-episode paper seed and hashed archival predecessor",
+      "Research-only, zero fills, execution and learning blocked",
+      "Incomplete IEX data rejected"
+    ],
+    "lost_money_opportunity": [
+      "No eligible session-level P&L; historical performance is archive-only",
+      "No qualified primary-source movers detected across full market",
+      "Old XLAB swing unresolved at retired deadline"
+    ],
+    "scanner_misses_late": [
+      "7AM references were not fresh ranked issuer news",
+      "9:15 board missing",
+      "Old zero scans; new rotating partial batches reject all eight latest rows"
+    ],
+    "scoring_defects": [
+      "No auditable decision-time VWAP/RVOL/remaining move/90-day analog features",
+      "PRSO financing dilution and SGRY offer cap require explicit gates"
+    ],
+    "allocation_risk_defects": [
+      "New seed must not be treated as recovering prior loss",
+      "Old XLAB open historical exposure not cleared by imagined fill",
+      "Account buying power/settlement/risk caps uncertified"
+    ],
+    "previous_adjustments": "A001-A049 preserved; all INCONCLUSIVE, A001-A008 retain historic ACTIVE designation only",
+    "proposed": [
+      {
+        "id": "A050",
+        "status": "PROPOSED_SHADOW_ONLY",
+        "patch": {
+          "preserve_hashed_archive": true,
+          "emit_archived_xlab_deadline_exception": true,
+          "retro_fill": false,
+          "cross_episode_cash_merge": false
+        },
+        "experiments": [
+          "20 migration replays",
+          "10 expired no-quote swing cases"
+        ],
+        "success": {
+          "fabricated_fills": 0,
+          "cash_merges": 0,
+          "lineage_complete_pct": 100
+        }
+      },
+      {
+        "id": "A051",
+        "status": "PROPOSED_SHADOW_ONLY",
+        "patch": {
+          "immutable_boards_et": [
+            "07:00",
+            "09:15"
+          ],
+          "primary_source_news_required": true,
+          "decision_time_quote_vwap_required": true,
+          "missing_quote_action": "REJECT",
+          "execution_enabled": false
+        },
+        "experiments": [
+          "30 source timestamped news events",
+          "20 quote/VWAP failure tests"
+        ],
+        "success": {
+          "early_recall_pct_min": 85,
+          "timestamp_completeness_pct_min": 95,
+          "synthetic_prices": 0
+        }
+      }
+    ],
+    "unresolved": [
+      "4PM certified EOD missing",
+      "10 XLAB shares unresolved in retired archive after 3:50PM legacy deadline",
+      "old cash diff $0.04",
+      "9:15 plan missing",
+      "strategy_id not explicit in new episode metadata",
+      "IEX coverage and quote incomplete"
+    ],
+    "no_auto_learning": true,
+    "no_execution_reactivation": true
+  },
+  "priority": "Document cross-episode lineage and XLAB unresolved archived deadline without creating retrospective fill; keep execution off.",
+  "detailed_local_file": "trader_brain_2026-10-26_codex_handoff.json",
+  "detailed_registry_file": "trader_brain_2026-10-26_adjustment_registry.json"
+}
