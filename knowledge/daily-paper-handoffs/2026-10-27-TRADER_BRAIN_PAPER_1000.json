@@ -1,0 +1,1031 @@
+{
+  "schema": "trader-brain-codex-eod-handoff/2026-10-27-v1",
+  "date": "2026-10-27",
+  "next_session_date": "2026-10-28",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "real_broker_fills": 0,
+  "canonical": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "activated_at_et": "2026-10-26T11:30:06-04:00",
+    "ledger_location": "~/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "canonical_manifest_sha256": "2b5b4abec24d11cf810b9705248b03cfdd96475f47345be3419f32d61c47c4e4",
+    "ledger_persisted_at_et": "2026-10-26T11:30:06-04:00",
+    "starting_equity": "1000.00",
+    "last_persisted_cash": "1000.00",
+    "positions": 0,
+    "closed_trades": 0,
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "weekly_lock": false
+  },
+  "premarket": {
+    "research_0700": {
+      "status": "NOT_RECOVERED",
+      "evidence": "No dated 7AM plan artifact in episode state; no Trader Brain Oct27 morning email found"
+    },
+    "final_plan_0915": {
+      "status": "NOT_RECOVERED",
+      "evidence": "No immutable 9:15 plan artifact or approved ranked board in canonical episode"
+    }
+  },
+  "intraday": {
+    "runtime_mode": "RESEARCH_ONLY_QUARANTINED",
+    "heartbeat_count_observed": 225,
+    "heartbeat_first_utc": "2026-10-27T11:00:22.728485+00:00",
+    "heartbeat_last_utc": "2026-10-27T19:58:32.903273+00:00",
+    "distinct_research_snapshots": 78,
+    "completed_batches_latest": 56,
+    "resolved_equity_identities": 64,
+    "stale_reference_catalog": {
+      "last_observed_utc": "2026-10-20T13:20:15.872750+00:00",
+      "reported_records": 30814,
+      "coverage": "PARTIAL_SEEDS_NOT_MARKET_WIDE"
+    },
+    "latest_research_at_et": "2026-10-27T15:55:32.398670-04:00",
+    "latest_panel": [
+      "SOFI",
+      "AAL",
+      "ACHC",
+      "ACHP"
+    ],
+    "latest_valid_history_symbols": 2,
+    "latest_rejected_symbols": 2,
+    "latest_rejection_reasons": [
+      "IEX_BAR_COVERAGE_GAP",
+      "IEX_SYMBOL_HISTORY_ABSENT"
+    ],
+    "decision_time_executable_quotes_verified": false,
+    "observed_signals_unique_symbols": 4,
+    "observed_signal_rows": 11,
+    "signal_entry_blocking_reasons": [
+      "GLOBAL_ACCOUNTING_QUARANTINE",
+      "QUOTE_EVENT_UNVERIFIED",
+      "ACCOUNT_ELIGIBILITY_UNVERIFIED"
+    ],
+    "approved_entries": 0,
+    "ledger_entries": 0,
+    "ledger_exits": 0
+  },
+  "contemporaneous_research_signals": [
+    {
+      "ticker": "AAPL",
+      "lane": "5m_stocks",
+      "at_et": "11:10",
+      "trigger": "347.605",
+      "rvol": "2.124",
+      "score": "82.07",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "AAL",
+      "lane": "5m_stocks",
+      "at_et": "11:30",
+      "trigger": "12.500",
+      "rvol": "1.947",
+      "score": "79.54",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "AAL",
+      "lane": "15m_options",
+      "at_et": "11:30",
+      "trigger": "12.500",
+      "rvol": "1.874",
+      "score": "80.90",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "SOFI",
+      "lane": "5m_stocks",
+      "at_et": "12:00",
+      "trigger": "16.680",
+      "rvol": "2.349",
+      "score": "86.25",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "SOFI",
+      "lane": "5m_stocks",
+      "at_et": "12:05",
+      "trigger": "16.700",
+      "rvol": "4.829",
+      "score": "87.50",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "SOFI",
+      "lane": "15m_options",
+      "at_et": "13:30",
+      "trigger": "16.675",
+      "rvol": "1.382",
+      "score": "78.69",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "AAL",
+      "lane": "5m_stocks",
+      "at_et": "14:10",
+      "trigger": "12.560",
+      "rvol": "3.488",
+      "score": "87.00",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "AAL",
+      "lane": "5m_stocks",
+      "at_et": "14:30",
+      "trigger": "12.580",
+      "rvol": "5.139",
+      "score": "88.98",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "ABCL",
+      "lane": "5m_stocks",
+      "at_et": "14:50",
+      "trigger": "12.830",
+      "rvol": "1.988",
+      "score": "83.78",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "SOFI",
+      "lane": "5m_stocks",
+      "at_et": "15:00",
+      "trigger": "16.525",
+      "rvol": "1.878",
+      "score": "81.86",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    },
+    {
+      "ticker": "AAL",
+      "lane": "15m_options",
+      "at_et": "15:00",
+      "trigger": "12.605",
+      "rvol": "1.879",
+      "score": "82.11",
+      "status": "BLOCKED_RESEARCH_ONLY",
+      "no_execution": true
+    }
+  ],
+  "close_1600": {
+    "last_research_heartbeat_et": "15:58:32",
+    "separate_certified_eod_artifact": false,
+    "official_equity": null,
+    "official_daily_pnl": null,
+    "official_daily_return_pct": null,
+    "reporting_status": "QUARANTINED",
+    "reporting_fault": "HISTORY_AND_VALUATION_UNVERIFIED",
+    "no_retroactive_fills": true,
+    "all_intraday_paper_positions_flat_by_absence_of_any_ledger_positions": true
+  },
+  "daily_ledger": {
+    "trades": [],
+    "stock_entries": 0,
+    "options_entries": 0,
+    "completed_exits": 0,
+    "authorized_swings": 0,
+    "gross_entry_notional_usd": "0.00",
+    "seed_based_utilization_pct": "0.00",
+    "planned_stop_risk_usd": "0.00",
+    "realized_risk_usd": "0.00",
+    "daily_realized_pnl_usd": "0.00",
+    "daily_unrealized_pnl_usd": "0.00",
+    "stored_cash_usd": "1000.00",
+    "settled_cash_certified": null,
+    "unsettled_proceeds_certified": null,
+    "certified_ending_equity_usd": null,
+    "official_daily_return_pct": null,
+    "arithmetic_flat_ledger_is_not_official_certification": true
+  },
+  "scoreboard": {
+    "scope": "CURRENT_CANONICAL_EPISODE_ONLY",
+    "experiment_seed_usd": "1000.00",
+    "certified_compounded_balance_usd": null,
+    "persisted_seed_cash_usd": "1000.00",
+    "cumulative_realized_pnl_usd": "0.00",
+    "certified_cumulative_pnl_usd": null,
+    "certified_cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": null,
+    "average_win": null,
+    "average_loss": null,
+    "largest_win": null,
+    "largest_loss": null,
+    "profit_factor": null,
+    "expectancy": null,
+    "maximum_drawdown": null,
+    "gross_entry_notional_usd": "0.00",
+    "capital_utilization_seed_pct": "0.00",
+    "mover_discovery_early_count": 0,
+    "mover_trades": 0,
+    "mover_trade_win_rate": null,
+    "average_mover_trade_return": null,
+    "missed_quality_movers_confirmed_in_external_benchmark": [
+      "MFIC",
+      "CLS"
+    ],
+    "late_technical_discovery": [
+      "SOFI 12:00 ET vs 07:00 public earnings"
+    ],
+    "stale_technical_rejections": [
+      "ACHC IEX_BAR_COVERAGE_GAP",
+      "ACHP IEX_SYMBOL_HISTORY_ABSENT"
+    ],
+    "data_integrity_faults": [
+      "no_07_plan",
+      "no_0915_plan",
+      "uncertified_1600_equity",
+      "stale_partial_catalog",
+      "quote_eligibility_unverified",
+      "no_90d_features"
+    ]
+  },
+  "retired_history": {
+    "source_id": "411e4c42cc3587b3149a",
+    "status": "RETIRED_ARCHIVED_NONAUTHORITATIVE",
+    "indicative_last_equity": "814.33",
+    "observed_closed_trades": 78,
+    "wins": 13,
+    "losses": 65,
+    "old_cash_discrepancy_usd": "0.04",
+    "xlab_shares_unresolved": 10,
+    "xlab_exit_deadline_et": "2026-10-26T15:50:00-04:00",
+    "never_merge_with_new_episode": true,
+    "retroactive_fill_prohibited": true
+  },
+  "benchmark_market": {
+    "close_2026_10_27": {
+      "sp500_pct": "+0.72",
+      "nasdaq_pct": "+1.21",
+      "dow_pct": "+0.13",
+      "source": "https://247wallst.com/cards/big-tech-did-nearly-all-the-work-today-the-nasdaq-added-1-2-gspc-market-bell-01m5zfc466wpggx27vagbmvdfk"
+    },
+    "external_movers": [
+      {
+        "ticker": "SOFI",
+        "catalyst": "Q3 record revenue, raised 2026 guidance and issued 2027 outlook",
+        "issuer_announcement_et": "07:00",
+        "catalyst_quality": "A",
+        "first_scanner_technical_signal_et": "12:00",
+        "external_movement": "roughly +11% morning; closing return not certified in scanner",
+        "classification": "LATE_TECHNICAL_DISCOVERY_NO_TRADE",
+        "source": "https://investors.sofi.com/news/news-details/2026/SoFi-Reports-Third-Quarter-2026-with-Record-Net-Revenue-of-1-4-Billion-Net-Income-of-241-Million-and-Raises-Full-Year-Guidance/default.aspx"
+      },
+      {
+        "ticker": "MFIC",
+        "catalyst": "Ares definitive cash-and-stock acquisition for approx $10.88 per fully diluted MFIC share at announcement terms",
+        "issuer_announcement_et": "06:00",
+        "catalyst_quality": "A",
+        "first_scanner_technical_signal_et": null,
+        "external_movement": "+20.9% premarket; later reporting around +22.6%",
+        "classification": "FRESH_ISSUER_NEWS_COVERAGE_MISS_NOT_CREDITED",
+        "source": "https://www.arcc.ares.com/news/ares-capital-corporation-agrees-to-acquire-midcap-financial-investment-corporation/fe8f3dcc-4fae-49fe-a4d2-097112c65bac"
+      },
+      {
+        "ticker": "CLS",
+        "catalyst": "Q3 results after Oct26 close; strong AI-related earnings and outlook",
+        "issuer_announcement_et": "2026-10-26 AFTER_CLOSE",
+        "catalyst_quality": "A-",
+        "first_scanner_technical_signal_et": null,
+        "external_movement": "+11.57% premarket; later report +17% closing",
+        "classification": "PRIOR_EVENING_EARNINGS_COVERAGE_MISS_NOT_CREDITED",
+        "source": "https://www.tipranks.com/news/the-fly/closing-bell-movers-celestica-jumps-17-on-earnings-beat-thefly-news"
+      },
+      {
+        "ticker": "BRAI",
+        "catalyst": "No confirmed fresh price-moving issuer catalyst; prior delisting/capital-structure concerns",
+        "issuer_announcement_et": null,
+        "catalyst_quality": "D_UNVERIFIED",
+        "first_scanner_technical_signal_et": null,
+        "external_movement": "+50.5% premarket at $3.19 08:05ET",
+        "classification": "UNDER_5_SPECULATIVE_EXTERNAL_TAPE_MOVER_UNQUALIFIED",
+        "source": "https://www.benzinga.com/trading-ideas/movers/26/10/62615517/12-information-technology-stocks-moving-tuesday-s-pre-market-session"
+      }
+    ]
+  },
+  "mover_audit_fields": {
+    "discovery_alpha": null,
+    "execution_alpha": null,
+    "decision_time_volume": "UNVERIFIED_FOR_EXTERNAL_MOVERS",
+    "rvol": "ONLY_SELECTED_INTERNAL_TECHNICAL_SIGNALS",
+    "spread": "UNVERIFIED",
+    "float_dilution_reverse_split": "NOT_COMPLETE",
+    "sector_breadth": "TECH_LEADERSHIP_GENERAL_ONLY",
+    "vwap_opening_range": "NO_REPRODUCIBLE_FEATURE_VECTOR",
+    "historical_90_day_gap_fade": "UNAVAILABLE",
+    "extension": "UNAVAILABLE",
+    "move_consumed_pct": "UNAVAILABLE",
+    "remaining_move_capacity": "UNAVAILABLE",
+    "session_outcome": "EXTERNAL_PUBLIC_QUOTES_ONLY_NOT_EXECUTION_EVIDENCE"
+  },
+  "best_under_5": {
+    "ticker": "BRAI",
+    "result": "LARGEST_VERIFIED_EARLY_UNDER_$5_PREMARKET_MOVE_IN_SAMPLE_BUT_NOT_A_QUALIFIED_TRADE",
+    "premarket_price_usd": "3.19",
+    "premarket_pct": "+50.5",
+    "catalyst_grade": "D_UNVERIFIED",
+    "trade_credit": 0,
+    "execution_notional": "0.00",
+    "reason": "No verified fresh issuer driver; delisting/liquidity/capital-structure and quote conditions not qualified"
+  },
+  "grades": {
+    "analysis_quality": "D",
+    "mover_discovery": "F",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "B",
+    "risk_control": "B",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "D-",
+    "avoidance_of_hindsight": "A",
+    "overall_daily_process": "D-",
+    "daily_price_jumps_scanner": "F"
+  },
+  "codex_learning": {
+    "what_worked": [
+      "Canonical episode ID and SHA-256 distinguish active ledger from retired runtime",
+      "Zero retroactive trades and no broker writes; all eleven technical signals blocked on missing quote/account eligibility",
+      "Basic SOFI/AAL/AAPL/ABCL research signals retained with timestamps"
+    ],
+    "what_lost_money_or_opportunity": [
+      "No new P&L opportunity realized; no certified paper result",
+      "MFIC 6AM definitive deal and CLS prior-evening earnings never surfaced in limited scanner",
+      "SOFI 7AM earnings catalyst surfaced only as technical signals at noon"
+    ],
+    "scanner_misses_late": [
+      "Alphabetical 64-symbol resolved rotation is not full-market discovery",
+      "No immutable 7AM or 9:15 issuer-event ranking",
+      "SOFI after most opening repricing; MFIC/CLS absent"
+    ],
+    "scoring_defects": [
+      "82–89 scores based on bar signals lack verified quote, spread, float/dilution, 90d analog and executable entry",
+      "Relative volume exists on selected bars but not as independently replayable decision-time full data",
+      "No deal-consideration and earnings-catalyst ranking for covered public news"
+    ],
+    "allocation_risk_defects": [
+      "Capital deployed 0 because quarantine; correctness is protective, not alpha",
+      "Risk cap policy settings not independently certified",
+      "Old XLAB unresolved and must stay segregated"
+    ],
+    "prior_adjustments": [
+      {
+        "id": "A001",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A002",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A003",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A004",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A005",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A006",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A007",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A008",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A009",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A010",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A011",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A012",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A013",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A014",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A015",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A016",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A017",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A018",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A019",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A020",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A021",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A022",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A023",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A024",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A025",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A026",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A027",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A028",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A029",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A030",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A031",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A032",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A033",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A034",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A035",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A036",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A037",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A038",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A039",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A040",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A041",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A042",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A043",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A044",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A045",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A046",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A047",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A048",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A049",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A050",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A051",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A052",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A053",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A054",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      }
+    ],
+    "proposed_changes": [
+      {
+        "id": "A052",
+        "title": "Event-prioritized issuer-news discovery ahead of alphabetical rotation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "patch": {
+          "shadow_only": true,
+          "priority_queue_order": [
+            "issuer_primary_source_fresh_catalyst",
+            "validated_liquid_mover",
+            "baseline_rotating_symbols"
+          ],
+          "persist_boards_et": [
+            "07:00",
+            "09:15"
+          ],
+          "catalog_max_age_hours": 24,
+          "required_event_fields": [
+            "issuer",
+            "ticker",
+            "release_timestamp_et",
+            "scanner_first_seen_et",
+            "catalyst_type",
+            "catalyst_direction",
+            "issuer_source_url"
+          ],
+          "leave_risk_limits_unchanged": true
+        },
+        "test": {
+          "sessions": 5,
+          "independent_fresh_issuer_events": 30,
+          "benchmark_symbols": [
+            "MFIC",
+            "SOFI",
+            "CLS"
+          ],
+          "success": {
+            "early_catalyst_recall_min": 0.85,
+            "timestamp_completeness_min": 0.95,
+            "zero_hindsight_credits": true
+          },
+          "reject_if": {
+            "misattributed_early_detections": 1,
+            "synthetic_prices": 1,
+            "missing_source_timestamp_rate_gt": 0.05
+          }
+        }
+      },
+      {
+        "id": "A053",
+        "title": "Separate technical signal observations from executable quote-validated paper entries",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "patch": {
+          "shadow_only": true,
+          "signal_state_machine": [
+            "DISCOVERED",
+            "RESEARCH_OBSERVED",
+            "VALIDATED_CANDIDATE",
+            "ELIGIBLE_PAPER_ENTRY",
+            "LEDGER_FILLED"
+          ],
+          "required_entry_evidence": [
+            "atomic_bid_ask_timestamp",
+            "bid_ask_size",
+            "spread_bps",
+            "exchange_price",
+            "decision_volume",
+            "rvol",
+            "vwap",
+            "opening_range",
+            "float_dilution_split_flags",
+            "sector_breadth",
+            "90d_analog",
+            "extension",
+            "move_consumed_pct",
+            "remaining_capacity",
+            "cash_settlement",
+            "stop_targets"
+          ],
+          "incomplete_evidence": "REJECT",
+          "deduplicate_symbol_lane_candle": true,
+          "leave_execution_enabled": false
+        },
+        "test": {
+          "shadow_signals": 50,
+          "quote_failure_tests": 20,
+          "success": {
+            "state_attribution_complete_min": 0.95,
+            "unauthorized_or_synthetic_fills": 0,
+            "duplicate_perf_credits": 0
+          },
+          "reject_if": {
+            "retrospective_entry": 1,
+            "unverified_quote_promoted": 1
+          }
+        }
+      },
+      {
+        "id": "A054",
+        "title": "Tamper-evident flat-session EOD certification and archived-episode exception ledger",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "patch": {
+          "shadow_only": true,
+          "require_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+          "eod_time_et": "16:00",
+          "flat_seed_eod_checks": [
+            "ledger_hash",
+            "zero_position_crosscheck",
+            "zero_entry_and_exit_crosscheck",
+            "opening_balance_source",
+            "settlement_journal",
+            "lock_and_risk_state",
+            "external_state_mismatch_check"
+          ],
+          "never_bridge_retired_equity": true,
+          "retired_xlab_status": "ARCHIVED_UNRESOLVED",
+          "learning_requires_certified_eod": true
+        },
+        "test": {
+          "flat_day_replays": 20,
+          "missing_eod_tests": 10,
+          "success": {
+            "certified_or_quarantined_deterministically": 1,
+            "prior_episode_equity_merges": 0,
+            "retrospective_fills": 0,
+            "ledger_cash_discrepancy_max_usd": "0.01"
+          },
+          "reject_if": {
+            "false_official_return": 1,
+            "merged_episode": 1
+          }
+        }
+      }
+    ],
+    "experiments_next_session": [
+      {
+        "id": "A052",
+        "tests": {
+          "sessions": 5,
+          "independent_fresh_issuer_events": 30,
+          "benchmark_symbols": [
+            "MFIC",
+            "SOFI",
+            "CLS"
+          ],
+          "success": {
+            "early_catalyst_recall_min": 0.85,
+            "timestamp_completeness_min": 0.95,
+            "zero_hindsight_credits": true
+          },
+          "reject_if": {
+            "misattributed_early_detections": 1,
+            "synthetic_prices": 1,
+            "missing_source_timestamp_rate_gt": 0.05
+          }
+        },
+        "patch": {
+          "shadow_only": true,
+          "priority_queue_order": [
+            "issuer_primary_source_fresh_catalyst",
+            "validated_liquid_mover",
+            "baseline_rotating_symbols"
+          ],
+          "persist_boards_et": [
+            "07:00",
+            "09:15"
+          ],
+          "catalog_max_age_hours": 24,
+          "required_event_fields": [
+            "issuer",
+            "ticker",
+            "release_timestamp_et",
+            "scanner_first_seen_et",
+            "catalyst_type",
+            "catalyst_direction",
+            "issuer_source_url"
+          ],
+          "leave_risk_limits_unchanged": true
+        }
+      },
+      {
+        "id": "A053",
+        "tests": {
+          "shadow_signals": 50,
+          "quote_failure_tests": 20,
+          "success": {
+            "state_attribution_complete_min": 0.95,
+            "unauthorized_or_synthetic_fills": 0,
+            "duplicate_perf_credits": 0
+          },
+          "reject_if": {
+            "retrospective_entry": 1,
+            "unverified_quote_promoted": 1
+          }
+        },
+        "patch": {
+          "shadow_only": true,
+          "signal_state_machine": [
+            "DISCOVERED",
+            "RESEARCH_OBSERVED",
+            "VALIDATED_CANDIDATE",
+            "ELIGIBLE_PAPER_ENTRY",
+            "LEDGER_FILLED"
+          ],
+          "required_entry_evidence": [
+            "atomic_bid_ask_timestamp",
+            "bid_ask_size",
+            "spread_bps",
+            "exchange_price",
+            "decision_volume",
+            "rvol",
+            "vwap",
+            "opening_range",
+            "float_dilution_split_flags",
+            "sector_breadth",
+            "90d_analog",
+            "extension",
+            "move_consumed_pct",
+            "remaining_capacity",
+            "cash_settlement",
+            "stop_targets"
+          ],
+          "incomplete_evidence": "REJECT",
+          "deduplicate_symbol_lane_candle": true,
+          "leave_execution_enabled": false
+        }
+      },
+      {
+        "id": "A054",
+        "tests": {
+          "flat_day_replays": 20,
+          "missing_eod_tests": 10,
+          "success": {
+            "certified_or_quarantined_deterministically": 1,
+            "prior_episode_equity_merges": 0,
+            "retrospective_fills": 0,
+            "ledger_cash_discrepancy_max_usd": "0.01"
+          },
+          "reject_if": {
+            "false_official_return": 1,
+            "merged_episode": 1
+          }
+        },
+        "patch": {
+          "shadow_only": true,
+          "require_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+          "eod_time_et": "16:00",
+          "flat_seed_eod_checks": [
+            "ledger_hash",
+            "zero_position_crosscheck",
+            "zero_entry_and_exit_crosscheck",
+            "opening_balance_source",
+            "settlement_journal",
+            "lock_and_risk_state",
+            "external_state_mismatch_check"
+          ],
+          "never_bridge_retired_equity": true,
+          "retired_xlab_status": "ARCHIVED_UNRESOLVED",
+          "learning_requires_certified_eod": true
+        }
+      }
+    ],
+    "success_failure_metrics": [
+      {
+        "id": "A052",
+        "success": {
+          "early_catalyst_recall_min": 0.85,
+          "timestamp_completeness_min": 0.95,
+          "zero_hindsight_credits": true
+        },
+        "reject_if": {
+          "misattributed_early_detections": 1,
+          "synthetic_prices": 1,
+          "missing_source_timestamp_rate_gt": 0.05
+        }
+      },
+      {
+        "id": "A053",
+        "success": {
+          "state_attribution_complete_min": 0.95,
+          "unauthorized_or_synthetic_fills": 0,
+          "duplicate_perf_credits": 0
+        },
+        "reject_if": {
+          "retrospective_entry": 1,
+          "unverified_quote_promoted": 1
+        }
+      },
+      {
+        "id": "A054",
+        "success": {
+          "certified_or_quarantined_deterministically": 1,
+          "prior_episode_equity_merges": 0,
+          "retrospective_fills": 0,
+          "ledger_cash_discrepancy_max_usd": "0.01"
+        },
+        "reject_if": {
+          "false_official_return": 1,
+          "merged_episode": 1
+        }
+      }
+    ],
+    "unresolved_data_integrity": [
+      "No immutable 7AM and 9:15 artifacts",
+      "4PM report/equity unverified despite seed cash and zero positions",
+      "Research catalog observed Oct20 stale/partial; 64 resolved identities",
+      "No actionable quote/spread/settlement verification",
+      "Retired XLAB 10 shares still unresolved; prior $0.04 cash difference",
+      "Exact risk config, 90-day gap fade and sector breadth unverified"
+    ],
+    "learning_enabled": false,
+    "implementation_authorized": false
+  },
+  "highest_priority_next_session": "Fix priority first-discovery: immutable 07:00/09:15 primary-source news sweep and event-prioritized full-universe candidate queue; preserve no-execution and quarantine until accounting/quote eligibility pass.",
+  "persistence_note": "Dated GitHub artifact is learning evidence only, not confirmed Codex ingestion or deployed strategy change."
+}
