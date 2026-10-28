@@ -1,0 +1,523 @@
+{
+  "schema": "trader-brain-paper-eod-codex-handoff-v4",
+  "date": "2026-10-28",
+  "timezone": "America/New_York",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "real_broker_fills": false,
+  "generated_for": "2026-10-28 post-close review",
+  "certification": {
+    "status": "QUARANTINED",
+    "official_daily_return_pct": null,
+    "official_ending_equity_usd": null,
+    "official_cumulative_return_pct": null,
+    "learning_eligible": false,
+    "execution_enabled": false,
+    "reason": [
+      "NO_CERTIFIED_4PM_EQUITY_SNAPSHOT",
+      "CURRENT_EOD_REPORTING_OFFICIAL_EQUITY_NULL",
+      "STALE_RESEARCH_INVENTORY",
+      "915_CHECKPOINT_POINTS_TO_RETIRED_LEDGER"
+    ]
+  },
+  "canonical_episode": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "active_since_utc": "2026-10-26T15:30:06.836835+00:00",
+    "portfolio_path": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "portfolio_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "portfolio_last_modified_et": "2026-10-26T11:30:06-04:00",
+    "portfolio_strategy_id": "TRADER_BRAIN_PAPER_1000",
+    "ledger_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "seed_cash_usd": "1000.00",
+    "recorded_cash_usd": "1000.00",
+    "last_observed_positions": [],
+    "last_observed_closed_trades": [],
+    "weekly_lock": false,
+    "week_start": "2026-10-26",
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "settled_cash_usd": null,
+    "unsettled_proceeds_usd": null,
+    "certified_buying_power_usd": null
+  },
+  "daily_ledger": {
+    "official": false,
+    "new_ledger_fills": [],
+    "new_entries": 0,
+    "exits": 0,
+    "open_positions": 0,
+    "realized_pnl_from_recorded_fills_usd": "0.00",
+    "gross_entry_notional_usd": "0.00",
+    "new_allocation_pct": 0,
+    "planned_new_trade_risk_usd": "0.00",
+    "realized_risk_usd": "0.00",
+    "proceeds_recycled": false,
+    "official_daily_pnl_usd": null,
+    "official_daily_return_pct": null,
+    "official_ending_equity_usd": null,
+    "reason": "No contemporaneous fills or positions in canonical episode; canonical runtime does not certify a 4PM mark; zero recorded activity does not authorize manufactured official P&L."
+  },
+  "morning_reconciliation": {
+    "seven_am": {
+      "durable_ranked_board_found": false,
+      "notes": "Canonical heartbeat at ~7:00 ET; no complete immutable issuer-event board recovered. Prior research cannot be invented."
+    },
+    "nine_fifteen": {
+      "snapshot_found": true,
+      "github_path": "reports/2026-10-28/TRADER_BRAIN_PAPER_1000_2026-10-28_0915_snapshot.json",
+      "saved_source_path": "/Users/harp/.local/state/trader-brain/control-center/portfolio.json",
+      "source_conflict": "RETired 2026-10-26 prior episode, NOT the active canonical ledger",
+      "saved_cash_usd": "784.03",
+      "saved_swing": "XLAB",
+      "saved_closed_trades": 78,
+      "selected_catalysts": [
+        "VRT",
+        "SKHY",
+        "FLEX",
+        "HOOD",
+        "STLA"
+      ],
+      "new_authorized_positions": 0,
+      "approved_cash_allocation_usd": "0.00",
+      "instruction": "Preserve candidate research as 9:15 external discovery, quarantine all portfolio, capital and scoreboard fields and contradictory adjustment effectiveness labels."
+    },
+    "intraday": {
+      "canonical_heartbeat_events": 225,
+      "first_utc": "2026-10-28T11:00:26.819798+00:00",
+      "last_utc": "2026-10-28T19:58:25.283893+00:00",
+      "new_signal_events": 0,
+      "scanner_status": "INVENTORY_STALE_NO_READ",
+      "catalog_age_seconds_at_1555": 142511.350201,
+      "stale_global_catalog_age_seconds_at_1558": 715089.373539,
+      "catalog_entries": 13261,
+      "resolved_equity_identities": 64,
+      "unresolved_or_pending_entries": 13197,
+      "completed_batches_lifetime": 56,
+      "latest_provider_requests": 0,
+      "latest_scan_rows": [],
+      "whole_market_scanned": false,
+      "execution_enabled": false
+    },
+    "four_pm": {
+      "complete_certified_report_found": false,
+      "heartbeat_not_eod": true,
+      "official_equity": null,
+      "official_pnl": null,
+      "official_return": null
+    }
+  },
+  "source_conflicts": [
+    {
+      "severity": "CRITICAL",
+      "name": "WRONG_915_LEDGER_SOURCE",
+      "evidence": "9:15 GitHub JSON identifies retired control-center portfolio cash $784.03 and overdue XLAB as authoritative while active canonical episode has $1000 cash and zero positions",
+      "remedy": "Episode-pointer resolver and mismatch quarantine; leave snapshot immutable, issue corrected addendum."
+    },
+    {
+      "severity": "HIGH",
+      "name": "UNSUPPORTED_PRIOR_ADJUSTMENT_STATUSES",
+      "evidence": "9:15 report says A001/A004/A007/A008 HURT, A005/A006 HELPED without verified prospective comparison; 10/27 registry all INCONCLUSIVE",
+      "remedy": "Carry prior INCONCLUSIVE statuses; require evidence before status promotion."
+    },
+    {
+      "severity": "HIGH",
+      "name": "RETIRED_ARCHIVED_XLAB_UNRESOLVED",
+      "evidence": "Prior $1000 episode XLAB 10 shares entered 10/16 at $2.6825; deadline 10/26 15:50 ET; no validated exit",
+      "remedy": "Retain archived unresolved; no simulated retrospective exit and no balance merge."
+    },
+    {
+      "severity": "HIGH",
+      "name": "STALE_INVENTORY_NO_READ",
+      "evidence": "At 15:55 scheduler reports INVENTORY_STALE_NO_READ, 0 requests, 0 rows, 64 resolved identities from 13,261 catalog entries.",
+      "remedy": "Refresh inventory under permissioned provider; fail-closed with explicit missing coverage."
+    },
+    {
+      "severity": "HIGH",
+      "name": "MISSING_CANONICAL_4PM_CERTIFICATION",
+      "evidence": "Latest heartbeat official equity null; no durable certifying EOD snapshot",
+      "remedy": "Issue immutable episode ID bound flat-session certified EOD."
+    }
+  ],
+  "mover_audit": {
+    "interpretation": "9:15 externally researched candidates are not runtime scanner detections. Post-session prices are external benchmark observations, not proof of triggers or executable fills.",
+    "nine_fifteen_market_breadth_pct": {
+      "SOXX": 0.87,
+      "XLK": 0.45,
+      "XLI": 0.69,
+      "XLV": -0.74,
+      "XLF": -0.25
+    },
+    "decision_time_rvol_warning": "9:15 premarket shares divided by full-day average, not equivalent-clock RVOL; true decision-time RVOL and precise bid/ask unavailable.",
+    "candidates": [
+      {
+        "ticker": "VRT",
+        "first_seen": "09:15 external plan (not runtime)",
+        "news_et": "05:55",
+        "catalyst": "Q3 sales +61%, organic orders +100%, raised guidance",
+        "grade": "A",
+        "price_915": 244,
+        "percent_915": 16.99,
+        "shares_pm": 495252,
+        "pm_vwap_est": 239.724,
+        "approx_spread_pct": 0.57,
+        "move_consumed_pct": 89.4,
+        "remaining_capacity_score": 44,
+        "analog_d5_pct": -4.65,
+        "analog_n": 10,
+        "plan_trigger": 245.75,
+        "plan_stop": 237.9,
+        "postopen_observation": "~2:01 ET +14.5%; later reported RTH high ~245.3, conditional trigger not verified",
+        "classification": "EARLY_EXTERNAL_DISCOVERY_REJECT_CURRENT_ENTRY",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "SKHY",
+        "first_seen": "09:15 external plan (not runtime)",
+        "news_et": "PREMARKET",
+        "catalyst": "Earnings and AI memory demand",
+        "grade": "A",
+        "price_915": 155.8,
+        "percent_915": 7.18,
+        "shares_pm": 1250069,
+        "pm_vwap_est": 156.541,
+        "approx_spread_pct": 0.15,
+        "move_consumed_pct": 79.9,
+        "remaining_capacity_score": 51,
+        "analog_d5_pct": -5.07,
+        "analog_n": 15,
+        "plan_trigger": 157.75,
+        "postopen_observation": "~15:51 ET $163.84 (+12.71%), RTH high 166.06; no recorded eligible entry",
+        "classification": "EARLY_EXTERNAL_DISCOVERY_UNEXECUTED",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "FLEX",
+        "first_seen": "09:15 external plan (not runtime)",
+        "catalyst": "Q3 revenue $8.5B, EPS and guidance beat",
+        "grade": "A",
+        "price_915": 93.0234,
+        "percent_915": 11.61,
+        "shares_pm": 120108,
+        "pm_vwap_est": 89.23,
+        "approx_spread_pct": 0.58,
+        "move_consumed_pct": 89.2,
+        "remaining_capacity_score": 43,
+        "analog_d5_pct": -8.49,
+        "analog_n": 10,
+        "plan_trigger": 93.8,
+        "postopen_observation": "Morning fade with source snapshots varying; no qualified 5-minute cross validated",
+        "classification": "EARLY_EXTERNAL_DISCOVERY_REJECT_CURRENT_ENTRY",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "HOOD",
+        "first_seen": "09:15 external plan (not runtime)",
+        "catalyst": "Q3 crypto revenue -55% YoY, EPS below expectation",
+        "grade": "A-",
+        "direction": "BEARISH",
+        "price_915": 88.6178,
+        "percent_915": -6.28,
+        "approx_spread_pct": 0.26,
+        "move_consumed_pct": 68.9,
+        "remaining_capacity_score": 42,
+        "analog_d5_pct": 4.73,
+        "analog_n": 20,
+        "plan_trigger": 87.8,
+        "postopen_observation": "~13:51 ET $91.11; contemporaneous option spread unavailable and low reported 89.15",
+        "classification": "EARLY_EXTERNAL_DISCOVERY_CORRECT_SKIP",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "STLA",
+        "first_seen": "09:15 external plan (not runtime)",
+        "news_et": "~03:00 scheduled release",
+        "catalyst": "Q3 revenue EUR37.6B, net loss narrowed, FCF still EUR-4B",
+        "grade": "B+",
+        "price_915": 4.51,
+        "percent_915": 8.94,
+        "shares_pm": 5807789,
+        "pm_vwap_est": 4.396,
+        "approx_spread_pct": 0.22,
+        "move_consumed_pct": 92.5,
+        "remaining_capacity_score": 37,
+        "analog_d5_pct": -4.19,
+        "analog_n": 4,
+        "plan_trigger": 4.55,
+        "postopen_observation": "~15:57 ET $4.685 (+13.16%), high 4.83; no observed 5-minute/VWAP validated entry",
+        "classification": "BEST_UNDER_5_EXTERNAL_DISCOVERY_UNEXECUTED",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "WEN",
+        "first_seen": "09:15 external plan (not runtime)",
+        "news_et": "08:34 filing",
+        "catalyst": "Nonbinding $7.35 cash takeover proposal",
+        "price_915": 7.09,
+        "move_consumed_pct": 78.5,
+        "remaining_capacity_score": 4,
+        "classification": "STRUCTURAL_REJECT_OFFER_CEILING",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "ULBI",
+        "first_seen": "09:15 external plan (not runtime)",
+        "catalyst": "Definitive $16 cash acquisition",
+        "price_915": 15.6,
+        "move_consumed_pct": 99.8,
+        "remaining_capacity_score": 2,
+        "classification": "STRUCTURAL_REJECT_CASH_DEAL",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "BRAI",
+        "first_seen": "09:15 external plan (not runtime)",
+        "catalyst": "No fresh issuer catalyst validated",
+        "price_915": 4.9333,
+        "move_consumed_pct": 97.4,
+        "remaining_capacity_score": 5,
+        "postopen_observation": "52.7% at 10:02 ET to 9.7% at 12:01 ET",
+        "classification": "CORRECT_UNVERIFIED_CATALYST_REJECT",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "GMAB",
+        "first_seen": null,
+        "news_et": "09:40",
+        "catalyst": "Phase 3 primary endpoints met; reported 50% mortality-risk reduction",
+        "grade": "A",
+        "postopen_observation": "+31.7% as of 14:01 ET",
+        "classification": "POST_915_PRIMARY_SOURCE_MOVER_NOT_IN_RUNTIME_SIGNALS",
+        "profit_credit": 0
+      },
+      {
+        "ticker": "AXGN",
+        "first_seen": null,
+        "news_et": "07:02",
+        "catalyst": "Q3 revenue +26.2%, raises 2026 revenue target",
+        "grade": "A-",
+        "postopen_observation": "+28.7% as of 14:00 ET",
+        "classification": "EARLY_ISSUER_NEWS_NOT_ON_915_BOARD_OR_RUNTIME",
+        "profit_credit": 0
+      }
+    ],
+    "external_high_quality_unscanned": [
+      "GMAB",
+      "AXGN"
+    ],
+    "identified_late_runtime": [],
+    "correct_rejections_research": [
+      "WEN",
+      "ULBI",
+      "BRAI",
+      "HOOD",
+      "VRT"
+    ],
+    "discovery_alpha_usd": null,
+    "execution_alpha_usd": null,
+    "confirmed_executable_missed_profit_usd": null,
+    "actual_paper_mover_trades": 0,
+    "best_under_5": {
+      "ticker": "STLA",
+      "status": "RESEARCH_WATCH_ONLY",
+      "paper_entry": false,
+      "approved_allocation_usd": 0,
+      "quality": "issuer earnings and deep liquidity; high premarket extension; unverified 5-minute conditional entry"
+    }
+  },
+  "scoreboard": {
+    "scope": "ACTIVE_EPISODE_ONLY",
+    "starting_balance_usd": "1000.00",
+    "last_recorded_cash_usd": "1000.00",
+    "official_ending_equity_usd": null,
+    "official_compounded_balance_usd": null,
+    "official_cumulative_pnl_usd": null,
+    "official_cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "average_win_usd": null,
+    "average_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "maximum_drawdown_pct": null,
+    "cumulative_entry_notional_usd": "0.00",
+    "observed_allocation_pct": 0,
+    "mover_trades": 0,
+    "mover_trade_win_rate_pct": null,
+    "average_mover_trade_return_pct": null,
+    "missed_high_quality_benchmark_events": 2,
+    "late_detected_signals": 0,
+    "late_detection_coverage_not_established": true,
+    "integrity_faults": 5
+  },
+  "risk": {
+    "recorded_new_trade_risk_usd": "0.00",
+    "realized_pnl_from_fills_usd": "0.00",
+    "active_episode_risk_violations_observed": 0,
+    "cash_account_recycling_observed": false,
+    "current_episode_capital_utilization_pct": 0,
+    "configured_reference_not_deployment_verified": {
+      "normal_planned_risk_pct": 3,
+      "a_plus_planned_risk_pct": 4,
+      "max_total_planned_risk_pct": 5,
+      "daily_new_entry_lock_pct": 6,
+      "hard_daily_kill_pct": 8,
+      "weekly_loss_lock_pct": 12
+    },
+    "evaluation": "Safe fail-closed; no new trading risk. Historical 9:15 illustrative VRT $16 risk should be 1.60% of actual $1,000 seed, not 1.97% of retired source equity."
+  },
+  "grades": {
+    "analysis_quality": "C+",
+    "mover_discovery": "D- external research, F runtime",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "B (zero unauthorized allocation)",
+    "risk_control": "B (fail closed)",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "overall_daily_process": "D-",
+    "daily_price_jumps_scanner": "F (runtime coverage)"
+  },
+  "learning": {
+    "worked": [
+      "9:15 external research found VRT/SKHY/FLEX and identified WEN/ULBI/BRAI structural pitfalls",
+      "Canonical episode remained flat with no fabricated entries or exits",
+      "Execution and autonomous learning stayed disabled"
+    ],
+    "lost_money_or_opportunity": [
+      "No verified paper trading losses in active episode; no realized execution gains",
+      "GMAB 09:40 event and AXGN 07:02 earnings were not observed by runtime; missed discovery coverage, not proven missed executable trades",
+      "9:15 simulated allocation used retired account reference and therefore misstated risk percentage"
+    ],
+    "scanner_misses_or_late": [
+      "Stale inventory with zero network reads; 64 resolved equities out of 13,261 candidate entries",
+      "No post-09:15 event interrupt for GMAB 09:40 issuer release",
+      "No durable 07:00 board or 16:00 canonical EOD report"
+    ],
+    "scoring_defects": [
+      "Premarket RVOL metric is not equal-time relative volume",
+      "Unqualified historical 90-day event analogs not comparable catalyst-to-catalyst",
+      "Unsupported HURT/HELPED prior-adjustment labels in 9:15 snapshot"
+    ],
+    "allocation_risk_defects": [
+      "Wrong-source 9:15 snapshot retired episode cash $784.03 with XLAB instead of current $1000 flat",
+      "Settlement and day buying power not certified at 4PM; fail closed maintained"
+    ],
+    "carry_forward_adjustments": "A001-A054 unchanged, all effectiveness INCONCLUSIVE pending verified prospective experiments",
+    "prior_adjustments_rated": {
+      "A001": "INCONCLUSIVE",
+      "A002": "INCONCLUSIVE",
+      "A003": "INCONCLUSIVE",
+      "A004": "INCONCLUSIVE",
+      "A005": "INCONCLUSIVE",
+      "A006": "INCONCLUSIVE",
+      "A007": "INCONCLUSIVE",
+      "A008": "INCONCLUSIVE",
+      "A009_to_A054": "INCONCLUSIVE"
+    },
+    "new_proposals": [
+      "A055",
+      "A056",
+      "A057",
+      "A058"
+    ],
+    "next_session_experiments": [
+      {
+        "id": "A055",
+        "test": {
+          "replays": 20,
+          "shadow_sessions": 5,
+          "success": {
+            "wrong_source_acceptances": 0,
+            "archive_comparisons_separated_pct": 100,
+            "retrospective_fills": 0
+          },
+          "reject_if": {
+            "old_ledger_classified_current": 1,
+            "learning_promoted_before_certification": 1
+          }
+        }
+      },
+      {
+        "id": "A056",
+        "test": {
+          "sessions": 5,
+          "marketwide_benchmark_events": 30,
+          "success": {
+            "healthy_scan_coverage_pct_min": 95,
+            "catalog_age_hours_max": 24,
+            "synthetic_prices": 0
+          },
+          "reject_if": {
+            "stale_catalog_promoted_executable": 1,
+            "ineligible_quote_promoted": 1
+          }
+        }
+      },
+      {
+        "id": "A057",
+        "test": {
+          "sessions": 5,
+          "dated_issuer_events": 30,
+          "benchmark_events": [
+            {
+              "symbol": "GMAB",
+              "published_at_et": "2026-10-28T09:40:00-04:00"
+            },
+            {
+              "symbol": "AXGN",
+              "published_at_et": "2026-10-28T07:02:00-04:00"
+            }
+          ],
+          "success": {
+            "early_event_recall_pct_min": 85,
+            "timestamp_complete_pct_min": 95,
+            "p95_detection_latency_minutes_max": 5
+          },
+          "reject_if": {
+            "retrospective_discovery_credit": 1,
+            "missing_event_source": 1
+          }
+        }
+      },
+      {
+        "id": "A058",
+        "test": {
+          "test_cases": 25,
+          "success": {
+            "unsupported_helped_hurt_assignments": 0,
+            "previous_registry_entries_preserved_pct": 100
+          },
+          "reject_if": {
+            "unverified_promotion": 1
+          }
+        }
+      }
+    ],
+    "unresolved_data_integrity": [
+      "915_wrong_episode_reference",
+      "outdated_7AM_data_board_missing",
+      "no_certified_4PM_snapshot",
+      "stale_inventory_zero_reads",
+      "retired_XLAB_archived_unresolved",
+      "unverified_settlement_and_live_risk_policy"
+    ],
+    "automation_should_keep_running": true,
+    "requires_codex_review_before_promotion": true
+  },
+  "sources": {
+    "canonical_pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "prior_registry": "knowledge/daily-paper-handoffs/2026-10-27-adjustment-registry-summary.json",
+    "previous_915_checkpoint": "reports/2026-10-28/TRADER_BRAIN_PAPER_1000_2026-10-28_0915_snapshot.json",
+    "market_sources": [
+      "https://www.prnewswire.com/news-releases/vertiv-reports-strong-third-quarter-2026-with-net-sales-growth-of-61-organic-orders-growth-over-100-and-diluted-eps-growth-of-91-adjusted-diluted-eps-growth-of-78-raises-full-year-2026-guidance-across-all-key-metrics-302921936.html",
+      "https://www.globenewswire.com/news-release/2026/10/28/3390308/0/en/genmab-announces-statistically-significant-clinically-meaningful-improvement-in-overall-survival-and-objective-response-with-petosemtamab-combination-at-first-interim-analysis-in-f.html",
+      "https://www.stellantis.com/en/news/press-releases/2026/october/third-quarter-2026-financial-results",
+      "https://ir.axogeninc.com/news-events/press-releases/detail/1030/axogen-inc-reports-third-quarter-2026-financial-results",
+      "https://www.stocktitan.net/articles/stock-market-today-live-october-28-2026"
+    ]
+  }
+}
