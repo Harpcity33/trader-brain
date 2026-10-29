@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-29",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "status": "QUARANTINED",
+  "canonical_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "last_recorded_cash_usd": "1000.00",
+  "official_daily_return_pct": null,
+  "official_ending_equity_usd": null,
+  "closed_trades": 0,
+  "open_positions": 0,
+  "new_trades": 0,
+  "scanner_unique_signals": 11,
+  "scanner_symbols": [
+    "SOFI",
+    "AAL",
+    "ACRS",
+    "ABSI"
+  ],
+  "issue": "09:15 snapshot uses retired source; post-cutoff reconstruction; missing certified 16:00 EOD",
+  "learning_eligible": false
+}
