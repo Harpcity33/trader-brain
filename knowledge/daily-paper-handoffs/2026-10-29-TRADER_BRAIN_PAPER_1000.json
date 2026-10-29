@@ -1,22 +1,364 @@
 {
+  "schema": "TRADER_BRAIN_PAPER_1000_EOD_v5",
   "date": "2026-10-29",
-  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "timezone": "America/New_York",
   "paper_only": true,
-  "status": "QUARANTINED",
-  "canonical_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
-  "last_recorded_cash_usd": "1000.00",
-  "official_daily_return_pct": null,
-  "official_ending_equity_usd": null,
-  "closed_trades": 0,
-  "open_positions": 0,
-  "new_trades": 0,
-  "scanner_unique_signals": 11,
-  "scanner_symbols": [
-    "SOFI",
-    "AAL",
-    "ACRS",
-    "ABSI"
-  ],
-  "issue": "09:15 snapshot uses retired source; post-cutoff reconstruction; missing certified 16:00 EOD",
-  "learning_eligible": false
+  "real_broker_trades": false,
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "certification": {
+    "status": "QUARANTINED",
+    "official_daily_return_pct": null,
+    "official_daily_pnl_usd": null,
+    "official_ending_equity_usd": null,
+    "learning_eligible": false,
+    "execution_enabled": false
+  },
+  "canonical": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "ledger_mtime_et": "2026-10-26T11:30:06-04:00",
+    "starting_cash_usd": "1000.00",
+    "last_persisted_cash_usd": "1000.00",
+    "positions": [],
+    "closed_trades": [],
+    "weekly_lock": false,
+    "settled_cash_usd": null,
+    "unsettled_proceeds_usd": null,
+    "certified_buying_power_usd": null
+  },
+  "daily_ledger": {
+    "entries": [],
+    "exits": [],
+    "pre_entry_designated_swings": [],
+    "gross_entry_notional_usd": "0.00",
+    "new_allocation_pct": 0,
+    "planned_risk_usd": "0.00",
+    "realized_pnl_from_fills_usd": "0.00",
+    "settlement_recycling": false,
+    "official_ending_equity_usd": null,
+    "official_daily_return_pct": null,
+    "note": "No new paper trades; no certified 16:00 mark. No retrospective fills or invented official zero return."
+  },
+  "reconciliation": {
+    "07:00": {
+      "canonical_ranked_board_found": false,
+      "separate_titan_study": "research/daily-strategy/2026-10-29.md generated 08:57 ET; isolated strategy, not paper 07:00 research"
+    },
+    "09:15": {
+      "path": "reports/2026-10-29/TRADER_BRAIN_PAPER_1000_2026-10-29_0915_snapshot.json",
+      "retrieved_after_cutoff": true,
+      "stated_market_cutoff": "09:15 ET",
+      "wrong_ledger_source": "/Users/harp/.local/state/trader-brain/control-center/portfolio.json",
+      "wrong_cash_usd": "784.03",
+      "wrong_position": "XLAB",
+      "wrong_completed_trades": 78,
+      "correct_active_cash_usd": "1000.00",
+      "correct_active_positions": 0,
+      "correct_completed_trades": 0,
+      "approved_entries": 0,
+      "first_seen_evidence": "UNVERIFIED_POST_CUTOFF_RECONSTRUCTION"
+    },
+    "intraday": {
+      "first_heartbeat_utc": "2026-10-29T11:27:13Z",
+      "last_heartbeat_utc": "2026-10-29T19:58:13Z",
+      "heartbeat_events": 195,
+      "completed_batches_lifetime": 77,
+      "resolved_equity_identifiers": 64,
+      "seed_records": 30814,
+      "inventory_age_seconds_at_1558": 22907,
+      "auto_refresh": false,
+      "rotation_minutes_nominal": 155,
+      "live_scan_scope": "PARTIAL_PANEL_NOT_MARKETWIDE",
+      "unique_signal_bars": 11,
+      "raw_signal_observations": 25,
+      "signal_tickers": [
+        "SOFI",
+        "AAL",
+        "ACRS",
+        "ABSI"
+      ],
+      "latest_scan_et": "15:55",
+      "latest_valid_history_symbols": 2,
+      "latest_rejected_symbols": 2,
+      "latest_rejected_lanes": 4,
+      "rejection": "IEX_BAR_COVERAGE_GAP",
+      "all_signals_executable": false,
+      "quote_evidence": "UNVERIFIED",
+      "signal_log_compact": [
+        "10:05 SOFI CALL s87.70 r2.730 t17.505 x17.445",
+        "11:15 SOFI CALL s78.98 r1.506 t17.53 x17.46",
+        "12:05 ACRS PUT s76.54 r1.506 t3.975 x3.98",
+        "12:35 AAL PUT s83.71 r2.203 t12.85 x12.885",
+        "13:15 SOFI CALL s81.30 r2.064 t17.56 x17.54",
+        "13:25 ABSI PUT s92.74 r3.296 t12.215 x12.29",
+        "15:05 AAL CALL s84.21 r2.439 t12.935 x12.925",
+        "15:15 AAL PUT s78.04 r1.601 t12.89 x12.93",
+        "15:50 AAL PUT s89.32 r3.452 t12.86 x12.895",
+        "15:55 AAL PUT s91.29 r4.176 t12.795 x12.865",
+        "15:55 SOFI CALL s91.15 r3.369 t17.6 x17.52"
+      ]
+    },
+    "16:00": {
+      "certified_eod_report_found": false,
+      "latest_heartbeat_et": "15:58:13",
+      "official_equity": null,
+      "official_return": null
+    }
+  },
+  "mover_audit": {
+    "pre_cutoff_reconstructed_board": [
+      {
+        "ticker": "NCLH",
+        "catalyst": "06:30 EPS/EBITDA beat and raise",
+        "grade": "A",
+        "price_915": 17.874,
+        "pm_pct": 11.3,
+        "pm_shares": 2614767,
+        "spread_pct_postcutoff": 0.17,
+        "move_consumed_pct_claimed": 79.6,
+        "remaining_score": 62,
+        "analog_90d_n": 4,
+        "analog_d5_pct": -3.38,
+        "actual": "~+13.3% day"
+      },
+      {
+        "ticker": "INSM",
+        "catalyst": "strong BRINSUPRI Q3 launch revenue and raised FY guidance",
+        "grade": "A",
+        "price_915": 114.01,
+        "pm_pct": 17.56,
+        "pm_shares": 396196,
+        "spread_pct_postcutoff": 0.44,
+        "move_consumed_pct_claimed": 81,
+        "remaining_score": 55,
+        "analog_90d_n": 3,
+        "analog_d5_pct": -0.2
+      },
+      {
+        "ticker": "CROX",
+        "catalyst": "Q3 beat and raised guidance",
+        "grade": "A",
+        "price_915": 139.0487,
+        "pm_pct": 16.17,
+        "spread_pct_postcutoff": 0.63,
+        "move_consumed_pct_claimed": 75,
+        "analog_90d_n": 7,
+        "analog_d5_pct": -1.41
+      },
+      {
+        "ticker": "GOOGL",
+        "catalyst": "earnings advertising and AI capex disappointment",
+        "grade": "A- bearish",
+        "price_915": 287.75,
+        "pm_pct": -11.43,
+        "move_consumed_pct_claimed": 97.7,
+        "analog_90d_n": 6,
+        "analog_d5_pct": -1.24,
+        "actual": "~12-13% down during session"
+      },
+      {
+        "ticker": "FTNT",
+        "catalyst": "soft product/services expectations",
+        "grade": "A- bearish",
+        "price_915": 128.5,
+        "pm_pct": -26.18,
+        "move_consumed_pct_claimed": 93.9,
+        "analog_90d_n": 8,
+        "analog_d5_pct": -0.42,
+        "actual": "~22% lower in published late-session coverage"
+      },
+      {
+        "ticker": "NOW",
+        "catalyst": "cRPO guidance deceleration",
+        "grade": "A- bearish",
+        "price_915": 120.35,
+        "pm_pct": -19.84,
+        "move_consumed_pct_claimed": 98.1,
+        "analog_90d_n": 12,
+        "analog_d5_pct": 6.26,
+        "actual": "more than 26% lower during session"
+      },
+      {
+        "ticker": "GKOS",
+        "catalyst": "Q3 earnings beat and raised outlook",
+        "grade": "A-",
+        "price_915": 210.6014,
+        "pm_pct": 16.08,
+        "spread_pct_postcutoff": 1.75,
+        "move_consumed_pct_claimed": 92.1,
+        "analog_90d_n": 6,
+        "analog_d5_pct": 0.49
+      },
+      {
+        "ticker": "NCPL",
+        "catalyst": "unverified fresh issuer catalyst",
+        "grade": "UNVERIFIED",
+        "price_915": 1.6207,
+        "pm_pct": 47.34,
+        "pm_shares": 7133937,
+        "spread_pct_postcutoff": 1.23,
+        "move_consumed_pct_claimed": 78.9,
+        "remaining_score": 1,
+        "analog_90d_n": 25,
+        "analog_d5_pct": 14.62,
+        "classification": "REJECTED_STRUCTURAL"
+      }
+    ],
+    "post_915_benchmark": {
+      "ticker": "ADT",
+      "published_et": "09:20",
+      "catalyst": "definitive $10/share cash acquisition by Thrive",
+      "observed_px_at_1356": 9.94,
+      "source": "https://www.nasdaq.com/press-release/adt-be-acquired-thrive-holdings-153-billion-transaction-2026-10-29",
+      "classification": "EVENT_COVERAGE_MISS_NO_ENTRY_PROFIT",
+      "structural_warning": "Cash price ceiling; deal completion risk"
+    },
+    "verified_early_runtime_discoveries": 0,
+    "discovery_alpha_usd": null,
+    "execution_alpha_usd": null,
+    "verified_executable_missed_profit_usd": null,
+    "qualified_under5": null,
+    "best_under5_raw_watch": "NCPL REJECT",
+    "historical_gap_fade_verification": "NON_CATALYST_MATCHED_SPARSE_ANALOGS",
+    "one_minute_evidence": "NOT_PRESERVED",
+    "social_media_credit": 0
+  },
+  "risk": {
+    "observed_entry_risk_usd": "0.00",
+    "observed_violations": 0,
+    "risk_policy_reference_unverified": {
+      "normal_pct": 3,
+      "aplus_pct": 4,
+      "max_combined_pct": 5,
+      "daily_lock_pct": 6,
+      "hard_kill_pct": 8,
+      "weekly_lock_pct": 12
+    },
+    "new_capital_utilization_pct": 0,
+    "no_cash_proceeds_reuse": true,
+    "assessment": "Fail-closed, no exposure, but policy deployment and settlement not independently certified"
+  },
+  "cumulative_scoreboard": {
+    "start_usd": "1000.00",
+    "last_recorded_cash_usd": "1000.00",
+    "official_compounded_equity_usd": null,
+    "official_cumulative_pnl_usd": null,
+    "official_cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "avg_win_usd": null,
+    "avg_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "max_drawdown_pct": null,
+    "total_entry_notional_usd": "0.00",
+    "mover_trades": 0,
+    "mover_win_rate_pct": null,
+    "mover_avg_return_pct": null,
+    "verified_missed_executable_movers": null,
+    "confirmed_post915_event_coverage_misses": [
+      "ADT"
+    ],
+    "integrity_fault_count": 6,
+    "archived_history": "Previous retired paper episode 78 closed 13 wins/65 losses, last indicative -18.567%; XLAB unresolved, excluded"
+  },
+  "grades": {
+    "analysis": "C-",
+    "mover_discovery": "F",
+    "execution": "NOT_GRADABLE",
+    "allocation": "B",
+    "risk_control": "B-",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_hindsight": "B+",
+    "overall": "D-",
+    "daily_price_jumps": "F"
+  },
+  "codex_learning": {
+    "worked": [
+      "No fabricated fills; canonical $1000 flat ledger hash retained",
+      "Limited IEX five-minute scanning recovered four symbols and rejected invalid histories",
+      "Research-only caution rejected NCPL with unverified catalyst and spread 1.23%"
+    ],
+    "lost_opportunity": [
+      "Post-9:15 ADT definitive cash acquisition missed by runtime",
+      "Broad NCLH/INSM/CROX/FTNT/NOW coverage absent from 64-equity rotation",
+      "No current-episode simulated financial P&L established"
+    ],
+    "scanner_misses": [
+      "ADT announced 09:20 ET; no contemporaneous runtime event",
+      "Only 11 unique signal bars on 4 tickers; 155-min nominal rotation, not marketwide",
+      "ABNB/ABOS rejected histories in final batch"
+    ],
+    "scoring_defects": [
+      "AAL flipped CALL 15:05 to PUT 15:15 without preserved new-impulse justification",
+      "9:15 after-cutoff reconstruction is not proof of early signal",
+      "90d analog n often 3-12 and not catalyst-matched; premarket volume ratio not equal-time RVOL"
+    ],
+    "allocation_risk_defects": [
+      "9:15 wrong retired account cash $784.03 and overdue XLAB vs active $1000 flat",
+      "Certified settlement/buying power and deployed risk settings absent"
+    ],
+    "exact_next_session_rule_changes": [
+      "Implement A055 source check in 07:00,09:15,desk,EOD; reject retired ledger",
+      "Implement A054 canonical hash-bound 16:00 flat-session certification",
+      "Shadow A056 automatic inventory refresh with explicit coverage and no stale promotion",
+      "Shadow A057 primary-source post9:15 event interrupts; ADT 09:20 test",
+      "Shadow A059 cutoff/first-seen evidence freeze",
+      "Shadow A060 1-minute + 5-minute direction-flip and quote health verification"
+    ],
+    "experiments": [
+      {
+        "id": "A055",
+        "n": 20,
+        "metric": "zero wrong-episode acceptance; five shadow sessions"
+      },
+      {
+        "id": "A054",
+        "n": 30,
+        "metric": "20 flat-day + 10 missing-EOD tests, zero false official 0% returns"
+      },
+      {
+        "id": "A056",
+        "n": 5,
+        "metric": "five sessions >=95% scan coverage; inventory under 24h"
+      },
+      {
+        "id": "A057",
+        "n": 30,
+        "metric": "30 primary events >=85% recall; latency <=5min; timestamp >=95%"
+      },
+      {
+        "id": "A059",
+        "n": 30,
+        "metric": "zero reconstructed aftercutoff observations credited early"
+      },
+      {
+        "id": "A060",
+        "n": 50,
+        "metric": "50 shadow signals, 10 flips; measure 1m vs 5m MFE/MAE and no synthetic fills"
+      }
+    ],
+    "unresolved": [
+      "No canonical 07:00 board",
+      "9:15 wrong source and post-cutoff provenance",
+      "No certified 16:00 EOD",
+      "Incomplete scanner universe and quote provenance",
+      "Archived retired XLAB exit deadline unresolved",
+      "Old retired cash discrepancy $0.04",
+      "Unverified settlement and risk-config deployment"
+    ],
+    "prior_adjustment_ids": "A001-A058",
+    "prior_adjustment_effectiveness": "ALL_INCONCLUSIVE",
+    "new_proposals": [
+      "A059 cutoff/source provenance",
+      "A060 one-minute direction-flip validation"
+    ],
+    "learning_promotions": [],
+    "execution_enable_change": false
+  }
 }
