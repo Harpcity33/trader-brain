@@ -1,0 +1,660 @@
+{
+  "schema": "trader-brain-official-eod-codex-handoff-v4",
+  "report_date": "2026-11-02",
+  "report_generated_from_verified_sources": "2026-11-02 post-close",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "simulation_only": true,
+  "never_real_brokerage_execution": true,
+  "immutable_ledger_guard": true,
+  "active_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "preexisting_strategy_loss_history_not_erased": true,
+  "canonical_account": {
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "ledger": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "strategy_id": "TRADER_BRAIN_PAPER_1000",
+    "seed_usd": "1000.00",
+    "last_recorded_cash_usd": "1000.00",
+    "positions": [],
+    "stock_trades": [],
+    "option_trades": [],
+    "trade_count": 0,
+    "closed_trade_count": 0,
+    "orders": 0,
+    "fills": 0,
+    "gross_entry_notional_usd": "0.00",
+    "trade_realized_pnl_usd": "0.00",
+    "trade_unrealized_pnl_usd": "0.00",
+    "notional_allocation_pct_of_seed": 0,
+    "planned_new_trade_risk_usd": "0.00",
+    "recorded_new_trade_risk_usd": "0.00",
+    "official_opening_equity_usd": null,
+    "official_closing_equity_usd": null,
+    "official_daily_pnl_usd": null,
+    "official_daily_return_pct": null,
+    "certified_settled_cash_usd": null,
+    "certified_unsettled_proceeds_usd": null,
+    "certified_buying_power_usd": null,
+    "simulated_execution_enabled": false,
+    "learning_enabled": false,
+    "paused": true,
+    "week_start_recorded": "2026-10-26",
+    "weekly_lock": false,
+    "reporting_status": "QUARANTINED",
+    "faults": [
+      "HISTORY_AND_VALUATION_UNVERIFIED",
+      "NO_CERTIFIED_16:00_VALUATION",
+      "CASH_SETTLEMENT_NOT_INDEPENDENTLY_CERTIFIED",
+      "WEEK_START_MARKER_STALE_FOR_NOV2"
+    ]
+  },
+  "excluded_state": {
+    "retired_legacy_500_ended": "2026-10-06",
+    "retired_oct26_same_strategy_episode": "historical only; cannot compound or silently clear losses",
+    "retired_ControlCenter_cash_784_03": "NON_AUTHORITATIVE",
+    "retired_ControlCenter_XLAB": "ARCHIVED_UNRESOLVED_NO_RETROSPECTIVE_EXIT",
+    "comparison_runtime": "NON_AUTHORITATIVE",
+    "no_cross_episode_balance_merge": true
+  },
+  "reconcile_timeline": {
+    "research_0700": {
+      "immutable_primary_source_catalyst_board_verified": false,
+      "runtime_first_heartbeat": "07:00:25 EST",
+      "notes": "Heartbeat is not a research board; local inventory generation began then"
+    },
+    "final_0915": {
+      "github_path": "reports/2026-11-02/TRADER_BRAIN_PAPER_1000_2026-11-02_0915_snapshot.json",
+      "archive_type": "READ_ONLY_RETROSPECTIVE_9_15_NO_FILL",
+      "data_collected_after_cutoff": true,
+      "early_discovery_credit": false,
+      "canonical_episode_correct": true,
+      "actual_allocation_usd": "0.00",
+      "watches": [
+        "TEM stock conditional only",
+        "TSEM stock conditional only",
+        "MRVL bearish options research only"
+      ],
+      "source_warning": "Approx PM VWAP is OHLCV proxy; relative-volume ratio compares to full-day and is not time-matched; indicative spreads after cutoff"
+    },
+    "intraday": {
+      "first_retained_analysis": "09:45:24 EST",
+      "last_analysis": "15:55:28 EST",
+      "last_regular_scan_result_persisted": "15:56:33 EST",
+      "source": "Alpaca IEX partial single-venue with cached history",
+      "scan_window": "5m stocks / 15m options",
+      "successful_retained_batches": 76,
+      "market_cycles": 74,
+      "scheduled_slots": 77,
+      "unaccounted_slots": 1,
+      "research_observations": 6310,
+      "observation_meaning": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "verified_fills": 0,
+      "market_wide_consolidated_coverage": false,
+      "broker_tradability_verified": false,
+      "first_observations_are_not_catalyst_detection": true,
+      "final_cycle": {
+        "catalog_listings": 13242,
+        "target_symbols": 12713,
+        "provider_mapping_skips": 529,
+        "strategy_evaluated_symbols": 807,
+        "coverage_gap_rejected_symbols": 7502,
+        "empty_history_rejected_symbols": 4404,
+        "requests": 22,
+        "signal_observations": 144,
+        "usable_strategy_evaluation_pct_of_targeted": 6.35
+      },
+      "scan_coverage_grade": "D",
+      "data_limitations": [
+        "Incomplete IEX historical bars",
+        "No NBBO",
+        "No verified Robinhood tradability",
+        "Incomplete options chain",
+        "Not complete US universe"
+      ]
+    },
+    "close_1600": {
+      "positions_before_close": 0,
+      "intraday_positions_needing_exit": 0,
+      "postclose_local_report_at": "16:05:04 EST",
+      "postclose_report_path": "/Users/harp/Documents/Codex/2026-10-14/task-2/deployment/research-20261024/var/research-reports/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/2026-11-02/latest.json",
+      "eod_on_time_observation": true,
+      "official_equity": null,
+      "official_return": null,
+      "local_report_written": true,
+      "report_error_recorded": "TypeError",
+      "delivery": "LOCAL_ONLY_NO_EMAIL",
+      "local_report_status": "LOCAL_REPORT_WRITTEN",
+      "never_certify_null_as_zero": true
+    }
+  },
+  "daily_paper_ledger": [],
+  "daily_paper_ledger_status": "NO_SIMULATED_ENTRIES_EXITS_OR_SWINGS_IN_CURRENT_EPISODE; OFFICIAL_ACCOUNT_VALUATION_QUARANTINED",
+  "cumulative_scoreboard": {
+    "experiment_seed_usd": "1000.00",
+    "last_persisted_cash_usd": "1000.00",
+    "official_compounded_balance": null,
+    "official_cumulative_pnl_usd": null,
+    "official_cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "average_win_usd": null,
+    "average_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "max_drawdown_pct": null,
+    "gross_entry_notional_usd": "0.00",
+    "recorded_current_episode_utilization_pct": 0,
+    "mover_trade_count": 0,
+    "mover_trade_win_rate_pct": null,
+    "average_mover_trade_return_pct": null,
+    "validated_discovery_alpha": null,
+    "validated_execution_alpha": null,
+    "verified_early_movers": 0,
+    "missed_high_quality_external_benchmarks": [
+      "IDXX earnings before open",
+      "MPWR earnings/guide"
+    ],
+    "unqualified_late_research_observations": [
+      "INO 10:40 vs Oct30 FDA announcement",
+      "PERI 10:30 vs Nov1 merger",
+      "EVGO 12:05 vs 07:32 SEC filing",
+      "MRVL 11:55 vs morning merger"
+    ],
+    "data_integrity_faults": 5,
+    "policy_note": "October 26 administrative episode reseed cannot be presented as recovered capital; earlier loss history remains archived and non-authoritative for current allocation. Original experiment lifetime return remains uncertified."
+  },
+  "daily_mover_audit": [
+    {
+      "ticker": "INO",
+      "catalyst": "FDA accelerated approval of VOCERYQ, public Oct 30; 8 AM Nov 2 call",
+      "catalyst_quality": "A issuer / HIGH execution risk",
+      "public_event_time_et": "2026-10-30 (time not independently established)",
+      "first_local_research_observation_et": "10:40",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 2.0402,
+        "change_pct": 238.68,
+        "premarket_shares": 26676413,
+        "full_day_ratio_not_equal_time": 5.714,
+        "range_consumed_model_pct": 47.9,
+        "remaining_model_score": 13
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Prior 2026 stock/warrant offerings, 49,285,715 warrants as of June 30 (historical; current amount not reverified), extreme >200% premarket gap, dilution and high spread risk",
+      "actual_session_outcome": "Premarket shares more than tripled; certified Nov 2 close/executable trade unavailable",
+      "category": "BEST_UNDER_5_CATALYST_UNQUALIFIED",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "EVGO",
+      "catalyst": "Nonbinding LS Power proposal for $2/share cash; not definitive merger",
+      "catalyst_quality": "B+ issuer / capped, contingent",
+      "public_event_time_et": "SEC accepted 07:32",
+      "first_local_research_observation_et": "12:05",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 1.85,
+        "change_pct": 46.83,
+        "premarket_shares": 11247035,
+        "full_day_ratio_not_equal_time": 3.114,
+        "remaining_model_score": 12
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Proposal can be changed or withdrawn, controller owns ~56% votes; purchase-price ceiling and committee conditions; never score as definitive deal",
+      "actual_session_outcome": "Large premarket repricing toward proposed $2; verified RTH close not established",
+      "category": "STRUCTURAL_REJECTION",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "PERI",
+      "catalyst": "Definitive Affle cash acquisition at $11.70, announced Nov 1",
+      "catalyst_quality": "A merger / limited remaining spread",
+      "public_event_time_et": "2026-11-01",
+      "first_local_research_observation_et": "10:30",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 11.41,
+        "change_pct": 31.15,
+        "premarket_shares": 1760171,
+        "remaining_model_score": 3
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "40-day go-shop and closing conditions; near agreed cash price limits momentum potential; underlying deal risk persists",
+      "actual_session_outcome": "Gap toward cash consideration; certified session close not established",
+      "category": "CORRECT_STRUCTURAL_REJECTION_IF_PROMPTLY_IDENTIFIED_UNPROVEN",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "MRVL",
+      "catalyst": "Proposed $115B all-stock acquisition of Lumentum announced Nov 2",
+      "catalyst_quality": "A transaction / bearish execution risk",
+      "public_event_time_et": "By 07:10 Reuters",
+      "first_local_research_observation_et": "11:55",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 191,
+        "change_pct": -2.75,
+        "premarket_shares": 1110325,
+        "move_consumed_model_pct": 86.4,
+        "remaining_model_score": 40
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Stock consideration varies with acquirer; dilution/regulatory/China antitrust and integration risks, AI network sector mixed",
+      "actual_session_outcome": "AP reported MRVL declined about 13.9% by close; no paper trade",
+      "category": "LATE_UNQUALIFIED_RESEARCH",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "LITE",
+      "catalyst": "Target of MRVL all-stock merger; ratio 4.5 MRVL shares per LITE share",
+      "catalyst_quality": "A merger / high volatility",
+      "public_event_time_et": "Nov 2 premarket",
+      "first_local_research_observation_et": "11:10",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 802,
+        "change_pct": -4.6,
+        "premarket_shares": 307391,
+        "move_consumed_model_pct": 76.8,
+        "remaining_model_score": 21
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Exchange ratio makes implied consideration variable, deal subject to approvals; suspension/halts and spreads not certified",
+      "actual_session_outcome": "AP reported LITE down about 17.7% by close; no paper trade",
+      "category": "LATE_UNQUALIFIED_RESEARCH",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "TEM",
+      "catalyst": "Q3 revenue $411.5M, up 23%, adjusted EPS positive; clinical diagnostics growth",
+      "catalyst_quality": "A- earnings",
+      "public_event_time_et": "Nov 2 before open",
+      "first_local_research_observation_et": "10:45 options; 14:10 stocks",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 74,
+        "change_pct": 2.46,
+        "premarket_shares": 314723,
+        "move_consumed_model_pct": 52.9,
+        "remaining_model_score": 59
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "High-priced issuer, no modeled executable spread or option premium; market breadth healthcare favorable",
+      "actual_session_outcome": "Barron's reported a double-digit session gain (~13%); no paper trade",
+      "category": "EARNINGS_COVERAGE_BENCHMARK",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "IDXX",
+      "catalyst": "Third-quarter EPS $4.01, revenue $1.214B, raised FY2026 guidance",
+      "catalyst_quality": "A earnings",
+      "public_event_time_et": "Nov 2 before open; 08:30 call",
+      "first_local_research_observation_et": "11:20",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": null,
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Liquid established issuer but no verified orderbook/VWAP/entry trigger, healthcare breadth relative positive",
+      "actual_session_outcome": "Barron's reported a large gain of at least ~15% during Monday; no paper trade",
+      "category": "EARLY_NEWS_COVERAGE_MISS",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "MPWR",
+      "catalyst": "Q3 beat and higher outlook, analog chip sector relative strength",
+      "catalyst_quality": "A- earnings",
+      "public_event_time_et": "Prior evening (exact news timestamp unverified)",
+      "first_local_research_observation_et": "10:20",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": null,
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "No quote/spread preserved, peer analog semis strong while broader tech weak",
+      "actual_session_outcome": "Reported >6% gain; no paper trade",
+      "category": "EARNINGS_COVERAGE_BENCHMARK",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "TSEM",
+      "catalyst": "Quarterly results and 10 AM issuer conference call",
+      "catalyst_quality": "B+ earnings",
+      "public_event_time_et": "Nov 2 before 10:00 earnings call",
+      "first_local_research_observation_et": "12:05",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 166,
+        "change_pct": -0.29,
+        "premarket_shares": 90336,
+        "move_consumed_model_pct": 20.9,
+        "remaining_model_score": 35
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Opening impulse failed in retrospective 9:15 reconstruction; no validated reclaimed VWAP/5-minute confirmation",
+      "actual_session_outcome": "No independently verified official session close",
+      "category": "UNQUALIFIED_RESEARCH",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    },
+    {
+      "ticker": "CLRO",
+      "catalyst": "Unverified fresh issuer catalyst behind speculative premarket move",
+      "catalyst_quality": "C",
+      "public_event_time_et": "Unverified",
+      "first_local_research_observation_et": "10:40",
+      "local_observation_semantics": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE; not verified issuer-news detection or executable signal",
+      "premarket_reconstruction": {
+        "price": 6.42,
+        "change_pct": 88.27,
+        "premarket_shares": 7012420,
+        "remaining_model_score": 2
+      },
+      "decision_time_evidence": {
+        "rvol_equal_time": null,
+        "decision_time_volume": null,
+        "nbbo_spread": null,
+        "executable_depth": null,
+        "float_confirmed": null,
+        "vwap_rth": null,
+        "opening_range": null,
+        "sector_breadth_validated": null,
+        "gap_fade_90d_catalyst_matched": null,
+        "move_consumed_actual": null,
+        "remaining_executable_move": null
+      },
+      "structural_notes": "Small-float, listing compliance, volatility, halt and spread evidence unavailable",
+      "actual_session_outcome": "No validated close, trade, catalyst, or liquidity",
+      "category": "CORRECT_QUALITY_REJECTION_UNPROVEN",
+      "credited_discovery_pnl": 0,
+      "credited_execution_pnl": 0,
+      "qualified_paper_entry": false
+    }
+  ],
+  "best_under_five": {
+    "ticker": "INO",
+    "assessment": "BEST_VERIFIED_FRESH_CATALYST; NOT QUALIFIED FOR PAPER_ENTRY",
+    "issuer_event": "FDA accelerated biologic approval reported Oct 30",
+    "premarket_reference_price": 2.0402,
+    "premarket_reference_gain_pct": 238.68,
+    "execution_qualification": false,
+    "trade_count": 0,
+    "paper_pnl_usd": "0.00",
+    "reason": "Large premarket extension, historical warrant overhang, no contemporaneous NBBO/VWAP/entry signal; EVGO alternative has nonbinding $2 deal ceiling"
+  },
+  "money_risk_policy": {
+    "executed_notional_usd": "0.00",
+    "seed_based_utilization_pct": 0,
+    "planned_trade_risk_usd": "0.00",
+    "realized_new_trade_risk_usd": "0.00",
+    "no_recycling_same_day_proceeds": true,
+    "policy_parameter_values_verified": false,
+    "existing_config_risk_limits_unchanged": true,
+    "risk_compliance_for_no_new_exposure": "NO_NEW_TRADE_VIOLATION_OBSERVED",
+    "cash_model_settlement_not_certified": true,
+    "closed_at_four_pm": "NO_POSITIONS_EXISTED"
+  },
+  "grades": {
+    "analysis_quality": "C-",
+    "mover_discovery": "D",
+    "execution_quality": "NOT_GRADABLE",
+    "allocation_concentration": "B",
+    "risk_control": "B",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "overall_daily_process": "D",
+    "daily_price_jumps_scanner": "D"
+  },
+  "learning_loop": {
+    "worked": [
+      "Canonical source resolved correctly in 9:15 retrospective archive and postclose report",
+      "Alpaca IEX produced 76 retained research batches and 6310 non-trade observations; improved from Oct30 zero qualified scans",
+      "Simulation execution and automatic learning correctly remained disabled; no fabricated fills"
+    ],
+    "lost_money_or_opportunity": [
+      "No realized losses in new active episode; no demonstrated profits",
+      "Morning news for IDXX/MPWR and premarket INO/PERI/EVGO not joined to verified timely catalyst detections",
+      "Only 807 of 12713 targeted symbols actually strategy-evaluated in final pass; data provider coverage deficient",
+      "No authorized entry or verified decision-price/spread; any missed-profit calculation is prohibited"
+    ],
+    "scanner_misses_late_detections": [
+      "IDXX high-quality earnings not in 9:15 reconstructed ranked list; first local historical observation 11:20",
+      "INO approval first observed in scanner at 10:40; announcement October 30, large gap consumed before that",
+      "EVGO nonbinding proposal accepted 07:32 and first observed 12:05; unable to measure actionable remaining move",
+      "PERI definitive cash deal announced Nov 1, first locally observed 10:30",
+      "MRVL/LITE deal observed after 11:00; no issuer-event joins",
+      "Unaccounted 1 of 77 scheduled scan slots"
+    ],
+    "scoring_defects": [
+      "Full-day RVOL comparison used in premarket ranking, not matched to equal time; cannot be treated as actionable RVOL",
+      "PM VWAP approximate OHLCV proxy; no RTH VWAP or completed opening-range validation",
+      "Modeled move-consumed and 90-day analog not catalyst matched, so remain unverified",
+      "No NBBO/quote freshness or dilution/reverse-split validated at candidate decision"
+    ],
+    "allocation_risk_defects": [
+      "EOD account valuation and settlement not independently certified",
+      "week_start stored Oct26 on new trading week Nov2",
+      "Trade risk settings not independently re-read from versioned configured policy; no changes allowed"
+    ],
+    "next_session": "2026-11-03",
+    "exact_rule_config_changes_proposed": [
+      {
+        "existing_ids": [
+          "A055",
+          "A059",
+          "A061"
+        ],
+        "target": "report ingestion: load canonical-episode.json before every calculation; if source episode_id or ledger hash mismatch => QUARANTINE, disable execution, return null not 0"
+      },
+      {
+        "existing_ids": [
+          "A056",
+          "A062"
+        ],
+        "target": "scanner: expose eligible_universe_count, evaluated_count, rejected_by_reason; fail data-quality coverage gate when evaluated/targeted <0.80; publish latency, catalog generation SHA, provider entitlement; shadow-only threshold, do not auto-arm"
+      },
+      {
+        "existing_ids": [
+          "A057",
+          "A052"
+        ],
+        "target": "issuer-event watcher: timestamp source publish, first-seen, joined symbol; prioritize press releases/SEC/FDA, and measure 5-min detection, rejection reason; never backfill credit"
+      },
+      {
+        "existing_ids": [
+          "A053",
+          "A060"
+        ],
+        "target": "candidate promotion: require current NBBO spread <= configured threshold, RTH VWAP/opening-range, quote age <=30 sec, float/dilution/corporate-action and 90-session catalyst-matched features; if absent reject as UNKNOWN not negative signal"
+      },
+      {
+        "new_id": "A064",
+        "target": "EOD report generation error boundary",
+        "patch": "Persist report_source_status, generated_at, report_error_name+stack_hash, last_successful_close_snapshot; TypeError must fail status while leaving null official return, and alert. Add automated deterministic flat-ledger certified-close test; no ledger mutation.",
+        "status": "PROPOSED_SHADOW_ONLY"
+      }
+    ],
+    "experiments_to_test": [
+      {
+        "id": "A064",
+        "test": "20 injected EOD failures plus 20 flat-session certification replays; one real shadow EOD November 3",
+        "accept": "20/20 injected exceptions surfaced; zero fabricated 0% returns; 20/20 flat replays exact and source-bound",
+        "reject": "Any missing error propagation, stale valuation silently certified, or retrospective fill"
+      },
+      {
+        "id": "A056_A062",
+        "test": "Five IEX shadow trading sessions and 30 benchmark issuer-events; record each cycle coverage denominator and stale ages",
+        "accept": ">=95% reporting-cycle timeliness; >=85% issuer-event recall; dashboard exposes exact 807/12713 style coverage denominator each cycle",
+        "reject": "Any unreported coverage gap or fabricated full-market qualification"
+      },
+      {
+        "id": "A057_A052",
+        "test": "30 independent timed institutional catalysts including FDA/SEC/earnings",
+        "accept": ">=85% genuine early recall; >=95% timestamp fields; median first-seen latency <=5min",
+        "reject": "Any after-event detection credited as pre-event"
+      },
+      {
+        "id": "A053_A060",
+        "test": "50 shadow candidate decisions with quote provenance and 10 reversal cases",
+        "accept": "Zero missing NBBO, quote age or risk structure among promoted setups; zero phantom fills",
+        "reject": "Any prospectively promoted incomplete quote"
+      }
+    ],
+    "metrics_to_validate": {
+      "event_recall_pct_target": 85,
+      "source_timestamp_completeness_pct_target": 95,
+      "recorded_scan_slot_pct_target": 95,
+      "quote_age_max_sec": 30,
+      "live_quote_required_for_promotions": true,
+      "cash_reconciliation_tolerance_usd": "0.01",
+      "max_fabricated_trade_count": 0
+    },
+    "carry_forward_registry": {
+      "prior_adjustments": "A001-A063",
+      "causal_status_all": "INCONCLUSIVE",
+      "historical_active_designations": "A001-A008 only; implementation_effectiveness_unverified",
+      "never_reset_without_evidence": true
+    },
+    "data_integrity_open": [
+      "No immutable genuine pre-cutoff 7AM and 9:15 board; 9:15 archive is reconstructed using after-cutoff data",
+      "report_error TypeError despite local postclose report",
+      "No certified 16:00 current episode valuation or settlement",
+      "14-day old background catalog source exists despite Nov2 generated partial inventory; completeness false with 64 resolved identities",
+      "No contemporaneous NBBO/spread/float/90-day feature snapshots and exact first-news detections",
+      "Week_start still October 26",
+      "Retired archived XLAB paper swing has no legitimate exit; must remain unresolved outside active ledger"
+    ]
+  },
+  "publication": {
+    "github_persistence": "PENDING",
+    "codex_ingestion_confirmed": false,
+    "risk_runtime_modified": false,
+    "ledger_mutated": false
+  }
+}
