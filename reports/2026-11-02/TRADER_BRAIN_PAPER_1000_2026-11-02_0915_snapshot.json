@@ -1,0 +1,261 @@
+{
+  "schema": "TRADER_BRAIN_PAPER_1000_9_15_CANONICAL_ARCHIVE_v2",
+  "archive_type": "READ_ONLY_RETROSPECTIVE_9_15_NO_FILL",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "date": "2026-11-02",
+  "cutoff_et": "2026-11-02T09:15:00-05:00",
+  "data_collected_after_cutoff": true,
+  "early_catalyst_detection_credit": false,
+  "paper_only": true,
+  "broker_trades": false,
+  "authoritative_ledger_mutated": false,
+  "legacy_500_retired_2026_10_06_excluded": true,
+  "canonical_source": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "ledger": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "activated_at_utc": "2026-10-26T15:30:06.836835+00:00",
+    "recorded_seed_cash": 1000,
+    "certified_equity": null,
+    "settled_buying_power": null,
+    "unsettled_proceeds": null,
+    "positions": [],
+    "swings": [],
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "realized_trade_pnl_in_active_episode": 0,
+    "unrealized_trade_pnl_in_active_episode": 0,
+    "lifetime_original_1000_experiment_pnl": null,
+    "lifetime_return_pct": null,
+    "weekly_lock": false,
+    "week_start_recorded": "2026-10-26",
+    "current_week_risk_utilization_certified": null,
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "new_entries": 0,
+    "new_paper_allocation_usd": 0,
+    "new_shares": 0,
+    "new_option_contracts": 0,
+    "new_risk_usd": 0,
+    "certification": "QUARANTINED_NO_CLOSE_VALUATION"
+  },
+  "archived_same_strategy_episode_NOT_ACTIVE": {
+    "cash": 784.03,
+    "closed_trades": 78,
+    "realized_pnl": -189.14,
+    "XLAB_exception": "10 historical paper shares; Oct26 exit deadline missed, no recorded exit; excluded from new canonical episode",
+    "IMPORTANT": "Previous 9:15 reports Oct28-30 took retired Control Center as authoritative. Administrative reset is NOT recovered profits or certified original lifetime return."
+  },
+  "market_at_915_pct": {
+    "SPY": 0.56,
+    "QQQ": 0.82,
+    "SOXX": 1.43,
+    "XLK": 0.89,
+    "XLV": 0.07,
+    "XLE": -1.97,
+    "IWM": 0.84
+  },
+  "movers": [
+    {
+      "ticker": "TEM",
+      "price": 74,
+      "change_pct": 2.46,
+      "pm_shares": 314723,
+      "turnover_m": 23.314,
+      "rvol_full_day": 0.048,
+      "approx_pm_vwap": 74.0764,
+      "low": 70,
+      "high": 77.5605,
+      "move_consumed_pct": 52.9,
+      "remaining_capacity": 59,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "INO",
+      "price": 2.0402,
+      "change_pct": 238.68,
+      "pm_shares": 26676413,
+      "turnover_m": 55.254,
+      "rvol_full_day": 5.714,
+      "approx_pm_vwap": 2.0713,
+      "low": 1.71,
+      "high": 2.4,
+      "move_consumed_pct": 47.9,
+      "remaining_capacity": 13,
+      "catalyst_grade": "A_FDA_ACCELERATED_BIOLOGIC",
+      "status": "STRUCTURAL_REJECT_UNDER_5_DILUTION_AND_EXTENSION"
+    },
+    {
+      "ticker": "MRVL",
+      "price": 191,
+      "change_pct": -2.75,
+      "pm_shares": 1110325,
+      "turnover_m": 217.708,
+      "rvol_full_day": 0.047,
+      "approx_pm_vwap": 196.076,
+      "low": 188.69,
+      "high": 205.6594,
+      "move_consumed_pct": 13.6,
+      "remaining_capacity": 40,
+      "catalyst_grade": "A",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "TSEM",
+      "price": 166,
+      "change_pct": -0.29,
+      "pm_shares": 90336,
+      "turnover_m": 15.504,
+      "rvol_full_day": 0.045,
+      "approx_pm_vwap": 171.6229,
+      "low": 162.56,
+      "high": 179.01,
+      "move_consumed_pct": 20.9,
+      "remaining_capacity": 35,
+      "catalyst_grade": "A",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "LITE",
+      "price": 802,
+      "change_pct": -4.6,
+      "pm_shares": 307391,
+      "turnover_m": 250.944,
+      "rvol_full_day": 0.064,
+      "remaining_capacity": 21,
+      "catalyst_grade": "A_STOCK_MERGER",
+      "status": "STRUCTURAL_REJECT_CORE_MOMENTUM"
+    },
+    {
+      "ticker": "EVGO",
+      "price": 1.85,
+      "change_pct": 46.83,
+      "pm_shares": 11247035,
+      "turnover_m": 19.782,
+      "rvol_full_day": 3.114,
+      "remaining_capacity": 12,
+      "catalyst_grade": "B+_NONBINDING_2_DOLLAR_PROPOSAL",
+      "status": "STRUCTURAL_REJECT_CORE_MOMENTUM"
+    },
+    {
+      "ticker": "PERI",
+      "price": 11.41,
+      "change_pct": 31.15,
+      "pm_shares": 1760171,
+      "turnover_m": 20.056,
+      "rvol_full_day": 4.737,
+      "remaining_capacity": 3,
+      "catalyst_grade": "A_11_70_CASH_MERGER",
+      "status": "STRUCTURAL_REJECT_CORE_MOMENTUM"
+    },
+    {
+      "ticker": "CLRO",
+      "price": 6.42,
+      "change_pct": 88.27,
+      "pm_shares": 7012420,
+      "turnover_m": 41.926,
+      "rvol_full_day": 1.344,
+      "remaining_capacity": 2,
+      "catalyst_grade": "C",
+      "status": "STRUCTURAL_REJECT_MICROFLOAT_NONCOMPLIANT"
+    }
+  ],
+  "watches_only_no_authorized_orders": [
+    {
+      "ticker": "TEM",
+      "direction": "LONG_STOCK",
+      "holding": "INTRADAY",
+      "trigger": "After 10 ET reset 72.8-73.6, hold 72.4, completed 5m close >74.9 AND RTHVWAP, volume >=1.5x median and spread<=.3%",
+      "reference_entry": 74.95,
+      "stop": 72.35,
+      "T1": 77.6,
+      "T2": 81,
+      "illustrative_only_shares": 4,
+      "illustrative_only_notional": 299.8,
+      "illustrative_only_risk": 10.4,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "TSEM",
+      "direction": "LONG_STOCK_REVERSAL",
+      "holding": "INTRADAY",
+      "trigger": "After 10 ET issuer call: hold 165, 5m close>172.2 and RTHVWAP, spread<=.3% and volume>=1.5x",
+      "reference_entry": 172.25,
+      "stop": 165.5,
+      "T1": 178,
+      "T2": 184,
+      "illustrative_only_shares": 2,
+      "illustrative_only_notional": 344.5,
+      "illustrative_only_risk": 13.5,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "MRVL",
+      "direction": "BEARISH_OPTION_WATCH",
+      "holding": "INTRADAY",
+      "trigger": "Bounce 195-198 then reject RTHVWAP and 5m close<190.5; verified defined-risk put spread required",
+      "underlying_invalidation": 199.5,
+      "underlying_T1": 186,
+      "underlying_T2": 180,
+      "option_premium_verified": false,
+      "actual_contracts": 0,
+      "actual_allocation": 0
+    }
+  ],
+  "best_under_5": "NO_QUALIFYING_ENTRY_INO_BEST_VERIFIED_CATALYST_BUT_238_PERCENT_EXTENSION_42M_WARRANT_OVERHANG_AND_UNQUALIFIED_SPREAD",
+  "active_A001_to_A008_status": "ALL_INCONCLUSIVE_CAUSAL",
+  "index_A001_to_A063_status": "ALL_INCONCLUSIVE_CAUSAL",
+  "prior_friday_2026_10_30_shadow_tests": [
+    {
+      "ids": [
+        "A055",
+        "A059",
+        "A061"
+      ],
+      "metric": "30 source and first-seen replays + 5 sessions, zero wrong-episode and early-credit"
+    },
+    {
+      "ids": [
+        "A054",
+        "A008"
+      ],
+      "metric": "20 certified flat +10 corrupt cases +5 closes, cash bridge <=0.01"
+    },
+    {
+      "ids": [
+        "A056",
+        "A062"
+      ],
+      "metric": "5 shadow sessions,>=30 events,>=95% coverage, stale alert <=5min"
+    },
+    {
+      "ids": [
+        "A002",
+        "A005"
+      ],
+      "metric": "15/30/60min MFE MAE and costs vs VWAP confirmation, no hindsight fills"
+    },
+    {
+      "ids": [
+        "A063"
+      ],
+      "metric": "25 correct biologic/ANDA/nonbinding vs binding stock-cash deal classifications"
+    }
+  ],
+  "provenance_notes": "Robinhood live saved scanners run after 9:15; 5-minute bars completed through 9:14:59 ET. RVOL uses full-day volume comparison, not equal-time. PM VWAP OHLCV-approx only. Indicative spreads observed after cutoff. Historical analogs 90 trading sessions, direction-magnitude only, not catalyst matched. No options spread verified. No exchange halt history certified. No real or paper trade booked.",
+  "sources": {
+    "codex_registry": "knowledge/CODEX_ADJUSTMENT_REGISTRY.md",
+    "codex_index": "knowledge/daily-paper-handoffs/2026-10-30-adjustment-registry-summary.json",
+    "source_review": "reviews/weekly/2026-10-30-paper-1000.md",
+    "ino": "https://ir.inovio.com/news/news-details/2026/INOVIO-Announces-FDA-Accelerated-Approval-of-VOCERYQ-an-Immunotherapy-to-Reduce-the-Frequency-of-Surgery-in-Adults-with-Recurrent-Respiratory-Papillomatosis-RRP/default.aspx",
+    "tsem": "https://towersemi.com/2026/11/02/11022026/",
+    "mrvl": "https://www.reuters.com/legal/transactional/marvell-buy-lumentum-115-billion-deal-ai-data-center-bet-2026-11-02/",
+    "peri": "https://perion.com/investors/press/perion-enters-into-definitive-merger-agreement-with-affle/",
+    "evgo": "https://www.stocktitan.net/sec-filings/EVGO/schedule-13d-a-e-vgo-inc-amended-major-shareholder-report-8b4ab14cd0f4.html"
+  }
+}
