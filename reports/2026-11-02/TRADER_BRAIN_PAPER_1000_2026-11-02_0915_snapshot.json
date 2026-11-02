@@ -98,10 +98,12 @@
       "approx_pm_vwap": 196.076,
       "low": 188.69,
       "high": 205.6594,
-      "move_consumed_pct": 13.6,
+      "move_consumed_pct": 86.4,
       "remaining_capacity": 40,
       "catalyst_grade": "A",
-      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "up_range_position_pct": 13.6,
+      "move_consumed_direction": "BEARISH_FROM_PREMARKET_HIGH"
     },
     {
       "ticker": "TSEM",
@@ -116,7 +118,8 @@
       "move_consumed_pct": 20.9,
       "remaining_capacity": 35,
       "catalyst_grade": "A",
-      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "move_consumed_direction": "ATTEMPTED_LONG_RECLAIM_AFTER_FAILED_PREMARKET_IMPULSE"
     },
     {
       "ticker": "LITE",
@@ -127,7 +130,10 @@
       "rvol_full_day": 0.064,
       "remaining_capacity": 21,
       "catalyst_grade": "A_STOCK_MERGER",
-      "status": "STRUCTURAL_REJECT_CORE_MOMENTUM"
+      "status": "STRUCTURAL_REJECT_CORE_MOMENTUM",
+      "up_range_position_pct": 23.2,
+      "move_consumed_pct": 76.8,
+      "move_consumed_direction": "BEARISH_FROM_PREMARKET_HIGH"
     },
     {
       "ticker": "EVGO",
@@ -247,7 +253,7 @@
       "metric": "25 correct biologic/ANDA/nonbinding vs binding stock-cash deal classifications"
     }
   ],
-  "provenance_notes": "Robinhood live saved scanners run after 9:15; 5-minute bars completed through 9:14:59 ET. RVOL uses full-day volume comparison, not equal-time. PM VWAP OHLCV-approx only. Indicative spreads observed after cutoff. Historical analogs 90 trading sessions, direction-magnitude only, not catalyst matched. No options spread verified. No exchange halt history certified. No real or paper trade booked.",
+  "provenance_notes": "Robinhood live saved scanners run after 9:15; 5-minute bars completed through 9:14:59 ET. RVOL uses full-day volume comparison, not equal-time. PM VWAP OHLCV-approx only. Indicative spreads observed after cutoff. Historical analogs 90 trading sessions, direction-magnitude only, not catalyst matched. No options spread verified. No exchange halt history certified. No real or paper trade booked. Direction-adjusted move_consumed_pct is high-to-current share of observed premarket range for bearish MRVL/LITE, and low-to-current for long candidates.",
   "sources": {
     "codex_registry": "knowledge/CODEX_ADJUSTMENT_REGISTRY.md",
     "codex_index": "knowledge/daily-paper-handoffs/2026-10-30-adjustment-registry-summary.json",
