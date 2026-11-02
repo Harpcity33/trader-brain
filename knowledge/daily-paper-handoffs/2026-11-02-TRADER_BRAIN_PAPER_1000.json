@@ -74,7 +74,63 @@
         "TSEM stock conditional only",
         "MRVL bearish options research only"
       ],
-      "source_warning": "Approx PM VWAP is OHLCV proxy; relative-volume ratio compares to full-day and is not time-matched; indicative spreads after cutoff"
+      "source_warning": "Approx PM VWAP is OHLCV proxy; relative-volume ratio compares to full-day and is not time-matched; indicative spreads after cutoff",
+      "illustrative_setups_not_authorized": [
+        {
+          "ticker": "TEM",
+          "structure": "LONG_STOCK_INTRADAY_RESEARCH_ONLY",
+          "reference_entry_usd": "74.95",
+          "quantity_if_hypothetical": 4,
+          "reference_notional_usd": "299.80",
+          "notional_pct_of_1000_seed": 29.98,
+          "stop_usd": "72.35",
+          "planned_risk_usd": "10.40",
+          "planned_risk_pct_of_1000_seed": 1.04,
+          "T1_usd": "77.60",
+          "T2_usd": "81.00",
+          "actual_shares": 0,
+          "actual_notional_usd": "0.00",
+          "entry_validated": false
+        },
+        {
+          "ticker": "TSEM",
+          "structure": "LONG_STOCK_REVERSAL_INTRADAY_RESEARCH_ONLY",
+          "reference_entry_usd": "172.25",
+          "quantity_if_hypothetical": 2,
+          "reference_notional_usd": "344.50",
+          "notional_pct_of_1000_seed": 34.45,
+          "stop_usd": "165.50",
+          "planned_risk_usd": "13.50",
+          "planned_risk_pct_of_1000_seed": 1.35,
+          "T1_usd": "178.00",
+          "T2_usd": "184.00",
+          "actual_shares": 0,
+          "actual_notional_usd": "0.00",
+          "entry_validated": false
+        },
+        {
+          "ticker": "MRVL",
+          "structure": "BEARISH_OPTION_WATCH_INTRADAY_RESEARCH_ONLY",
+          "reference_underlying_trigger": "5m close below 190.5 after VWAP rejection and bounce 195-198",
+          "underlying_invalidation_usd": "199.50",
+          "underlying_T1_usd": "186.00",
+          "underlying_T2_usd": "180.00",
+          "option_contract_identified": false,
+          "option_premium_verified": false,
+          "actual_contracts": 0,
+          "actual_notional_usd": "0.00",
+          "entry_validated": false
+        }
+      ],
+      "if_both_illustrative_stock_setups": {
+        "reference_notional_usd": "644.30",
+        "pct_of_1000_seed": 64.43,
+        "combined_planned_stop_risk_usd": "23.90",
+        "planned_risk_pct_of_seed": 2.39,
+        "current_equity_certified": false,
+        "within_configured_risk_policy_verified": false,
+        "simultaneous_entries_authorized": false
+      }
     },
     "intraday": {
       "first_retained_analysis": "09:45:24 EST",
@@ -517,7 +573,8 @@
     "existing_config_risk_limits_unchanged": true,
     "risk_compliance_for_no_new_exposure": "NO_NEW_TRADE_VIOLATION_OBSERVED",
     "cash_model_settlement_not_certified": true,
-    "closed_at_four_pm": "NO_POSITIONS_EXISTED"
+    "closed_at_four_pm": "NO_POSITIONS_EXISTED",
+    "allocation_model_only_against_seed": "Notional and theoretical risk calculated as research counterfactual, never treated as executable or authorized."
   },
   "grades": {
     "analysis_quality": "C-",
