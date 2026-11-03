@@ -1,0 +1,1093 @@
+{
+  "schema": "trader-brain-official-eod-codex-handoff-v4",
+  "report_date": "2026-11-03",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "never_real_brokerage_executions": true,
+  "immutable_ledger_guard": true,
+  "canonical_account": {
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "ledger": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "recorded_seed_usd": "1000.00",
+    "recorded_cash_usd": "1000.00",
+    "positions": [],
+    "orders": [],
+    "paper_fills": [],
+    "closed_trades": [],
+    "stock_entries": 0,
+    "options_entries": 0,
+    "exits": 0,
+    "gross_entry_notional_usd": "0.00",
+    "realized_trade_pnl_usd": "0.00",
+    "unrealized_trade_pnl_usd": "0.00",
+    "seed_based_capital_utilization_pct": 0,
+    "planned_new_trade_risk_usd": "0.00",
+    "realized_new_trade_risk_usd": "0.00",
+    "certified_opening_equity_usd": null,
+    "certified_closing_equity_usd": null,
+    "certified_settled_cash_usd": null,
+    "certified_unsettled_proceeds_usd": null,
+    "certified_buying_power_usd": null,
+    "official_daily_pnl_usd": null,
+    "official_daily_return_pct": null,
+    "official_compounded_equity_usd": null,
+    "weekly_lock": false,
+    "recorded_week_start": "2026-10-26",
+    "current_week_start": "2026-11-02",
+    "week_marker_stale": true,
+    "simulated_execution_enabled": false,
+    "automatic_learning_enabled": false,
+    "reporting_status": "QUARANTINED"
+  },
+  "retired_sources_excluded": {
+    "retired_control_center": "NON_AUTHORITATIVE",
+    "comparison_runtime": "NON_AUTHORITATIVE",
+    "precutover_paper_episode": "HISTORICAL_ONLY; 78 closed trades, 13 wins, 65 losses, indicative -18.567%; quarantined; XLAB swing unresolved; cannot be compounded with administrative $1,000 reseed",
+    "legacy_500_ended": "2026-10-06",
+    "no_cross_episode_cash_or_pnl_merge": true,
+    "original_lifetime_1000_performance_certified": false
+  },
+  "reconcile_timeline": {
+    "research_0700": {
+      "verified_immutable_primary_source_board": false,
+      "first_active_episode_heartbeat_utc": "2026-11-03T12:00:29.771278Z",
+      "note": "Heartbeat not proof of completed 7:00 news sweep"
+    },
+    "plan_0915": {
+      "github_path": "reports/2026-11-03/TRADER_BRAIN_PAPER_1000_2026-11-03_0915_snapshot.json",
+      "archive_type": "READ_ONLY_915_RECONSTRUCTION_NO_FILL",
+      "correct_canonical_episode": true,
+      "generated_as_retrospective": true,
+      "data_collected_after_cutoff": true,
+      "first_detected_before_cutoff_verified": false,
+      "preopen_quote_through": "2026-11-03T09:14:59-05:00",
+      "rvol_not_clock_matched": true,
+      "premarket_vwap_proxy_not_atomic": true,
+      "indicative_spreads_not_at_cutoff": true,
+      "approved_allocations_usd": "0.00",
+      "watches": [
+        {
+          "ticker": "GRAB",
+          "structure": "STOCK",
+          "reference_trigger": "Reset 3.08-3.14 hold 3.04 then post-9:35 5-minute close >3.22 AND RTH VWAP, spread<=0.35%, volume>=1.5x",
+          "reference_entry": 3.23,
+          "stop": 3.04,
+          "T1": 3.43,
+          "T2": 3.62,
+          "illustrative_shares": 100,
+          "actual_shares": 0,
+          "actual_contracts": 0,
+          "approved_allocation_usd": 0
+        },
+        {
+          "ticker": "LSCC",
+          "structure": "STOCK",
+          "reference_trigger": "Reset 104-106 hold 103.90 then after 9:40 5-minute close >108.90 AND RTH VWAP; SOXX positive; spread <=0.30%",
+          "reference_entry": 108.95,
+          "stop": 104.5,
+          "T1": 113.5,
+          "T2": 118,
+          "illustrative_shares": null,
+          "actual_shares": 0,
+          "actual_contracts": 0,
+          "approved_allocation_usd": 0
+        },
+        {
+          "ticker": "BLZE",
+          "structure": "STOCK",
+          "reference_trigger": "Hold 9.70, reset 9.75-10; 5-minute close >10.36 and RTH VWAP; spread <=0.35%",
+          "reference_entry": 10.38,
+          "stop": 9.68,
+          "T1": 11.1,
+          "T2": 11.8,
+          "illustrative_shares": null,
+          "actual_shares": 0,
+          "actual_contracts": 0,
+          "approved_allocation_usd": 0
+        },
+        {
+          "ticker": "SHOP",
+          "structure": "BEARISH_DEFINED_RISK_OPTIONS_WATCH_ONLY",
+          "reference_trigger": "Relief bounce 135-138 rejects VWAP then 5-minute close <131.80",
+          "reference_entry": null,
+          "stop": null,
+          "T1": 126,
+          "T2": 120,
+          "illustrative_shares": null,
+          "actual_shares": 0,
+          "actual_contracts": 0,
+          "approved_allocation_usd": 0
+        },
+        {
+          "ticker": "PLTR",
+          "structure": "BEARISH_DEFINED_RISK_OPTIONS_WATCH_ONLY",
+          "reference_trigger": "Bounce 168.5-171 fails VWAP then 5-minute close <165.80",
+          "reference_entry": null,
+          "stop": null,
+          "T1": 161.5,
+          "T2": 156,
+          "illustrative_shares": null,
+          "actual_shares": 0,
+          "actual_contracts": 0,
+          "approved_allocation_usd": 0
+        }
+      ],
+      "best_under5": {
+        "ticker": "GRAB",
+        "classification": "BEST_DISCOVERY_NOT_APPROVED",
+        "cutoff_price": 3.17,
+        "pm_shares": 5151588,
+        "spread_after_cutoff_approx_pct": 0.32,
+        "reason": "Fresh Q3 earnings and raised guidance; institutional float ~2.77B; however 95.8% range consumption and execution disabled",
+        "approved_shares": 0
+      }
+    },
+    "intraday": {
+      "runtime": "paper-research-quarantined-v1",
+      "source": "Alpaca IEX partial single-venue data",
+      "broker_tradability_verified": false,
+      "consolidated_nbbo_available": false,
+      "market_wide_coverage": false,
+      "first_retained_analysis": "2026-11-03T09:35:12-05:00",
+      "last_analysis": "2026-11-03T15:55:12-05:00",
+      "last_regular_heartbeat": "2026-11-03T15:58:39-05:00",
+      "heartbeat_events": 189,
+      "retained_batches": 77,
+      "market_cycles": 77,
+      "completed_batches": 76,
+      "partial_batches": 1,
+      "scheduled_slots": 77,
+      "unaccounted_slots": 0,
+      "research_observations": 6069,
+      "unique_symbols_research_observed": 1278,
+      "final_cycle_targeted_symbols": 12710,
+      "final_cycle_symbol_evaluations": 689,
+      "final_cycle_effective_coverage_pct": 5.42,
+      "previous_session_final_cycle_coverage_pct": 6.35,
+      "final_cycle_signal_observations": 173,
+      "signal_observations_are_not_paper_entries": true,
+      "final_cycle_empty_history_exclusions": 4730,
+      "final_cycle_iex_bar_coverage_gap_exclusions": 7291,
+      "provider_symbol_mapping_skips": 529,
+      "final_cycle_requests": 19,
+      "dual_inventory_conflict": {
+        "active_research_catalog": {
+          "status": "FRESH_INCOMPLETE",
+          "entries": 13239,
+          "resolved_equity_entries": 64,
+          "pending_symbols": 13159,
+          "age_hours_at_close": 9.08
+        },
+        "legacy_heartbeat_catalog": {
+          "status": "STALE_CATALOG",
+          "observed_at": "2026-10-20T13:20:15Z",
+          "records": 30814,
+          "measures": "different partial seed catalog, not full market coverage"
+        }
+      },
+      "proof_first_price_observation_is_news_discovery": false,
+      "new_paper_trades": 0
+    },
+    "close_1600": {
+      "postclose_report_generated": "2026-11-03T16:05:10-05:00",
+      "postclose_path": "/Users/harp/Documents/Codex/2026-10-14/task-2/deployment/research-20261024/var/research-reports/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/2026-11-03/latest.json",
+      "report_kind": "POST_CLOSE_LOCAL_OBSERVATION",
+      "status": "QUARANTINED",
+      "official_equity": null,
+      "official_return": null,
+      "certified_eod_snapshot": false,
+      "open_intraday_positions": 0,
+      "required_intraday_exits": 0,
+      "simulated_exits": 0,
+      "postclose_typeerror_reobserved": false,
+      "report_local_only": true
+    }
+  },
+  "daily_paper_ledger": [],
+  "daily_paper_ledger_status": "NO_RECORDED_SIMULATED_TRADES_OR_OPEN_POSITIONS; OFFICIAL_RETURN_AND_EQUITY_NULL_UNCERTIFIED",
+  "scoreboard": {
+    "scope": "ACTIVE_CANONICAL_EPISODE_ONLY",
+    "seed": "1000.00",
+    "persisted_cash": "1000.00",
+    "official_compounded_balance": null,
+    "cumulative_pnl": null,
+    "cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "avg_win_usd": null,
+    "avg_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "max_drawdown_pct": null,
+    "capital_utilization_pct_of_seed": 0,
+    "gross_entry_notional_usd": "0.00",
+    "mover_trade_count": 0,
+    "mover_trade_win_rate_pct": null,
+    "avg_mover_trade_return_pct": null,
+    "qualified_discovery_alpha_usd": null,
+    "qualified_execution_alpha_usd": null,
+    "certified_missed_executable_movers": 0,
+    "certified_late_detections": 0,
+    "unqualified_late_research_observations": [
+      "GRAB 10:25 after Q3 results",
+      "LSCC 13:40 after Nov2 earnings",
+      "BLZE 13:00 after Nov2 16:05 earnings",
+      "AEHR 11:40 after Nov2 results",
+      "SHOP 15:40 after earnings",
+      "MERC 10:55 after Nov2 recapitalization"
+    ],
+    "data_integrity_faults": [
+      "No certified 16:00 equity and P&L",
+      "Unverified cash settlement/buying power",
+      "Administrative reseed means original lifetime return uncertified",
+      "Original weekly-start marker stale",
+      "No immutable 7AM board or verified 9:15 first discovery",
+      "Dual inventory freshness mismatch and ~5.42% final-cycle evaluated coverage",
+      "No NBBO, quote or opening-range provenance; incomplete market data"
+    ]
+  },
+  "mover_audit": [
+    {
+      "ticker": "GRAB",
+      "catalyst": "November 3 Q3 2026 revenue +27% YoY to $1.112B, adjusted EBITDA +73%, FY guidance raised",
+      "event_published_at_et": "2026-11-03; exact ET release time not verified",
+      "verified_quality": "A-",
+      "primary_source": "https://www.grab.com/sg/press/others/grab-reports-third-quarter-2026-results-raises-full-year-guidance/",
+      "archive_morning_snapshot": {
+        "price": 3.17,
+        "change_pct": 10.84,
+        "premarket_shares": 5151588,
+        "pm_to_full_day_ratio_not_clock_matched": 0.075,
+        "ohlc4_vwap_proxy": 3.1433,
+        "range_consumed_estimate_pct": 95.8,
+        "remaining_capacity_model_score": 42,
+        "catalyst_grade": "A-",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "10:25:09",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reported about +11% intraday; final closing quote unverified",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "LSCC",
+      "catalyst": "November 2 Q3 2026 revenue +118% with acquisition contribution; strong FPGA bookings, Q4 outlook",
+      "event_published_at_et": "2026-11-02 postclose",
+      "verified_quality": "A-",
+      "primary_source": "https://latticesemi.gcs-web.com/news-releases/news-release-details/lattice-semiconductor-reports-record-3q26-revenue-118-yoy",
+      "archive_morning_snapshot": {
+        "price": 107.6,
+        "change_pct": 12.74,
+        "premarket_shares": 140602,
+        "pm_to_full_day_ratio_not_clock_matched": 0.069,
+        "ohlc4_vwap_proxy": 105.6151,
+        "range_consumed_estimate_pct": 75.2,
+        "remaining_capacity_model_score": 46,
+        "catalyst_grade": "A-",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "13:40:33",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "About +13% reported during November 3 session",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "SHOP",
+      "catalyst": "November 3 earnings: revenue +32%, gross merchandise volume and subscription below forecasts, first sharp gap then partial recovery",
+      "event_published_at_et": "2026-11-03 before opening",
+      "verified_quality": "A- bearish, mixed fundamentals",
+      "primary_source": "https://www.shopify.com/news/shopify-q3-2026-financial-results",
+      "archive_morning_snapshot": {
+        "price": 132.7,
+        "change_pct": -15.06,
+        "premarket_shares": 670910,
+        "pm_to_full_day_ratio_not_clock_matched": 0.075,
+        "ohlc4_vwap_proxy": 132.7651,
+        "range_consumed_estimate_pct": 77.2,
+        "remaining_capacity_model_score": 34,
+        "catalyst_grade": "A-",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "15:40:22",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Morning -15% to -19% reported; approximately -5.9% in a later report; no paper trade",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "PLTR",
+      "catalyst": "November 2 postclose strong revenue guidance but weaker bookings growth; valuation pressure",
+      "event_published_at_et": "2026-11-02 postclose",
+      "verified_quality": "B+ bearish",
+      "primary_source": "https://www.reuters.com/technology/palantir-tops-third-quarter-revenue-estimates-strong-ai-software-demand-2026-11-02/",
+      "archive_morning_snapshot": {
+        "price": 167.26,
+        "change_pct": -6.21,
+        "premarket_shares": 1644686,
+        "pm_to_full_day_ratio_not_clock_matched": 0.072,
+        "ohlc4_vwap_proxy": 166.4742,
+        "range_consumed_estimate_pct": 40.2,
+        "remaining_capacity_model_score": 43,
+        "catalyst_grade": "B+",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "10:50:22",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "About -5.2% reported; no paper trade",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "AAPL",
+      "catalyst": "Memory chip cost pressure weighed on margins and outlook despite strong sales",
+      "event_published_at_et": "2026-11-02 postclose context",
+      "verified_quality": "A- bearish",
+      "primary_source": "https://www.reuters.com/business/retail-consumer/apple-shares-slide-higher-memory-costs-fuel-margin-concerns-2026-11-03/",
+      "archive_morning_snapshot": {
+        "price": 325.12,
+        "change_pct": -3.9,
+        "premarket_shares": 1432127,
+        "pm_to_full_day_ratio_not_clock_matched": 0.036,
+        "ohlc4_vwap_proxy": 324.5326,
+        "range_consumed_estimate_pct": 57.8,
+        "remaining_capacity_model_score": 41,
+        "catalyst_grade": "A-",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "10:35:32",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reuters reported ~-1.8% by close",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "BLZE",
+      "catalyst": "November 2 16:05 ET Q3 revenue +26%, B2 cloud +47%, FY guidance increased; $201M convertible note financing adds structure considerations",
+      "event_published_at_et": "2026-11-02T16:05:00-05:00",
+      "verified_quality": "A-, conditional convertible debt risk",
+      "primary_source": "https://ir.backblaze.com/news/news-details/2026/Backblaze-Announces-Third-Quarter-2026-Financial-Results/default.aspx",
+      "archive_morning_snapshot": {
+        "price": 9.9,
+        "change_pct": 33.78,
+        "premarket_shares": 259629,
+        "pm_to_full_day_ratio_not_clock_matched": 0.124,
+        "ohlc4_vwap_proxy": 9.9766,
+        "range_consumed_estimate_pct": 24.6,
+        "remaining_capacity_model_score": 24,
+        "catalyst_grade": "A",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "13:00:20",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reported +12% intraday after larger premarket jump; exact close not certified",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "LIFE",
+      "catalyst": "Reconstructed premarket positive mover; fresh issuer catalyst not independently confirmed",
+      "event_published_at_et": null,
+      "verified_quality": "B provisional",
+      "primary_source": null,
+      "archive_morning_snapshot": {
+        "price": 49.85,
+        "change_pct": 16.96,
+        "premarket_shares": 70430,
+        "pm_to_full_day_ratio_not_clock_matched": 0.048,
+        "ohlc4_vwap_proxy": 47.6924,
+        "range_consumed_estimate_pct": 100,
+        "remaining_capacity_model_score": 30,
+        "catalyst_grade": "B",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "10:05:22",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reconstructed +16.96% premarket; session close unverified",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "DT",
+      "catalyst": "Fiscal adjusted earnings forecast lowered partly due to Arize acquisition margin effects and FX headwinds",
+      "event_published_at_et": "2026-11-03 before opening",
+      "verified_quality": "B+ bearish",
+      "primary_source": "https://www.barrons.com/articles/dynatrace-earnings-stock-price-84493f87",
+      "archive_morning_snapshot": {
+        "price": 46.25,
+        "change_pct": -16.11,
+        "premarket_shares": 355533,
+        "pm_to_full_day_ratio_not_clock_matched": 0.048,
+        "ohlc4_vwap_proxy": 47.6804,
+        "range_consumed_estimate_pct": 92,
+        "remaining_capacity_model_score": 18,
+        "catalyst_grade": "B+",
+        "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+      },
+      "first_preserved_scanner_research_observation_et": "10:55:20",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "About -10% to -12% reported",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "PARA",
+      "catalyst": "Extreme sub-$5 premarket move; fresh causal primary-source catalyst not independently established",
+      "event_published_at_et": null,
+      "verified_quality": "C unverified speculative",
+      "primary_source": null,
+      "archive_morning_snapshot": {
+        "price": 3.1615,
+        "change_pct": 87.07,
+        "premarket_shares": 5112039,
+        "pm_to_full_day_ratio_not_clock_matched": 12.104,
+        "ohlc4_vwap_proxy": 2.5314,
+        "range_consumed_estimate_pct": 89.9,
+        "remaining_capacity_model_score": 2,
+        "catalyst_grade": "C",
+        "classification": "STRUCTURAL_REJECT_MICROFLOAT"
+      },
+      "first_preserved_scanner_research_observation_et": null,
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reconstructed premarket +87.07%; session outcome unverified",
+      "classification": "NO_RECOVERED_SCANNER_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "MERC",
+      "catalyst": "Nov2 recapitalization: ~$1.1B notes exchanged for equity, prepackaged Chapter 11, existing equity holders assigned small fraction of reorganized equity",
+      "event_published_at_et": "2026-11-02 afterhours",
+      "verified_quality": "A structural event; unqualified equity-long catalyst",
+      "primary_source": "https://mercerint.com/news/mercer-international-announces-comprehensive-recapitalization-agreement-with-significant-support-from-noteholders-and-shareholders/",
+      "archive_morning_snapshot": {
+        "price": 0.2286,
+        "change_pct": 81.43,
+        "premarket_shares": 59752676,
+        "pm_to_full_day_ratio_not_clock_matched": 26.15,
+        "ohlc4_vwap_proxy": 0.2386,
+        "range_consumed_estimate_pct": 38.4,
+        "remaining_capacity_model_score": 1,
+        "catalyst_grade": "A_STRUCTURAL_RECAPITALIZATION",
+        "classification": "STRUCTURAL_REJECT_DILUTION_NONCOMPLIANCE"
+      },
+      "first_preserved_scanner_research_observation_et": "10:55:20",
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "~+81% reconstructed premarket; regular-session executable close unverified",
+      "classification": "LATE_OR_UNQUALIFIED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "INLF",
+      "catalyst": "Extreme low-price move with unverified fresh catalyst and high structural uncertainty",
+      "event_published_at_et": null,
+      "verified_quality": "C unverified speculative",
+      "primary_source": null,
+      "archive_morning_snapshot": {
+        "price": 0.3695,
+        "change_pct": 27.46,
+        "premarket_shares": 17494545,
+        "pm_to_full_day_ratio_not_clock_matched": 0.599,
+        "ohlc4_vwap_proxy": 0.4014,
+        "range_consumed_estimate_pct": 26.5,
+        "remaining_capacity_model_score": 1,
+        "catalyst_grade": "C",
+        "classification": "STRUCTURAL_REJECT_MICROFLOAT"
+      },
+      "first_preserved_scanner_research_observation_et": null,
+      "first_issuer_news_detection_verified": false,
+      "observation_type": "HISTORICAL_RESEARCH_OBSERVATION_NOT_TRADE",
+      "archive_created_after_0915": true,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reconstructed premarket +27.46%; session outcome unverified",
+      "classification": "NO_RECOVERED_SCANNER_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "AEHR",
+      "catalyst": "November 2 record quarterly $33M revenue (+200% YoY) and $150M FY outlook; $46.7M bookings",
+      "event_published_at_et": "2026-11-02 afterhours",
+      "verified_quality": "A fundamental earnings",
+      "primary_source": "https://www.aehr.com/2026/11/aehr-test-systems-reports-record-first-quarter-fiscal-2027-revenue-of-33-0-million-raises-full-year-revenue-outlook-to-150-million-triple-fiscal-2026-revenue/",
+      "archive_morning_snapshot": null,
+      "first_preserved_scanner_research_observation_et": "11:40:17",
+      "first_issuer_news_detection_verified": false,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "+24.58% indicated intraday ~15:09 ET in a market-mover update",
+      "classification": "LATE_UNQUALIFIED_RESEARCH_BENCHMARK",
+      "paper_traded": false
+    },
+    {
+      "ticker": "CLVT",
+      "catalyst": "Nov3 06:00 ET mixed Q3: adjusted EPS beat, revenue missed estimates; portfolio divestiture complicated comparison",
+      "event_published_at_et": "2026-11-03T06:00:00-05:00",
+      "verified_quality": "B mixed / data normalization needed",
+      "primary_source": "https://www.prnewswire.com/news-releases/clarivate-reports-third-quarter-2026-results-delivering-clear-path-to-value-creation-302927166.html",
+      "archive_morning_snapshot": null,
+      "first_preserved_scanner_research_observation_et": null,
+      "first_issuer_news_detection_verified": false,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Premarket reported -6.6%; conflicting intraday reports; close not verified",
+      "classification": "NO_PRESERVED_RESEARCH_OBSERVATION",
+      "paper_traded": false
+    },
+    {
+      "ticker": "NBIX",
+      "catalyst": "Nov3 earnings beat and guidance raise on Ingrezza demand",
+      "event_published_at_et": "2026-11-03 before opening; exact time unverified",
+      "verified_quality": "A- earnings",
+      "primary_source": "https://www.barrons.com/articles/neurocrine-biosciences-earnings-stock-price-82979cd3",
+      "archive_morning_snapshot": null,
+      "first_preserved_scanner_research_observation_et": "11:20:15",
+      "first_issuer_news_detection_verified": false,
+      "decision_time_evidence": {
+        "time_matched_relative_volume": null,
+        "decision_time_volume": null,
+        "atomic_bid_ask_spread": null,
+        "displayed_depth_and_liquidity": null,
+        "current_float_and_dilution": null,
+        "reverse_split_90d_current_action": null,
+        "market_sector_breadth_at_decision": null,
+        "regular_session_vwap": null,
+        "opening_range_confirmation": null,
+        "catalyst_matched_90d_gap_fade": null,
+        "actual_move_consumed_pct": null,
+        "executable_remaining_move_pct": null,
+        "trade_entry_approved": false,
+        "credited_discovery_dollars": null,
+        "credited_execution_dollars": null
+      },
+      "actual_session_outcome": "Reported approximately +15% intraday",
+      "classification": "LATE_UNQUALIFIED_RESEARCH_BENCHMARK",
+      "paper_traded": false
+    }
+  ],
+  "ninety_day_model_from_reconstructed_plan": {
+    "GRAB": {
+      "n": 4,
+      "D1": 3.01,
+      "D5": 2.47
+    },
+    "LSCC": {
+      "n": 11,
+      "D1": -1.77,
+      "D5": -5.1
+    },
+    "SHOP": {
+      "n": 13,
+      "D1": -1.23,
+      "D5": 5.1
+    },
+    "PLTR": {
+      "n": 7,
+      "D1": 0.33,
+      "D5": 4.01
+    },
+    "BLZE": {
+      "n": 13,
+      "D1": 2.53,
+      "D5": 5.58
+    },
+    "MERC": {
+      "n": 12,
+      "D1": -3.15,
+      "D5": -14.95
+    },
+    "PARA": {
+      "n": 12,
+      "D1": -2.92,
+      "D5": -16.17
+    }
+  },
+  "model_caveat": "Tiny heterogeneous analog samples (n=4-13), retrospective and not catalyst-matched; D+1/D+5 is not executable expected value.",
+  "best_under_5": {
+    "ticker": "GRAB",
+    "status": "BEST_VERIFIED_ISSUER_CATALYST_RESEARCH_ONLY_NO_PAPER_TRADE",
+    "primary_source": "https://www.grab.com/sg/press/others/grab-reports-third-quarter-2026-results-raises-full-year-guidance/",
+    "reconstructed_price_usd": 3.17,
+    "reconstructed_premarket_shares": 5151588,
+    "model_move_consumed_pct": 95.8,
+    "model_remaining_capacity_score": 42,
+    "model_90day_analogs": {
+      "n": 4,
+      "D1": 3.01,
+      "D5": 2.47
+    },
+    "execution_spread_verified": false,
+    "regular_session_vwap_verified": false,
+    "entry_authorized": false,
+    "qualifying_executable_trade": null,
+    "compared_against": "MERC recapitalization prepackaged Chapter 11/dilution; PARA INLF speculative unverified"
+  },
+  "risk_and_capital": {
+    "configured_policy_preserved": true,
+    "policy_version_independently_verified": false,
+    "new_notional": "0.00",
+    "new_trade_planned_risk": "0.00",
+    "new_trade_realized_risk": "0.00",
+    "same_day_unsettled_proceeds_recycled": false,
+    "risk_limits_changed": false,
+    "illustrative_research_setups_do_not_count_as_trades": true,
+    "GRAB_illustrative_stock_plan": {
+      "shares": 100,
+      "entry_usd": 3.23,
+      "stop_usd": 3.04,
+      "T1_usd": 3.43,
+      "T2_usd": 3.62,
+      "notional_usd": "323.00",
+      "planned_risk_usd": "19.00",
+      "notional_pct_of_seed": 32.3,
+      "stop_risk_pct_of_seed": 1.9,
+      "not_authorized": true,
+      "policy_compliance_not_certified": true
+    },
+    "settled_unsettled_unverified": true
+  },
+  "grades": {
+    "analysis_quality": "C",
+    "mover_discovery": "D-",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "B",
+    "risk_control": "B",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "overall_daily_process": "D",
+    "daily_price_jumps_scanner": "D-"
+  },
+  "learning_loop": {
+    "what_worked": [
+      "Canonical source stayed consistent at 9:15 and 16:05",
+      "Research activity returned: 76 complete/77 cycles and 6069 observations",
+      "No fabricated execution or false positive daily return",
+      "Strong corporate-action rejection of MERC recapitalization risk"
+    ],
+    "what_lost_money_or_opportunity": [
+      "No verified executable entries; therefore cannot attribute paper loss or profit",
+      "Qualified earnings opportunities could not be ranked early with immutable first-discovery and NBBO",
+      "After-open scanning first observed LSCC at 13:40 and BLZE at 13:00, long after release; no early-credit"
+    ],
+    "scanner_misses_and_late_detections": [
+      "AEHR 11:40 vs Nov2 press release",
+      "BLZE 13:00 vs Nov2 16:05 results",
+      "LSCC 13:40 vs Nov2 earnings",
+      "SHOP 15:40 vs early Nov3 report",
+      "CLVT no preserved same-day research observation despite Nov3 06:00 release",
+      "NBIX first research 11:20 but issuer-news detection unverified",
+      "GRAB 10:25 after Nov3 release"
+    ],
+    "scoring_defects": [
+      "Premarket/full-day average volume ratio improperly resembles RVOL; avoid clock-time interpretation",
+      "Move consumed is modeled premarket range statistic, not executable remaining move",
+      "90-day analog samples n 4-13 are not catalyst matched",
+      "High grade cannot imply executable liquidity"
+    ],
+    "allocation_risk_defects": [
+      "Reported $1000 cash does not establish settled buying power certification",
+      "No venue-consolidated NBBO; options premiums unverified",
+      "Stale week start from 2026-10-26 even though current week starts 2026-11-02"
+    ],
+    "exact_rule_changes_proposed": [
+      {
+        "id": "A065",
+        "patch": {
+          "inventory_sources": [
+            "legacy_heartbeat_catalog",
+            "active_research_inventory"
+          ],
+          "report_both_separately": true,
+          "freshness_clock_per_source": true,
+          "do_not_count_catalog_seeds_as_scanned": true,
+          "effective_coverage_denominator": "targeted_tradable_symbol_candidates",
+          "valid_evaluation_requires": [
+            "current_session_completed_bars",
+            "provider_eligible",
+            "security_type_normalized",
+            "minimum_bars",
+            "effective_coverage_denominator"
+          ],
+          "threshold_min_pct": 95,
+          "outage_alert_minutes": 5,
+          "execution_enabled": false
+        },
+        "not_deployed": true
+      },
+      {
+        "id": "A066",
+        "patch": {
+          "primary_source_first": true,
+          "require_event_publication_at": true,
+          "require_immutable_first_local_news_detection_at": true,
+          "require_separate_first_price_observation_at": true,
+          "do_not_credit_0915_reconstruction": true,
+          "report_lag_minutes": true,
+          "prioritize_catalyst_watch_before_alphabetical_rotation": true,
+          "do_not_promote_without_nbbo_spread_vwap_or_opening_range": true,
+          "cash_account_no_same_day_unsettled_recycling": true,
+          "execution_enabled": false
+        },
+        "not_deployed": true
+      }
+    ],
+    "experiments_next_session": [
+      {
+        "id": "A065",
+        "test": {
+          "sessions": 5,
+          "inject_stale_heartbeat_catalog": 10,
+          "inject_partial_iex_history": 10,
+          "pass": "100% correct source freshness attribution, >=95% complete actual signal coverage when provider permits, no false full-market claim",
+          "fail": "any heartbeat presented as completed scanner or partial IEX considered consolidated market"
+        }
+      },
+      {
+        "id": "A066",
+        "test": {
+          "event_cases": 30,
+          "shadow_sessions": 5,
+          "priority_tickers": [
+            "GRAB",
+            "LSCC",
+            "BLZE",
+            "AEHR",
+            "NBIX",
+            "MERC",
+            "SHOP"
+          ],
+          "pass": "at least 85% primary-source event recall <=5min for eligible events and >=95% timestamp provenance; 0 fabricated early detections",
+          "fail": "event chronologies retroactively credited, missing data passed as executable"
+        }
+      },
+      {
+        "id": "A064",
+        "test": {
+          "flat_replays": 20,
+          "injected_report_errors": 20,
+          "pass": "20/20 proper source-bound certifications; nulls remain null whenever lineage fails"
+        }
+      }
+    ],
+    "metrics_for_confirmation": [
+      "Fresh qualified effective symbol coverage, not catalog size",
+      "Per-catalyst detection lag, minimum event recall 85% within 5min",
+      "Source identity, quote provenance completeness >=95%",
+      "0 fabricated entries and 0 wrong episode references",
+      "Correct 16:00 settlement and flat-session certification across 20 tests",
+      "First 15/30/60min MFE/MAE and realized R after executable approval; do not use hindsight"
+    ],
+    "unresolved_data_integrity": [
+      "Official EOD equity and return null",
+      "Original experiment lifetime losses not certified across cutover",
+      "No first-seen news board at 07:00",
+      "9:15 archive generated after cutoff",
+      "Dual catalog freshness mismatch",
+      "Only 689/12710 strategy evaluated in final cycle",
+      "No NBBO/liquidity/spread structure recorded at decision",
+      "Prior XLAB retired swing unresolved; no false close"
+    ],
+    "carryforward_adjustments": {
+      "registry_previous": "knowledge/daily-paper-handoffs/2026-11-02-adjustment-registry-summary.json",
+      "historical_ids": "A001-A064",
+      "prior_causal_effectiveness": "INCONCLUSIVE",
+      "new_ids": [
+        "A065",
+        "A066"
+      ],
+      "all_previous_decisions_kept": true,
+      "never_reset_clean_slate": true,
+      "implementation_enabled": false
+    }
+  },
+  "single_highest_priority_next_session": "Implement and test A064/A054 source-bound 16:00 account certification for a truly flat simulated account without converting missing data to zero or touching prior episodes.",
+  "sources": [
+    {
+      "url": "https://www.grab.com/sg/press/others/grab-reports-third-quarter-2026-results-raises-full-year-guidance/",
+      "event_at": "2026-11-03; exact ET release time not verified"
+    },
+    {
+      "url": "https://latticesemi.gcs-web.com/news-releases/news-release-details/lattice-semiconductor-reports-record-3q26-revenue-118-yoy",
+      "event_at": "2026-11-02 postclose"
+    },
+    {
+      "url": "https://ir.backblaze.com/news/news-details/2026/Backblaze-Announces-Third-Quarter-2026-Financial-Results/default.aspx",
+      "event_at": "2026-11-02T16:05:00-05:00"
+    },
+    {
+      "url": "https://www.shopify.com/news/shopify-q3-2026-financial-results",
+      "event_at": "2026-11-03 before opening"
+    },
+    {
+      "url": "https://www.reuters.com/technology/palantir-tops-third-quarter-revenue-estimates-strong-ai-software-demand-2026-11-02/",
+      "event_at": "2026-11-02 postclose"
+    },
+    {
+      "url": "https://www.reuters.com/business/retail-consumer/apple-shares-slide-higher-memory-costs-fuel-margin-concerns-2026-11-03/",
+      "event_at": "2026-11-02 postclose context"
+    },
+    {
+      "url": "https://www.barrons.com/articles/dynatrace-earnings-stock-price-84493f87",
+      "event_at": "2026-11-03 before opening"
+    },
+    {
+      "url": "https://mercerint.com/news/mercer-international-announces-comprehensive-recapitalization-agreement-with-significant-support-from-noteholders-and-shareholders/",
+      "event_at": "2026-11-02 afterhours"
+    },
+    {
+      "url": "https://www.aehr.com/2026/11/aehr-test-systems-reports-record-first-quarter-fiscal-2027-revenue-of-33-0-million-raises-full-year-revenue-outlook-to-150-million-triple-fiscal-2026-revenue/",
+      "event_at": "2026-11-02 afterhours"
+    },
+    {
+      "url": "https://www.prnewswire.com/news-releases/clarivate-reports-third-quarter-2026-results-delivering-clear-path-to-value-creation-302927166.html",
+      "event_at": "2026-11-03T06:00:00-05:00"
+    },
+    {
+      "url": "https://www.barrons.com/articles/neurocrine-biosciences-earnings-stock-price-82979cd3",
+      "event_at": "2026-11-03 before opening; exact time unverified"
+    }
+  ],
+  "github_status": "PENDING_PUBLICATION"
+}
