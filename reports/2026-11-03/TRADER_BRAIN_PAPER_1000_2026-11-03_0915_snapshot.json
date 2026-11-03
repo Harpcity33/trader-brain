@@ -1,0 +1,354 @@
+{
+  "schema": "TRADER_BRAIN_PAPER_1000_2026_11_03_0915_ARCHIVAL_V1",
+  "archive_type": "READ_ONLY_915_RECONSTRUCTION_NO_FILL",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "date": "2026-11-03",
+  "cutoff_et": "2026-11-03T09:15:00-05:00",
+  "data_collected_after_cutoff": true,
+  "first_detected_by_cutoff_verified": false,
+  "paper_only": true,
+  "legacy_500_experiment_excluded": true,
+  "authoritative_ledger_mutated": false,
+  "canonical": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "source": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "recorded_cash": 1000,
+    "recorded_starting_equity": 1000,
+    "certified_current_equity": null,
+    "verified_settled_buying_power": null,
+    "positions": [],
+    "swings": [],
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "realized_trade_pnl_in_active_episode": 0,
+    "unrealized_trade_pnl_in_active_episode": 0,
+    "official_original_1000_strategy_lifetime_pnl": null,
+    "lifetime_return_pct": null,
+    "week_start_stored": "2026-10-26",
+    "week_start_current": "2026-11-02",
+    "weekly_lock": false,
+    "current_week_risk_utilization_certified": null,
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "new_allocations_usd": 0,
+    "new_shares": 0,
+    "new_option_contracts": 0,
+    "new_stop_defined_risk_usd": 0
+  },
+  "scan": {
+    "daily_price_jumps_results": 258,
+    "under_5_results": 396,
+    "measured_from": "Robinhood 5-minute extended-hours OHLCV through 2026-11-03T14:14:59Z",
+    "rvol_denominator": "average full regular day 30d, NOT clock-time matched",
+    "vwap": "volume-weighted OHLC4 approximation",
+    "spreads": "indicative from after 09:15, NOT authenticated at cutoff"
+  },
+  "market_breadth_percent": {
+    "SPY": 0.1,
+    "QQQ": 0.66,
+    "SOXX": 3.47,
+    "XLK": 0.82,
+    "XLI": 0.76,
+    "XLV": -0.36,
+    "XLE": -0.83,
+    "IWM": 0.37
+  },
+  "movers": [
+    {
+      "ticker": "GRAB",
+      "price": 3.17,
+      "change_pct": 10.84,
+      "premarket_shares": 5151588,
+      "premarket_turnover_m": 16.193,
+      "pm_to_full_day_RVOL": 0.075,
+      "approx_pm_vwap": 3.1433,
+      "MOVE_ALREADY_CONSUMED_PCT": 95.8,
+      "REMAINING_MOVE_CAPACITY": 42,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "LSCC",
+      "price": 107.6,
+      "change_pct": 12.74,
+      "premarket_shares": 140602,
+      "premarket_turnover_m": 14.85,
+      "pm_to_full_day_RVOL": 0.069,
+      "approx_pm_vwap": 105.6151,
+      "MOVE_ALREADY_CONSUMED_PCT": 75.2,
+      "REMAINING_MOVE_CAPACITY": 46,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "SHOP",
+      "price": 132.7,
+      "change_pct": -15.06,
+      "premarket_shares": 670910,
+      "premarket_turnover_m": 89.073,
+      "pm_to_full_day_RVOL": 0.075,
+      "approx_pm_vwap": 132.7651,
+      "MOVE_ALREADY_CONSUMED_PCT": 77.2,
+      "REMAINING_MOVE_CAPACITY": 34,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "PLTR",
+      "price": 167.26,
+      "change_pct": -6.21,
+      "premarket_shares": 1644686,
+      "premarket_turnover_m": 273.798,
+      "pm_to_full_day_RVOL": 0.072,
+      "approx_pm_vwap": 166.4742,
+      "MOVE_ALREADY_CONSUMED_PCT": 40.2,
+      "REMAINING_MOVE_CAPACITY": 43,
+      "catalyst_grade": "B+",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "AAPL",
+      "price": 325.12,
+      "change_pct": -3.9,
+      "premarket_shares": 1432127,
+      "premarket_turnover_m": 464.772,
+      "pm_to_full_day_RVOL": 0.036,
+      "approx_pm_vwap": 324.5326,
+      "MOVE_ALREADY_CONSUMED_PCT": 57.8,
+      "REMAINING_MOVE_CAPACITY": 41,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "BLZE",
+      "price": 9.9,
+      "change_pct": 33.78,
+      "premarket_shares": 259629,
+      "premarket_turnover_m": 2.59,
+      "pm_to_full_day_RVOL": 0.124,
+      "approx_pm_vwap": 9.9766,
+      "MOVE_ALREADY_CONSUMED_PCT": 24.6,
+      "REMAINING_MOVE_CAPACITY": 24,
+      "catalyst_grade": "A",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "LIFE",
+      "price": 49.85,
+      "change_pct": 16.96,
+      "premarket_shares": 70430,
+      "premarket_turnover_m": 3.359,
+      "pm_to_full_day_RVOL": 0.048,
+      "approx_pm_vwap": 47.6924,
+      "MOVE_ALREADY_CONSUMED_PCT": 100,
+      "REMAINING_MOVE_CAPACITY": 30,
+      "catalyst_grade": "B",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "DT",
+      "price": 46.25,
+      "change_pct": -16.11,
+      "premarket_shares": 355533,
+      "premarket_turnover_m": 16.952,
+      "pm_to_full_day_RVOL": 0.048,
+      "approx_pm_vwap": 47.6804,
+      "MOVE_ALREADY_CONSUMED_PCT": 92,
+      "REMAINING_MOVE_CAPACITY": 18,
+      "catalyst_grade": "B+",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "PARA",
+      "price": 3.1615,
+      "change_pct": 87.07,
+      "premarket_shares": 5112039,
+      "premarket_turnover_m": 12.941,
+      "pm_to_full_day_RVOL": 12.104,
+      "approx_pm_vwap": 2.5314,
+      "MOVE_ALREADY_CONSUMED_PCT": 89.9,
+      "REMAINING_MOVE_CAPACITY": 2,
+      "catalyst_grade": "C",
+      "status": "STRUCTURAL_REJECT_MICROFLOAT",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "MERC",
+      "price": 0.2286,
+      "change_pct": 81.43,
+      "premarket_shares": 59752676,
+      "premarket_turnover_m": 14.256,
+      "pm_to_full_day_RVOL": 26.15,
+      "approx_pm_vwap": 0.2386,
+      "MOVE_ALREADY_CONSUMED_PCT": 38.4,
+      "REMAINING_MOVE_CAPACITY": 1,
+      "catalyst_grade": "A_STRUCTURAL_RECAPITALIZATION",
+      "status": "STRUCTURAL_REJECT_DILUTION_NONCOMPLIANCE",
+      "approved_allocation_usd": 0
+    },
+    {
+      "ticker": "INLF",
+      "price": 0.3695,
+      "change_pct": 27.46,
+      "premarket_shares": 17494545,
+      "premarket_turnover_m": 7.023,
+      "pm_to_full_day_RVOL": 0.599,
+      "approx_pm_vwap": 0.4014,
+      "MOVE_ALREADY_CONSUMED_PCT": 26.5,
+      "REMAINING_MOVE_CAPACITY": 1,
+      "catalyst_grade": "C",
+      "status": "STRUCTURAL_REJECT_MICROFLOAT",
+      "approved_allocation_usd": 0
+    }
+  ],
+  "ninety_day_price_pattern_study": {
+    "GRAB": {
+      "n": 4,
+      "D1": 3.01,
+      "D5": 2.47
+    },
+    "LSCC": {
+      "n": 11,
+      "D1": -1.77,
+      "D5": -5.1
+    },
+    "SHOP": {
+      "n": 13,
+      "D1": -1.23,
+      "D5": 5.1
+    },
+    "PLTR": {
+      "n": 7,
+      "D1": 0.33,
+      "D5": 4.01
+    },
+    "BLZE": {
+      "n": 13,
+      "D1": 2.53,
+      "D5": 5.58
+    },
+    "MERC": {
+      "n": 12,
+      "D1": -3.15,
+      "D5": -14.95
+    },
+    "PARA": {
+      "n": 12,
+      "D1": -2.92,
+      "D5": -16.17
+    }
+  },
+  "watches_only": [
+    {
+      "ticker": "GRAB",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Reset 3.08-3.14 hold 3.04 then post-9:35 5-minute close >3.22 AND RTH VWAP, spread<=0.35%, volume>=1.5x",
+      "reference_entry": 3.23,
+      "stop": 3.04,
+      "T1": 3.43,
+      "T2": 3.62,
+      "illustrative_shares": 100,
+      "illustrative_notional": 323,
+      "illustrative_risk": 19,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "LSCC",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Reset 104-106 hold 103.90 then after 9:40 5-minute close >108.90 AND RTH VWAP; SOXX positive; spread <=0.30%",
+      "entry": 108.95,
+      "stop": 104.5,
+      "T1": 113.5,
+      "T2": 118,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "BLZE",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Hold 9.70, reset 9.75-10; 5-minute close >10.36 and RTH VWAP; spread <=0.35%",
+      "entry": 10.38,
+      "stop": 9.68,
+      "T1": 11.1,
+      "T2": 11.8,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "SHOP",
+      "direction": "BEARISH_DEFINED_RISK_OPTIONS_WATCH_ONLY",
+      "trigger": "Relief bounce 135-138 rejects VWAP then 5-minute close <131.80",
+      "underlying_invalidation": 139,
+      "T1_underlying": 126,
+      "T2_underlying": 120,
+      "option_contracts_approved": 0,
+      "option_premium_verified": false
+    },
+    {
+      "ticker": "PLTR",
+      "direction": "BEARISH_DEFINED_RISK_OPTIONS_WATCH_ONLY",
+      "trigger": "Bounce 168.5-171 fails VWAP then 5-minute close <165.80",
+      "underlying_invalidation": 172,
+      "T1_underlying": 161.5,
+      "T2_underlying": 156,
+      "option_contracts_approved": 0,
+      "option_premium_verified": false
+    }
+  ],
+  "best_under_5": {
+    "ticker": "GRAB",
+    "classification": "BEST_DISCOVERY_NOT_APPROVED",
+    "cutoff_price": 3.17,
+    "pm_shares": 5151588,
+    "spread_after_cutoff_approx_pct": 0.32,
+    "reason": "Fresh Q3 earnings and raised guidance; institutional float ~2.77B; however 95.8% range consumption and execution disabled",
+    "approved_shares": 0
+  },
+  "learning": {
+    "registry": "knowledge/CODEX_ADJUSTMENT_REGISTRY.md",
+    "cumulative": "knowledge/daily-paper-handoffs/2026-10-30-adjustment-registry-summary.json",
+    "prior_EOD": "reports/2026-11-02/TRADER_BRAIN_PAPER_1000_2026-11-02_EOD_review.md",
+    "A001_to_A008": {
+      "A001": "INCONCLUSIVE",
+      "A002": "INCONCLUSIVE",
+      "A003": "INCONCLUSIVE",
+      "A004": "INCONCLUSIVE",
+      "A005": "INCONCLUSIVE",
+      "A006": "INCONCLUSIVE",
+      "A007": "INCONCLUSIVE",
+      "A008": "INCONCLUSIVE"
+    },
+    "A009_to_A063": "PROPOSED/SHADOW; CAUSAL INCONCLUSIVE",
+    "tests": [
+      "30 source/first-seen replays over five sessions, 0 episode mismatches",
+      "5 sessions 30 issuer events, >=95% verified fresh-event coverage, stale source alerts <=5 minutes",
+      "GRAB/LSCC/BLZE/SHOP/PLTR chase vs VWAP confirmation: 15/30/60m MFE MAE 1R 2R and costs",
+      "20 valid and 10 corrupt ledger cases plus 5 certified 16:00 closes; zero false performance assertions",
+      "Corporate-action rejects PARA/MERC/INLF vs GRAB: zero ineligible promoted trades"
+    ]
+  },
+  "integrity": "Read-only archive. Current week start stale, original lifetime $1000 return uncertified across administrative cutover; old $500 never included. No paper or real fills claimed.",
+  "sources": {
+    "GRAB": "https://www.marketscreener.com/news/grab-reports-third-quarter-2026-results-raises-full-year-guidance-ce785fd9dd89f021",
+    "LSCC": "https://www.stocktitan.net/sec-filings/LSCC/8-k-lattice-semiconductor-corp-reports-material-event-da84cfd18ed2.html",
+    "BLZE": "https://www.stocktitan.net/sec-filings/BLZE/8-k-backblaze-inc-reports-material-event-991fa2f909ab.html",
+    "SHOP": "https://www.stocktitan.net/articles/shopify-q3-2026-earnings-revenue-growth-holds-at-32-percent"
+  }
+}
