@@ -517,7 +517,7 @@
     "analysis_quality": "C",
     "mover_discovery": "D-",
     "execution": "NOT_GRADABLE",
-    "allocation_concentration": "B",
+    "allocation_concentration": "C",
     "risk_control": "B-",
     "risk_adjusted_result": "NOT_GRADABLE",
     "data_integrity": "F",
@@ -553,7 +553,8 @@
       "Official settled buying power remains uncertified, despite $1000 persisted flat cash",
       "Recorded week_start 2026-10-26 lags current week 2026-11-02",
       "Execution disabled; cannot demonstrate policy compliance for illustrative sizing",
-      "No cash-account proceeds recycling allowed"
+      "No cash-account proceeds recycling allowed",
+      "Three alternative 09:15 illustrations sum to $1194.30 notional (119.43% seed), $49 stop risk; if simultaneous, would exceed $1000 cash budget by $194.30; must reserve buying power across conditional watches."
     ],
     "proposed_exact_changes_next_session": [
       {
@@ -587,6 +588,12 @@
         "config": "news_priority_queue.events_before_0915_and_after_0915=true; event_first_seen_and_5m_first_seen_separate=true; do_not_rank_missing_quote_as_executable=true; first_news_event_latency_sla_seconds=300",
         "dependency": "A066",
         "reason": "Earnings and adverse study events observed hours late"
+      },
+      {
+        "id": "CAPACITY_GUARD_SHADOW",
+        "status": "CARRY_FORWARD_A007_A017",
+        "config": "watchlist_order_proposals.require_single_settled_cash_reservation=true; reserve_notional_at_approval=true; reject_simultaneous_total_notional_gt_settled_cash=true; enforce_configured_daily_loss_cap=true",
+        "reason": "Illustrative watch totals exceed simulated cash even before execution, no actual trades."
       }
     ],
     "experiments_next_session": [
@@ -613,6 +620,12 @@
         "tests": "20 FTCI/CRIS-like financing and split-risk scenario replays",
         "accept": "100% structural-risk flags and zero nonqualified entries",
         "reject": "One unsupported A-grade execution or misclassified reverse split"
+      },
+      {
+        "id": "EXP_CAPITAL",
+        "tests": "Three concurrent-watch order-book replays with $1000 cash, plus settlement T+1 cases",
+        "accept": "All simultaneous proposed position sets obey current policy, reserve settled funds, no same-day proceeds recycling",
+        "reject": "Any booking above available settled balance or untracked 4.9% combined stop risk"
       }
     ],
     "metrics_to_confirm_or_reject": [
@@ -653,5 +666,52 @@
     "report_read": true,
     "github_0915_read": true,
     "market_verified_via_web": true
+  },
+  "risk_and_capital_review": {
+    "current_equity_certified": false,
+    "last_persisted_simulated_cash_usd": "1000.00",
+    "daily_live_paper_entry_notional_usd": "0.00",
+    "planned_and_realized_risk_usd": [
+      "0.00",
+      "0.00"
+    ],
+    "entry_permission": false,
+    "existing_policy_limits_unchanged": true,
+    "cash_account_same_day_proceeds_recycling": false,
+    "conditional_research_only_watches": [
+      {
+        "ticker": "ANET",
+        "shares": 2,
+        "entry": 182.4,
+        "stop": 174.9,
+        "notional_usd": "364.80",
+        "risk_usd": "15.00",
+        "seed_allocation_pct": 36.48
+      },
+      {
+        "ticker": "AMD",
+        "shares": 1,
+        "entry": 493,
+        "stop": 481,
+        "notional_usd": "493.00",
+        "risk_usd": "12.00",
+        "seed_allocation_pct": 49.3
+      },
+      {
+        "ticker": "OUST",
+        "shares": 10,
+        "entry": 33.65,
+        "stop": 31.45,
+        "notional_usd": "336.50",
+        "risk_usd": "22.00",
+        "seed_allocation_pct": 33.65
+      }
+    ],
+    "sum_if_simultaneously_executed_notional_usd": "1194.30",
+    "sum_if_simultaneously_executed_risk_usd": "49.00",
+    "simultaneous_seed_allocation_pct": 119.43,
+    "simultaneous_risk_pct_of_seed": 4.9,
+    "interpretation": "Not a recorded risk violation because all are inactive alternatives with zero approved shares. If treated as concurrent orders without a settled-cash reservation system, aggregate notional would exceed the simulated $1000 by $194.30. Stop-defined risk $49 cannot be certified as compliant with current configured limits until those rules are inspected.",
+    "capital_utilization_concentration_grade": "C_PLANNING_B_REALIZED_NO_NEW_RISK"
   }
 }
