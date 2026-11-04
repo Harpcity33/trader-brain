@@ -1,0 +1,657 @@
+{
+  "schema": "trader-brain-official-eod-codex-handoff-v5",
+  "report_date": "2026-11-04",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "real_brokerage_fills": 0,
+  "creation_policy": "No retrospectively created trades or hindsight alpha",
+  "canonical_account": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "ledger_path": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "ledger_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "seed_usd": "1000.00",
+    "persisted_cash_usd": "1000.00",
+    "positions": [],
+    "closed_trades": [],
+    "stock_entries": 0,
+    "options_entries": 0,
+    "exits": 0,
+    "gross_entry_notional_usd": "0.00",
+    "realized_trade_pnl_usd": "0.00",
+    "unrealized_trade_pnl_usd": "0.00",
+    "planned_new_trade_risk_usd": "0.00",
+    "realized_new_trade_risk_usd": "0.00",
+    "certified_opening_equity_usd": null,
+    "certified_ending_equity_usd": null,
+    "certified_buying_power_usd": null,
+    "certified_settled_cash_usd": null,
+    "certified_unsettled_proceeds_usd": null,
+    "official_daily_pnl_usd": null,
+    "official_daily_return_pct": null,
+    "reporting_status": "QUARANTINED",
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "week_start_recorded": "2026-10-26",
+    "actual_week_start": "2026-11-02",
+    "weekly_lock": false,
+    "stale_week_marker": true,
+    "capital_utilization_pct_of_seed": 0,
+    "simulated_cash_account_recycling_allowed": false
+  },
+  "other_state_sources": {
+    "retired_control_center": "NON_AUTHORITATIVE",
+    "duplicate_comparison_runtime": "NON_AUTHORITATIVE",
+    "provisional_signal_book": "NON_CANONICAL_ZERO_EVENTS",
+    "original_1000_pre_cutover_history": "HISTORICAL_ONLY_UNCERTIFIED; 78 trades/13 wins/65 losses, -18.567% stale indicator; unresolved XLAB swing; no reset of lost money implied",
+    "legacy_500": "Ended 2026-10-06, excluded entirely"
+  },
+  "reconciliation": {
+    "research_0700": {
+      "event": "2026-11-04T07:00:05-05:00 initial heartbeat and inventory attempt",
+      "immutable_news_board_verified": false,
+      "comment": "Heartbeat proves process, not a qualified primary-source 7 AM board"
+    },
+    "plan_0915": {
+      "file": "reports/2026-11-04/TRADER_BRAIN_PAPER_1000_2026-11-04_0915_snapshot.json",
+      "sha": "fb5f45be1dea28e3937fc315f4086e05e2f6aa4f",
+      "read_only_retroactive": true,
+      "created_after_cutoff": true,
+      "claimable_early_discoveries": 0,
+      "correct_canonical_account": true,
+      "allocation_authorized_usd": "0.00",
+      "movers_retrospectively_ranked": [
+        {
+          "ticker": "ANET",
+          "grade": "A",
+          "premarket_pct": 4.76,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 36.6,
+          "remaining_capacity_score": 64
+        },
+        {
+          "ticker": "OUST",
+          "grade": "A-",
+          "premarket_pct": 12.22,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 78.3,
+          "remaining_capacity_score": 43
+        },
+        {
+          "ticker": "AMD",
+          "grade": "A",
+          "premarket_pct": 1.1,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 13.6,
+          "remaining_capacity_score": 58
+        },
+        {
+          "ticker": "SMCI",
+          "grade": "A-",
+          "premarket_pct": 0,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 0,
+          "remaining_capacity_score": 18
+        },
+        {
+          "ticker": "DOX",
+          "grade": "A_BEARISH",
+          "premarket_pct": -36.42,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 80.4,
+          "remaining_capacity_score": 24
+        },
+        {
+          "ticker": "NRIX",
+          "grade": "A_BEARISH",
+          "premarket_pct": -32.55,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 95.3,
+          "remaining_capacity_score": 14
+        },
+        {
+          "ticker": "DUOL",
+          "grade": "A-",
+          "premarket_pct": 22.58,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 99.3,
+          "remaining_capacity_score": 22
+        },
+        {
+          "ticker": "NVTS",
+          "grade": "B+",
+          "premarket_pct": 9.81,
+          "action": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+          "estimated_move_consumed_pct": 55.6,
+          "remaining_capacity_score": 33
+        },
+        {
+          "ticker": "FTCI",
+          "grade": "B+",
+          "premarket_pct": 27.59,
+          "action": "STRUCTURAL_REJECT_DILUTION_FINANCING",
+          "estimated_move_consumed_pct": 61.5,
+          "remaining_capacity_score": 15
+        },
+        {
+          "ticker": "CRIS",
+          "grade": "C",
+          "premarket_pct": 94.58,
+          "action": "STRUCTURAL_REJECT_RECENT_REVERSE_SPLIT_NO_FRESH_ISSUER_CATALYST",
+          "estimated_move_consumed_pct": 52.1,
+          "remaining_capacity_score": 3
+        }
+      ],
+      "watches": [
+        {
+          "ticker": "ANET",
+          "direction": "LONG",
+          "structure": "STOCK",
+          "holding": "INTRADAY",
+          "trigger": "Hold 174-177 reset; after 09:40 complete 5m close >182.30 and RTH VWAP, spread <=0.30%, volume >=1.5x previous five-bar average; QQQ not below -0.5%",
+          "reference_entry": 182.4,
+          "stop": 174.9,
+          "T1": 188,
+          "T2": 191.9,
+          "illustrative_shares": 2,
+          "illustrative_notional": 364.8,
+          "illustrative_stop_risk": 15,
+          "actual_shares": 0,
+          "actual_allocation": 0
+        },
+        {
+          "ticker": "AMD",
+          "direction": "LONG",
+          "structure": "STOCK",
+          "holding": "INTRADAY",
+          "trigger": "Hold 480-486 reset; after 09:40 5m close >492.50 and RTH VWAP; SOXX stable or reclaiming VWAP; spread <=0.20%",
+          "reference_entry": 493,
+          "stop": 481,
+          "T1": 503,
+          "T2": 514,
+          "illustrative_shares": 1,
+          "illustrative_notional": 493,
+          "illustrative_stop_risk": 12,
+          "actual_shares": 0,
+          "actual_allocation": 0
+        },
+        {
+          "ticker": "OUST",
+          "direction": "LONG",
+          "structure": "STOCK",
+          "holding": "INTRADAY",
+          "trigger": "Hold 31.50 on reset, then after 09:40 5m close >33.60 and RTH VWAP; spread <=0.35%",
+          "reference_entry": 33.65,
+          "stop": 31.45,
+          "T1": 35.5,
+          "T2": 37.7,
+          "illustrative_shares": 10,
+          "illustrative_notional": 336.5,
+          "illustrative_stop_risk": 22,
+          "actual_shares": 0,
+          "actual_allocation": 0
+        },
+        {
+          "ticker": "DOX",
+          "direction": "BEARISH",
+          "structure": "DEFINED_RISK_PUT_DEBIT_SPREAD_WATCH_UNPRICED",
+          "holding": "INTRADAY",
+          "trigger": "Bounce towards 40-41 rejects RTH VWAP then 5m close <38.80; contemporaneous option bid ask and OI required",
+          "underlying_invalidation": 41.5,
+          "T1_underlying": 36.5,
+          "T2_underlying": 34.15,
+          "option_terms_verified": false,
+          "contracts": 0,
+          "allocation": 0
+        }
+      ],
+      "estimation_cautions": [
+        "Premarket OHLC4 VWAP is proxy",
+        "RVOL uses prior full day average not clock-matched",
+        "spreads after 9:15 not decision-time",
+        "primary news cutoff timestamps not certified"
+      ]
+    },
+    "intraday": {
+      "heartbeat_events": 192,
+      "retained_batches": 76,
+      "completed_batches": 69,
+      "partial_batches": 7,
+      "scheduled_slots": 77,
+      "unaccounted_schedule_slots": 1,
+      "observations": 6173,
+      "unique_observed_symbols": 1532,
+      "final_cycle_targeted_symbols": 12708,
+      "final_cycle_strategy_evaluated_symbols": 958,
+      "final_cycle_effective_coverage_pct": 7.54,
+      "final_cycle_signal_observations": 189,
+      "final_cycle_iex_bar_coverage_gap_exclusions": 7263,
+      "final_cycle_empty_history_exclusions": 4487,
+      "provider_symbol_mapping_skips": 529,
+      "last_analysis_et": "2026-11-04T15:55:23-05:00",
+      "last_heartbeat_et": "2026-11-04T15:59:02-05:00",
+      "market_data": "Alpaca IEX partial single-venue historical bars; not consolidated NBBO",
+      "broker_tradability_certified": false,
+      "fresh_incomplete_catalog_count": 13237,
+      "resolved_equity_identities": 64,
+      "pending_symbols": 13157,
+      "older_heartbeat_catalog": "STALE 2026-10-20; separate seed catalog, not a conflicting canonical ledger",
+      "observed_signals_are_not_trades": true
+    },
+    "close_1600": {
+      "postclose_at_et": "2026-11-04T16:05:02-05:00",
+      "postclose_report_path": "/Users/harp/Documents/Codex/2026-10-14/task-2/deployment/research-20261024/var/research-reports/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/2026-11-04/latest.json",
+      "status": "QUARANTINED",
+      "official_ending_equity": null,
+      "official_daily_return": null,
+      "accounting_exception": "TypeError in maintenance state",
+      "no_open_intraday_positions": true,
+      "no_liquidations_required": true
+    }
+  },
+  "official_daily_paper_ledger": [],
+  "ledger_field_completeness": {
+    "no_trades": "All per-trade ticker, structure, grades, score, timestamps, price, quantity, notional, allocation, stop, T1/T2, partials, final exit and trade P&L are NOT_APPLICABLE rather than fabricated",
+    "gross_entry_notional_usd": "0.00",
+    "certified_settled_cash": null,
+    "certified_unsettled_proceeds": null,
+    "official_ending_equity": null,
+    "official_daily_return": null
+  },
+  "scoreboard": {
+    "basis": "ACTIVE_CANONICAL_EPISODE_ONLY, lifetime original $1000 strategy not separately certified after Oct 26 administrative restart",
+    "starting_seed_usd": "1000.00",
+    "persisted_cash_usd": "1000.00",
+    "certified_compounded_balance_usd": null,
+    "cumulative_pnl_usd": null,
+    "cumulative_return_pct": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "average_win_usd": null,
+    "average_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "max_drawdown_pct": null,
+    "capital_utilization_pct_of_seed": 0,
+    "gross_entry_notional_usd": "0.00",
+    "mover_trade_count": 0,
+    "mover_trade_win_rate_pct": null,
+    "average_mover_trade_return_pct": null,
+    "verified_early_mover_discoveries": 0,
+    "confirmed_executable_mover_misses": null,
+    "confirmed_stale_or_late_executable_detections": null,
+    "discovery_alpha_usd": null,
+    "execution_alpha_usd": null,
+    "integrity_faults": [
+      "No certified 4 PM valuation",
+      "Report TypeError",
+      "Stale week_start marker",
+      "Retrospective 9:15 archive",
+      "No 7 AM immutable news board",
+      "Coverage <8% of target in last cycle",
+      "IEX single venue lacks executable quote verification",
+      "Unresolved retired XLAB swing and historical $0.04 discrepancy"
+    ]
+  },
+  "mover_audit": {
+    "outcome_source_scope": "Primary issuer releases, reliable Nov 4 market coverage, local historical research observations and 9:15 retrospective report; no hindsight trading credit",
+    "movers": [
+      {
+        "ticker": "ANET",
+        "catalyst": "Nov 3 after-close third-quarter beat and higher guidance; AI networking demand",
+        "quality": "A",
+        "first_research_observation_et": "10:25:18",
+        "pre_market_pct_from_retrospective_board": 4.76,
+        "retrospective_move_consumed_pct": 36.6,
+        "retrospective_remaining_capacity_score": 64,
+        "historical_90d": {
+          "n": 10,
+          "d1_pct": -0.01,
+          "d5_pct": -1.57
+        },
+        "outcome": "Up strongly premarket/early session on earnings; exact official close not certified for attribution",
+        "classification": "AFTER_CUTOFF_RESEARCH_OBSERVATION_NOT_VERIFIED_EARLY",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "OUST",
+        "catalyst": "Nov 3 after-close Q3 report: revenue $59M, up 50%, Q4 midpoint $62.5M",
+        "quality": "A-",
+        "first_research_observation_et": null,
+        "pre_market_pct_from_retrospective_board": 12.22,
+        "retrospective_move_consumed_pct": 78.3,
+        "retrospective_remaining_capacity_score": 43,
+        "historical_90d": {
+          "n": 20,
+          "d1_pct": 0.83,
+          "d5_pct": -5.46
+        },
+        "outcome": "Reported strong premarket increase and traded up roughly 10% at 13:02 ET; no canonical observation",
+        "classification": "NO_RETAINED_LOCAL_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "AMD",
+        "catalyst": "Nov 3 after-close results; mixed AI/data-center sentiment",
+        "quality": "A",
+        "first_research_observation_et": "15:40:28",
+        "pre_market_pct_from_retrospective_board": 1.1,
+        "retrospective_move_consumed_pct": 13.6,
+        "retrospective_remaining_capacity_score": 58,
+        "historical_90d": {
+          "n": 13,
+          "d1_pct": -0.3,
+          "d5_pct": -4.25
+        },
+        "outcome": "Mixed intraday trading, no trade",
+        "classification": "LATE_RESEARCH_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "SMCI",
+        "catalyst": "Nov 3 earnings results and outlook",
+        "quality": "A-",
+        "first_research_observation_et": "10:45:11",
+        "pre_market_pct_from_retrospective_board": 0,
+        "retrospective_move_consumed_pct": 0,
+        "retrospective_remaining_capacity_score": 18,
+        "historical_90d": {
+          "n": 18,
+          "d1_pct": 0.09,
+          "d5_pct": -0.67
+        },
+        "outcome": "Mixed sector trading; no verified executable trade",
+        "classification": "LATE_RESEARCH_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "DOX",
+        "catalyst": "Nov 3 after-close FY2027 weak outlook and T-Mobile contract dispute",
+        "quality": "A_BEARISH",
+        "first_research_observation_et": "10:20:21",
+        "pre_market_pct_from_retrospective_board": -36.42,
+        "retrospective_move_consumed_pct": 80.4,
+        "retrospective_remaining_capacity_score": 24,
+        "historical_90d": {
+          "n": 1,
+          "d1_pct": -0.27,
+          "d5_pct": 3.89
+        },
+        "outcome": "Reported approximately -27% during session; decline already substantial before market open",
+        "classification": "LATE_RESEARCH_OBSERVATION_EXTENDED_GAP",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "NRIX",
+        "catalyst": "Nov 3 at 16:01 ET discontinued Sanofi Phase 1 STAT6 program",
+        "quality": "A_BEARISH",
+        "catalyst_timestamp_et": "2026-11-03T16:01:00-05:00",
+        "first_research_observation_et": "13:00:18",
+        "pre_market_pct_from_retrospective_board": -32.55,
+        "retrospective_move_consumed_pct": 95.3,
+        "retrospective_remaining_capacity_score": 14,
+        "historical_90d": {
+          "n": 3,
+          "d1_pct": -0.75,
+          "d5_pct": 0.82
+        },
+        "outcome": "Shares plunged more than 39% in reported trading; extended by time observed",
+        "classification": "LATE_RESEARCH_OBSERVATION_EXTENDED_GAP",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "DUOL",
+        "catalyst": "Nov 3 Q3 earnings, daily active users and guidance",
+        "quality": "A-",
+        "first_research_observation_et": "12:50:17",
+        "pre_market_pct_from_retrospective_board": 22.58,
+        "retrospective_move_consumed_pct": 99.3,
+        "retrospective_remaining_capacity_score": 22,
+        "historical_90d": {
+          "n": 15,
+          "d1_pct": 0.09,
+          "d5_pct": -1.03
+        },
+        "outcome": "Large morning premarket move; no qualified canonical entry",
+        "classification": "LATE_RESEARCH_OBSERVATION_EXTENDED_GAP",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "NVTS",
+        "catalyst": "Nov 3 revenue report and outlook for power semiconductor products",
+        "quality": "B+",
+        "first_research_observation_et": "11:50:24",
+        "pre_market_pct_from_retrospective_board": 9.81,
+        "retrospective_move_consumed_pct": 55.6,
+        "retrospective_remaining_capacity_score": 33,
+        "historical_90d": {
+          "n": 17,
+          "d1_pct": -2.34,
+          "d5_pct": -3.81
+        },
+        "outcome": "News-driven early mover; no verified executable continuation",
+        "classification": "LATE_RESEARCH_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "FTCI",
+        "catalyst": "Nov 4 before-open Q3 earnings: revenue $32.8M up 25.4% sequentially, Q4 revenue forecast $44M-$52M; credit amendment and $20M equity line risk",
+        "quality": "B+_CATALYST_AWARE_STRUCTURAL_REJECT",
+        "first_research_observation_et": "11:10:10",
+        "pre_market_pct_from_retrospective_board": 27.59,
+        "pre_market_volume_shares_from_retrospective_board": 14904521,
+        "pre_market_volume_vs_prior_full_day_average": 45.17,
+        "retrospective_move_consumed_pct": 61.5,
+        "retrospective_remaining_capacity_score": 15,
+        "historical_90d": {
+          "n": 12,
+          "d1_pct": -1.84,
+          "d5_pct": -7.99
+        },
+        "outcome": "Strong premarket repricing; verified full-session close not preserved",
+        "classification": "STRUCTURAL_REJECT_NOT_PROVEN_TIMELY",
+        "decision_time_quote_spread_float_vwap_range": "After-cutoff spread estimate ~0.54%; exact 09:15 spread unverified; float and live liquidity unverified"
+      },
+      {
+        "ticker": "CRIS",
+        "catalyst": "No fresh validated favorable clinical catalyst; Jul 2026 1-for-20 reverse split and Nov 18 reverse-split proposal vote",
+        "quality": "C_STRUCTURAL",
+        "first_research_observation_et": null,
+        "pre_market_pct_from_retrospective_board": 94.58,
+        "pre_market_volume_shares_from_retrospective_board": 39058165,
+        "pre_market_volume_vs_prior_full_day_average": 17.71,
+        "retrospective_move_consumed_pct": 52.1,
+        "retrospective_remaining_capacity_score": 3,
+        "historical_90d": {
+          "n": 9,
+          "d1_pct": -0.72,
+          "d5_pct": -3.31,
+          "gap_fade": "20/24"
+        },
+        "outcome": "Highly speculative premarket move with reverse-split/delisting structure concerns",
+        "classification": "STRUCTURAL_REJECT_NO_LOCAL_RESEARCH_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "DDOG",
+        "catalyst": "Nov 4 Q3 revenue and EPS beat but Q4 revenue outlook below expectations; major AI customer usage decrease",
+        "quality": "A_BEARISH",
+        "first_research_observation_et": "12:45:13",
+        "outcome": "Reported -12% to -14% on outlook disappointment",
+        "classification": "UNRANKED_0915_BENCHMARK_LATE_LOCAL_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "XYZ",
+        "catalyst": "Nov 4 Q3 earnings beat and stronger Block outlook",
+        "quality": "A",
+        "first_research_observation_et": null,
+        "outcome": "Reported approximately +16% on November 4",
+        "classification": "UNRANKED_0915_EXTERNAL_COVERAGE_MISS",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      },
+      {
+        "ticker": "UBER",
+        "catalyst": "Nov 4 quarterly results and positive delivery/business trends",
+        "quality": "A-",
+        "first_research_observation_et": "10:10:25",
+        "outcome": "Reported roughly +8% on November 4",
+        "classification": "LATE_LOCAL_OBSERVATION",
+        "decision_time_quote_spread_float_vwap_range": "UNVERIFIED"
+      }
+    ],
+    "best_under_5": {
+      "ticker": "FTCI",
+      "discovery_quality": "Best verifiable issuer-specific earnings catalyst in under-$5 universe",
+      "paper_qualified": false,
+      "reason": "Q3 results genuine but a $20M equity line, credit amendments, questionable liquidity, 0.54% postcutoff indicative spread and 90-session average D+5 -7.99% preclude validated entry",
+      "other_mover": "CRIS high percentage but recent reverse split and new vote with no validated new positive company catalyst",
+      "actual_profit": null
+    },
+    "social_media_role": "SUPPLEMENTAL_ONLY"
+  },
+  "grades": {
+    "analysis_quality": "C",
+    "mover_discovery": "D-",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "B",
+    "risk_control": "B-",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "overall": "D",
+    "daily_price_jumps_scanner": "D-"
+  },
+  "learning_loop": {
+    "what_worked": [
+      "Correct canonical ledger binding in retrospective 9:15 archive",
+      "69 completed research batches and 6,173 historical observations",
+      "No fabricated simulated fills or recycled proceeds",
+      "Structural caution for FTCI and CRIS"
+    ],
+    "what_lost_money_or_opportunity": [
+      "No current recorded paper trade P&L; no lost dollars attributable",
+      "Failed to establish timely knowledge of ANET, OUST, DOX, NRIX, DUOL and FTCI",
+      "Incomplete venue coverage and unavailable executable quotations"
+    ],
+    "scanner_misses_or_late_detections": [
+      "OUST and CRIS had no retained local research observations",
+      "AMD first local research at 15:40",
+      "FTCI first local research at 11:10, ANET at 10:25, NRIX at 13:00, DUOL at 12:50, DDOG at 12:45",
+      "First local observation is not necessarily first catalyst detection"
+    ],
+    "scoring_defects": [
+      "After-cutoff estimates masquerade as 09:15 candidate features unless gated",
+      "Premarket/full-day volume denominator not clock-matched",
+      "VWAP OHLC4 proxy and non-atomic spread",
+      "Small 90-day analog samples and extrapolation"
+    ],
+    "allocation_risk_defects": [
+      "Official settled buying power remains uncertified, despite $1000 persisted flat cash",
+      "Recorded week_start 2026-10-26 lags current week 2026-11-02",
+      "Execution disabled; cannot demonstrate policy compliance for illustrative sizing",
+      "No cash-account proceeds recycling allowed"
+    ],
+    "proposed_exact_changes_next_session": [
+      {
+        "id": "A064",
+        "status": "CARRY_FORWARD_PRIORITY",
+        "config": "eod_certification.enabled_in_shadow=true; require_same_ledger_sha=true; require_valid_decimal_flat_journal=true; write_accounting_exception_class_and_stack=true; publish_null_on_failure=true; no_authority_mutation=true",
+        "reason": "Nov 4 again recorded report TypeError"
+      },
+      {
+        "id": "A065",
+        "status": "CARRY_FORWARD",
+        "config": "research.effective_coverage_denominator=targeted_symbols; count_only_strategy_evaluated=true; distinguish_fresh_incomplete_catalog_from_old_heartbeat_seed=true; under_95pct_coverage=FAIL_INCOMPLETE_NOT_FULL_MARKET",
+        "reason": "958/12708 only"
+      },
+      {
+        "id": "A066",
+        "status": "CARRY_FORWARD",
+        "config": "news_event.source_publish_at_required=true; research.first_detected_at_immutable=true; local_bar_seen_at_is_not_news_detected_at=true; classify_after_cutoff_reconstruction=true",
+        "reason": "Morning reconstructed after cutoff"
+      },
+      {
+        "id": "A067",
+        "status": "NEW_PROPOSED_SHADOW",
+        "config": "eod.error_contract.persist_exception_type=true; preserve_failed_report_payload_sha=true; require_account_id_and_source_hash=true; test_flat_day_0_trade_certification_without_fake_fills=true",
+        "dependency": "A064",
+        "reason": "Specific Nov 4 TypeError regression on an unchanged flat account"
+      },
+      {
+        "id": "A068",
+        "status": "NEW_PROPOSED_SHADOW",
+        "config": "news_priority_queue.events_before_0915_and_after_0915=true; event_first_seen_and_5m_first_seen_separate=true; do_not_rank_missing_quote_as_executable=true; first_news_event_latency_sla_seconds=300",
+        "dependency": "A066",
+        "reason": "Earnings and adverse study events observed hours late"
+      }
+    ],
+    "experiments_next_session": [
+      {
+        "id": "EXP_ACCOUNTING",
+        "tests": "20 valid flat-account replay days plus 20 TypeError injections",
+        "accept": "100% correct source-bound decimal balance and no false return; preserve null when error",
+        "reject": "Any invented fill, wrong episode, or false certified equity"
+      },
+      {
+        "id": "EXP_SCANNER",
+        "tests": "Five prospective sessions of 5m catalog scanning",
+        "accept": ">=95% evaluated target universe when provider data permits, 100% truthful coverage labeling",
+        "reject": "Any false full-market assertion or stale data counted as complete"
+      },
+      {
+        "id": "EXP_CATALYST",
+        "tests": "30 primary-source earnings/regulatory issuer events",
+        "accept": ">=85% detected within five minutes, >=95% timestamp lineage",
+        "reject": "Any after-cutoff reconstruction credited as early"
+      },
+      {
+        "id": "EXP_MICROCAP",
+        "tests": "20 FTCI/CRIS-like financing and split-risk scenario replays",
+        "accept": "100% structural-risk flags and zero nonqualified entries",
+        "reject": "One unsupported A-grade execution or misclassified reverse split"
+      }
+    ],
+    "metrics_to_confirm_or_reject": [
+      "EOD certification false-positive count",
+      "EOD exception frequency",
+      "Coverage percentage on targeted vs evaluated universe",
+      "Primary-source event detection latency",
+      "Clock-time RVOL and atomic spread availability",
+      "Pre- versus post-qualification 15/30/60m MFE and MAE",
+      "Capital/risk breach and settlement reuse count"
+    ],
+    "unresolved_integrity": [
+      "Official daily return and ending equity still null",
+      "TypeError not repaired",
+      "No immutable 7:00 board",
+      "Retrospective 9:15 plan",
+      "Partial IEX quote, broker eligibility unavailable",
+      "Week marker stale",
+      "Old XLAB exception and $0.04 historical discrepancy",
+      "No verified Codex code deployment"
+    ],
+    "adjustments_prior_effectiveness": "A001-A066 remain INCONCLUSIVE absent certified prospective causal measurements; historical policy designations preserved",
+    "automatic_learning_enabled": false,
+    "changes_deployed": false
+  },
+  "priority_next_session": "Fix the canonical 4:00 PM TypeError and certify a flat cash-only $1,000 episode without creating simulated trades.",
+  "external_sources": [
+    "https://ftcsolar.gcs-web.com/news-releases/news-release-details/ftc-solar-announces-third-quarter-2026-financial-results",
+    "https://www.globenewswire.com/news-release/2026/11/03/3394742/0/en/nurix-therapeutics-announces-sanofi-s-decision-to-discontinue-development-of-stat6-degrader-sar448272.html",
+    "https://www.sec.gov/Archives/edgar/data/1108205/000110820526000078/cris-20260702.htm",
+    "https://www.barrons.com/articles/arista-networks-earnings-stock-price-6bfb2004",
+    "https://www.barrons.com/articles/amdocs-earnings-stock-price-5f5595dc",
+    "https://apnews.com/article/4d12764c0b3ce38ffde3077712811182"
+  ],
+  "source_provenance": {
+    "remote_host": "Mac.attlocal.net",
+    "ledger_verified": true,
+    "report_read": true,
+    "github_0915_read": true,
+    "market_verified_via_web": true
+  }
+}
