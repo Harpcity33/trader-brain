@@ -1,0 +1,366 @@
+{
+  "schema": "TRADER_BRAIN_PAPER_1000_2026_11_04_0915_ARCHIVAL_V1",
+  "date": "2026-11-04",
+  "as_of_et": "2026-11-04T09:15:00-05:00",
+  "archive_created_after_cutoff": true,
+  "never_credit_early_detection": true,
+  "paper_only": true,
+  "legacy_500_excluded": true,
+  "canonical_ledger_mutated": false,
+  "canonical": {
+    "strategy_id": "TRADER_BRAIN_PAPER_1000",
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "portfolio": "/Users/harp/.local/state/trader-brain-paper-episodes/d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac/portfolio.json",
+    "verified_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "recorded_seed": 1000,
+    "recorded_cash": 1000,
+    "certified_equity": null,
+    "settled_buying_power": null,
+    "open_positions": [],
+    "swing_positions": [],
+    "realized_pnl_active_episode": 0,
+    "unrealized_pnl_active_episode": 0,
+    "closed_trades_active_episode": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": null,
+    "cumulative_original_1000_pnl": null,
+    "lifetime_return": null,
+    "recorded_week_start": "2026-10-26",
+    "current_week_start": "2026-11-02",
+    "weekly_lock": false,
+    "certified_weekly_risk_utilization": null,
+    "execution_enabled": false,
+    "learning_enabled": false,
+    "authorized_allocations": 0,
+    "authorized_shares": 0,
+    "authorized_options_contracts": 0,
+    "authorized_new_risk": 0,
+    "retired_same_strategy_episode_not_in_current_pnl": true
+  },
+  "scan": {
+    "saved_scans": [
+      "Titan Daily Price Jumps",
+      "Titan Under-$5 Leaders"
+    ],
+    "results_count": {
+      "daily_price_jumps": 291,
+      "under5": 396
+    },
+    "historic_cutoff": "5minute extended OHLCV bars with bar start<=2026-11-04T14:10:00Z",
+    "vwap": "approximate volume weighted OHLC4",
+    "rvol": "premarket volume / prior average 30 full day volume, not equivalent-time",
+    "spreads": "available only post-9:15 (~09:22 ET), not certified at cutoff",
+    "news_source_cutoff_not_certified": true
+  },
+  "breadth": {
+    "SPY": 1.19,
+    "QQQ": 0.41,
+    "SOXX": -1.44,
+    "XLK": 0.09,
+    "IWM": 1.77,
+    "XLE": -1.06,
+    "TAN": 6.71
+  },
+  "movers": [
+    {
+      "ticker": "ANET",
+      "price": 178,
+      "change_pct": 4.76,
+      "pm_shares": 338140,
+      "pm_turnover_m": 61.5,
+      "pm_over_average_full_day_volume": 0.058,
+      "pm_vwap": 181.883,
+      "pm_low": 175.25,
+      "pm_high": 191.99,
+      "MOVE_ALREADY_CONSUMED_PCT": 36.6,
+      "REMAINING_MOVE_CAPACITY": 64,
+      "catalyst_grade": "A",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "OUST",
+      "price": 32.52,
+      "change_pct": 12.22,
+      "pm_shares": 92158,
+      "pm_turnover_m": 3,
+      "pm_over_average_full_day_volume": 0.035,
+      "pm_vwap": 32.6055,
+      "pm_low": 30.75,
+      "pm_high": 33.5,
+      "MOVE_ALREADY_CONSUMED_PCT": 78.3,
+      "REMAINING_MOVE_CAPACITY": 43,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "AMD",
+      "price": 489.21,
+      "change_pct": 1.1,
+      "pm_shares": 1974396,
+      "pm_turnover_m": 969.87,
+      "pm_over_average_full_day_volume": 0.094,
+      "pm_vwap": 491.2214,
+      "pm_low": 470.7499,
+      "pm_high": 523,
+      "MOVE_ALREADY_CONSUMED_PCT": 13.6,
+      "REMAINING_MOVE_CAPACITY": 58,
+      "catalyst_grade": "A",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "SMCI",
+      "price": 31.39,
+      "change_pct": 0,
+      "pm_shares": 3451472,
+      "pm_turnover_m": 111.8,
+      "pm_over_average_full_day_volume": 0.095,
+      "pm_vwap": 32.3934,
+      "pm_low": 31.08,
+      "pm_high": 34.32,
+      "MOVE_ALREADY_CONSUMED_PCT": 0,
+      "REMAINING_MOVE_CAPACITY": 18,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "DOX",
+      "price": 39.69,
+      "change_pct": -36.42,
+      "pm_shares": 131137,
+      "pm_turnover_m": 4.98,
+      "pm_over_average_full_day_volume": 0.133,
+      "pm_vwap": 37.9505,
+      "pm_low": 34.15,
+      "pm_high": 40.13,
+      "MOVE_ALREADY_CONSUMED_PCT": 80.4,
+      "REMAINING_MOVE_CAPACITY": 24,
+      "catalyst_grade": "A_BEARISH",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "NRIX",
+      "price": 17.4157,
+      "change_pct": -32.55,
+      "pm_shares": 97262,
+      "pm_turnover_m": 1.72,
+      "pm_over_average_full_day_volume": 0.04,
+      "pm_vwap": 17.6548,
+      "pm_low": 17,
+      "pm_high": 19.01,
+      "MOVE_ALREADY_CONSUMED_PCT": 95.3,
+      "REMAINING_MOVE_CAPACITY": 14,
+      "catalyst_grade": "A_BEARISH",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "DUOL",
+      "price": 156.9,
+      "change_pct": 22.58,
+      "pm_shares": 69802,
+      "pm_turnover_m": 10.58,
+      "pm_over_average_full_day_volume": 0.073,
+      "pm_vwap": 151.5687,
+      "pm_low": 142,
+      "pm_high": 157.11,
+      "MOVE_ALREADY_CONSUMED_PCT": 99.3,
+      "REMAINING_MOVE_CAPACITY": 22,
+      "catalyst_grade": "A-",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "NVTS",
+      "price": 9.4,
+      "change_pct": 9.81,
+      "pm_shares": 1366076,
+      "pm_turnover_m": 13.08,
+      "pm_over_average_full_day_volume": 0.088,
+      "pm_vwap": 9.5739,
+      "pm_low": 8.65,
+      "pm_high": 10.07,
+      "MOVE_ALREADY_CONSUMED_PCT": 55.6,
+      "REMAINING_MOVE_CAPACITY": 33,
+      "catalyst_grade": "B+",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "FTCI",
+      "price": 1.85,
+      "change_pct": 27.59,
+      "pm_shares": 14904521,
+      "pm_turnover_m": 26.53,
+      "pm_over_average_full_day_volume": 45.17,
+      "pm_vwap": 1.7798,
+      "pm_low": 1.52,
+      "pm_high": 2.1,
+      "MOVE_ALREADY_CONSUMED_PCT": 61.5,
+      "REMAINING_MOVE_CAPACITY": 15,
+      "catalyst_grade": "B+",
+      "status": "STRUCTURAL_REJECT_DILUTION_FINANCING",
+      "approved_allocation": 0
+    },
+    {
+      "ticker": "CRIS",
+      "price": 1.3891,
+      "change_pct": 94.58,
+      "pm_shares": 39058165,
+      "pm_turnover_m": 58.53,
+      "pm_over_average_full_day_volume": 17.71,
+      "pm_vwap": 1.4985,
+      "pm_low": 0.9361,
+      "pm_high": 2.01,
+      "MOVE_ALREADY_CONSUMED_PCT": 52.1,
+      "REMAINING_MOVE_CAPACITY": 3,
+      "catalyst_grade": "C",
+      "status": "STRUCTURAL_REJECT_RECENT_REVERSE_SPLIT_NO_FRESH_ISSUER_CATALYST",
+      "approved_allocation": 0
+    }
+  ],
+  "historical_90_trading_sessions": {
+    "ANET": {
+      "up_n": 10,
+      "d1": -0.01,
+      "d5": -1.57,
+      "positive_gap_fade": "7/16"
+    },
+    "OUST": {
+      "up_n": 20,
+      "d1": 0.83,
+      "d5": -5.46
+    },
+    "AMD": {
+      "up_n": 13,
+      "d1": -0.3,
+      "d5": -4.25
+    },
+    "SMCI": {
+      "up_n": 18,
+      "d1": 0.09,
+      "d5": -0.67
+    },
+    "DOX": {
+      "down_n": 1,
+      "d1": -0.27,
+      "d5": 3.89
+    },
+    "FTCI": {
+      "up_n": 12,
+      "d1": -1.84,
+      "d5": -7.99
+    },
+    "CRIS": {
+      "up_n": 9,
+      "d1": -0.72,
+      "d5": -3.31,
+      "positive_gap_fade": "20/24"
+    },
+    "NRIX": {
+      "down_n": 3,
+      "d1": -0.75,
+      "d5": 0.82
+    },
+    "DUOL": {
+      "up_n": 15,
+      "d1": 0.09,
+      "d5": -1.03
+    },
+    "NVTS": {
+      "up_n": 17,
+      "d1": -2.34,
+      "d5": -3.81
+    }
+  },
+  "watches_only": [
+    {
+      "ticker": "ANET",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Hold 174-177 reset; after 09:40 complete 5m close >182.30 and RTH VWAP, spread <=0.30%, volume >=1.5x previous five-bar average; QQQ not below -0.5%",
+      "reference_entry": 182.4,
+      "stop": 174.9,
+      "T1": 188,
+      "T2": 191.9,
+      "illustrative_shares": 2,
+      "illustrative_notional": 364.8,
+      "illustrative_stop_risk": 15,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "AMD",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Hold 480-486 reset; after 09:40 5m close >492.50 and RTH VWAP; SOXX stable or reclaiming VWAP; spread <=0.20%",
+      "reference_entry": 493,
+      "stop": 481,
+      "T1": 503,
+      "T2": 514,
+      "illustrative_shares": 1,
+      "illustrative_notional": 493,
+      "illustrative_stop_risk": 12,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "OUST",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "holding": "INTRADAY",
+      "trigger": "Hold 31.50 on reset, then after 09:40 5m close >33.60 and RTH VWAP; spread <=0.35%",
+      "reference_entry": 33.65,
+      "stop": 31.45,
+      "T1": 35.5,
+      "T2": 37.7,
+      "illustrative_shares": 10,
+      "illustrative_notional": 336.5,
+      "illustrative_stop_risk": 22,
+      "actual_shares": 0,
+      "actual_allocation": 0
+    },
+    {
+      "ticker": "DOX",
+      "direction": "BEARISH",
+      "structure": "DEFINED_RISK_PUT_DEBIT_SPREAD_WATCH_UNPRICED",
+      "holding": "INTRADAY",
+      "trigger": "Bounce towards 40-41 rejects RTH VWAP then 5m close <38.80; contemporaneous option bid ask and OI required",
+      "underlying_invalidation": 41.5,
+      "T1_underlying": 36.5,
+      "T2_underlying": 34.15,
+      "option_terms_verified": false,
+      "contracts": 0,
+      "allocation": 0
+    }
+  ],
+  "best_under_5": {
+    "ticker": "FTCI",
+    "classification": "STRONG_FRESH_CATALYST_DISCOVERY_BUT_STRUCTURAL_REJECT",
+    "reason": "Q3 earnings and projects fresh; PM volume 14.9M, spread postcutoff about 0.54%; float ~12.8M, market cap ~26M, prior going-concern caution, credit waivers, equity line $20M; 90d D5 -7.99%; cannot pass structural gate",
+    "approved_allocation": 0
+  },
+  "learning": {
+    "registry": "knowledge/CODEX_ADJUSTMENT_REGISTRY.md",
+    "latest": "knowledge/daily-paper-handoffs/2026-11-03-adjustment-registry-summary.json",
+    "prior_eod": "reports/2026-11-03/TRADER_BRAIN_PAPER_1000_2026-11-03_EOD_review.md",
+    "active_prior_A001_A008": "INCONCLUSIVE",
+    "proposals_A009_A066": "INCONCLUSIVE_SHADOW",
+    "today_tests": [
+      "A065 coverage denominators: 5 sessions, >=95% fully evaluated when provider permits, zero stale-catalog counted as scanned",
+      "A066 timestamp provenance: 30 issuer events across 5 sessions, >=85% detected <=5min, >=95% timestamp lineage, zero retroactive 09:15 credit",
+      "A002 geometry: ANET, AMD, OUST, DOX chase vs after 9:40 5m VWAP/open-range confirmation, measure 15/30/60m MFE MAE 1R/2R",
+      "A054/A064 certified equity: 20 valid flats, 20 corrupt cases, zero false certification",
+      "A001/A010 corporate action: FTCI CRIS structural exclusion, assess avoided gap fade and missed valid move"
+    ]
+  },
+  "note": "Not executable. No real or simulated fills. Canonical active episode only; older $1k episode remains un-reconciled lifetime, $500 never included."
+}
