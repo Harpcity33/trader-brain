@@ -1,0 +1,548 @@
+{
+  "schema": "trader-brain-eod-codex-handoff-v7",
+  "date": "2026-11-05",
+  "generated_for": "end-of-market",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "canonical_sole_authority": {
+    "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "portfolio_sha256": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+    "seed_usd": "1000.00",
+    "last_persisted_cash_usd": "1000.00",
+    "positions": 0,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "official_daily_return_pct": null,
+    "official_ending_equity_usd": null,
+    "certification": "QUARANTINED",
+    "new_stock_entries": 0,
+    "new_options_entries": 0,
+    "recorded_exits": 0,
+    "gross_new_entry_notional_usd": "0.00",
+    "recorded_realized_pnl_usd": "0.00",
+    "recorded_unrealized_pnl_usd": "0.00",
+    "certified_settled_cash_usd": null,
+    "certified_unsettled_proceeds_usd": null,
+    "certified_buying_power_usd": null,
+    "planned_new_trade_risk_usd": "0.00",
+    "realized_new_trade_risk_usd": "0.00",
+    "paper_execution_enabled": false,
+    "adaptive_learning_enabled": false,
+    "week_start_recorded": "2026-10-26",
+    "week_start_actual": "2026-11-02",
+    "historical_episode_merging_prohibited": true,
+    "legacy_500_retired_on": "2026-10-06"
+  },
+  "chronology": {
+    "07:00": "Service/inventory event around 07:00; no immutable complete issuer news board recovered",
+    "09:15": "Read-only morning snapshot was generated AFTER 09:15; correct episode but cannot receive contemporaneous discovery credit; approved shares/options/allocation/risk all zero",
+    "intraday": "Retained IEX read-only historical research; scanner observations are not valid entry or catalyst discovery proof",
+    "16:00": "No open canonical positions; no intraday liquidation needed; certification absent",
+    "16:05": "Local report written with TypeError; official equity, P&L and return null",
+    "source_of_0915": "reports/2026-11-05/TRADER_BRAIN_PAPER_1000_2026-11-05_0915_snapshot.json"
+  },
+  "daily_paper_ledger": [],
+  "unresolved_noncanonical_conflicts": [
+    {
+      "source": "retired Control Center episode",
+      "issue": "historical 78 closures and unresolved XLAB; all excluded, never merge, never invent exit"
+    },
+    {
+      "source": "provisional-signal-book-v1",
+      "canonical": false,
+      "modelled_closed_positions": 2,
+      "modelled_symbols": [
+        "ACRS",
+        "AAL"
+      ],
+      "modelled_losses_usd": [
+        "-0.06",
+        "-0.14"
+      ],
+      "status": "QUARANTINED_NONAUTHORITATIVE",
+      "issue": "Distinct noncanonical modeling worker; none count as official closed trades/P&L or learnable performance; provisional cash 999.80 is NOT canonical cash"
+    },
+    {
+      "source": "older heartbeat catalog",
+      "issue": "Oct 20 stale 30,814 security seed list, separate from freshly published incomplete inventory"
+    }
+  ],
+  "research_audit": {
+    "observation_report_at": "2026-11-05T16:05:12.761116-05:00",
+    "heartbeats": 193,
+    "retained_market_cycles": 75,
+    "completed_market_cycles": 70,
+    "partial_market_cycles": 5,
+    "scheduled_slots": 77,
+    "unaccounted_schedule_slots": 2,
+    "retained_research_observations": 5689,
+    "distinct_observed_symbols": 1556,
+    "last_cycle_targeted_symbols": 12711,
+    "last_cycle_evaluated_symbols": 1088,
+    "last_cycle_effective_evaluation_percent": 8.5595,
+    "last_cycle_technical_signal_observations": 228,
+    "last_cycle_provider": "Alpaca single-venue IEX",
+    "historical_bars_rejection_rows": 23246,
+    "source_catalog_entries": 13241,
+    "resolved_equity_identities": 64,
+    "inventory_fresh_but_incomplete": true,
+    "market_wide_coverage": false,
+    "robinhood_tradability_confirmed": false,
+    "atomic_spreads_confirmed": false,
+    "validated_paper_signals": 0,
+    "policy": "Research observations cannot be promoted into fills."
+  },
+  "mover_audit": {
+    "movers": [
+      {
+        "ticker": "APP",
+        "catalyst_grade": "A",
+        "catalyst_published_et": "2026-11-04 after close",
+        "premarket_0915_reconstructed": {
+          "price": 335.76,
+          "change_pct": 23.55,
+          "cumulative_shares": 512599,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.176,
+          "float_m": 266.6,
+          "modeled_move_consumed_pct": 96.6,
+          "modeled_remaining_capacity_score": 44,
+          "analog90_n": 6,
+          "analog90_d5_pct": -4.16
+        },
+        "first_local_research_observation_et": "2026-11-05T10:50:26-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "APP $355.27 +30.7% at close (independent close report)",
+        "notes": "strong earnings + buyback; 9:15 reconstructed, no early credit",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "U",
+        "catalyst_grade": "A",
+        "catalyst_published_et": "2026-11-05 07:00 ET",
+        "premarket_0915_reconstructed": {
+          "price": 50.3752,
+          "change_pct": 18.64,
+          "cumulative_shares": 2887704,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.179,
+          "float_m": 358.2,
+          "modeled_move_consumed_pct": 66.6,
+          "modeled_remaining_capacity_score": 53,
+          "analog90_n": 14,
+          "analog90_d5_pct": 7.35
+        },
+        "first_local_research_observation_et": "2026-11-05T13:55:08-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "earlier report showed U up >12%; certified close not verified",
+        "notes": "first GAAP quarterly profit and Vector growth; 9:15 reconstructed",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "RUN",
+        "catalyst_grade": "B+",
+        "catalyst_published_et": "2026-11-04 16:01 ET",
+        "premarket_0915_reconstructed": {
+          "price": 10.47,
+          "change_pct": 19.11,
+          "cumulative_shares": 1209838,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.191,
+          "float_m": 232.5,
+          "modeled_move_consumed_pct": 73.1,
+          "modeled_remaining_capacity_score": 39,
+          "analog90_n": 9,
+          "analog90_d5_pct": -4.51
+        },
+        "first_local_research_observation_et": "2026-11-05T12:40:26-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "regular session final close not verified",
+        "notes": "revenue up but weaker subscriber adds and guidance mixed",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "ARQ",
+        "catalyst_grade": "B+",
+        "catalyst_published_et": "2026-11-04 16:33 ET",
+        "premarket_0915_reconstructed": {
+          "price": 2.3682,
+          "change_pct": 28.01,
+          "cumulative_shares": 1771550,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.837,
+          "float_m": 31.8,
+          "modeled_move_consumed_pct": 61.7,
+          "modeled_remaining_capacity_score": 20,
+          "analog90_n": 6,
+          "analog90_d5_pct": -1.39
+        },
+        "first_local_research_observation_et": "2026-11-05T10:20:16-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "$2.28 +23.24% observed at 11:24 ET; not closing price",
+        "notes": "earnings-backed under-$5; cash/debt and spread veto",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "ZNB",
+        "catalyst_grade": "C",
+        "catalyst_published_et": null,
+        "premarket_0915_reconstructed": {
+          "price": 1.27,
+          "change_pct": 104.18,
+          "cumulative_shares": 19628366,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.816,
+          "float_m": 5,
+          "modeled_move_consumed_pct": 53.7,
+          "modeled_remaining_capacity_score": 2,
+          "analog90_n": 14,
+          "analog90_d5_pct": -13.45
+        },
+        "first_local_research_observation_et": null,
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "session close not independently verified",
+        "notes": "1:100 March and 1:8 July reverse splits; no fresh explanatory issuer catalyst",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "QCOM",
+        "catalyst_grade": "A- BEARISH",
+        "catalyst_published_et": "2026-11-04 after close",
+        "premarket_0915_reconstructed": {
+          "price": 152.09,
+          "change_pct": -12.18,
+          "cumulative_shares": 259133,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": 0.416,
+          "float_m": 1060.2,
+          "modeled_move_consumed_pct": 97.8,
+          "modeled_remaining_capacity_score": 24,
+          "analog90_n": 10,
+          "analog90_d5_pct": 2.19
+        },
+        "first_local_research_observation_et": "2026-11-05T15:55:31-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "roughly -11% in contemporary close coverage",
+        "notes": "semiconductor sector decline; no verified option premiums",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "BROS",
+        "catalyst_grade": "A- BEARISH",
+        "catalyst_published_et": "2026-11-04 after close",
+        "premarket_0915_reconstructed": {
+          "price": null,
+          "change_pct": null,
+          "cumulative_shares": null,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": null,
+          "float_m": null,
+          "modeled_move_consumed_pct": null,
+          "modeled_remaining_capacity_score": null,
+          "analog90_n": null,
+          "analog90_d5_pct": null
+        },
+        "first_local_research_observation_et": "2026-11-05T13:05:17-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "$34.39 -21.7% closing board",
+        "notes": "Q3 guidance below estimates despite revenue/EPS beat; missing morning ranked watch",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      },
+      {
+        "ticker": "SNDK",
+        "catalyst_grade": "SECTOR SELL-OFF",
+        "catalyst_published_et": "2026-11-05 during session",
+        "premarket_0915_reconstructed": {
+          "price": null,
+          "change_pct": null,
+          "cumulative_shares": null,
+          "clock_time_rvol": null,
+          "atomic_spread_pct": null,
+          "spread_observed_after_cutoff_pct": null,
+          "float_m": null,
+          "modeled_move_consumed_pct": null,
+          "modeled_remaining_capacity_score": null,
+          "analog90_n": null,
+          "analog90_d5_pct": null
+        },
+        "first_local_research_observation_et": "2026-11-05T12:35:21-05:00",
+        "first_local_catalyst_detection_et": null,
+        "first_executable_setup_at": null,
+        "verified_opening_range_vwap": null,
+        "verified_decision_time_liquidity": null,
+        "verified_current_dilution_status": null,
+        "external_session_observation": "$828.73 -20.1% closing board",
+        "notes": "broad AI semiconductor/storage rout; not issuer-specific fresh event",
+        "discovery_alpha_credit": false,
+        "execution_alpha_credit": false
+      }
+    ],
+    "feature_gaps": [
+      "catalyst first-local-news-detection timestamp",
+      "clock-time-matched RVOL and absolute decision-time eligible volume",
+      "atomic NBBO/executable size",
+      "regular-session VWAP and completed opening range",
+      "current free float/dilution/split on every candidate",
+      "90-day catalyst-matched forward and gap-fade validation",
+      "confirmed remaining executable move"
+    ],
+    "best_under_five": {
+      "ticker": "ARQ",
+      "reason": "Fresh issuer earnings with 9% revenue growth, adjusted EBITDA +71%; $2.3682 reconstructed 09:15, 1.77m PM shares; after-cutoff spread 0.837%, 12% below PM high, unrestricted cash $7.8m against $28.2m debt; first preserved local research 10:20. NOT EXECUTABLE, $0 allocated.",
+      "structural_reject": "ZNB",
+      "certified_executable_under5_trade": null
+    },
+    "market_regime": "Broad Nov 5 risk-off technology/AI selloff: S&P 500 approximately -4.4%, Nasdaq -5.5% by close; APP and U earnings relative strength. Independent external benchmark only.",
+    "discovery_alpha_usd": null,
+    "execution_alpha_usd": null,
+    "missed_executable_profit_usd": null,
+    "no_retrospective_credit": true
+  },
+  "capital_risk_audit": {
+    "strategy_policy_source": "config/paper_options_v1_runtime.json (historical config, deployment verification required)",
+    "normal_trade_risk_percent_reference": [
+      2,
+      3
+    ],
+    "exceptional_trade_risk_percent_max_reference": 4,
+    "weekly_drawdown_lock_percent_reference": 10,
+    "new_trades_realized_risk_usd": "0.00",
+    "risk_limit_breaches_observed": 0,
+    "cash_recycling_observed": false,
+    "illustrative_watches_not_approved": [
+      {
+        "ticker": "U",
+        "shares": 10,
+        "entry": "51.00",
+        "notional": "510.00",
+        "stop": "48.50",
+        "risk": "25.00"
+      },
+      {
+        "ticker": "APP",
+        "shares": 1,
+        "entry": "337.30",
+        "notional": "337.30",
+        "stop": "327.40",
+        "risk": "9.90"
+      },
+      {
+        "ticker": "RUN",
+        "shares": 40,
+        "entry": "10.67",
+        "notional": "426.80",
+        "stop": "10.04",
+        "risk": "25.20"
+      }
+    ],
+    "simultaneous_watch_notional_usd": "1274.10",
+    "simultaneous_watch_risk_usd": "60.10",
+    "concentration_issue": "Three alternatives cannot be considered simultaneously approved; illustrative total is 127.41% of $1,000 and stop-defined risk 6.01% of seed; no actual violation."
+  },
+  "scoreboard": {
+    "basis": "current authoritative episode only; administrative seed is not recovery of retired losses",
+    "seed": "1000.00",
+    "last_recorded_cash": "1000.00",
+    "compounded_equity": null,
+    "cumulative_pnl": null,
+    "cumulative_return": null,
+    "closed_trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": null,
+    "average_win": null,
+    "average_loss": null,
+    "largest_win": null,
+    "largest_loss": null,
+    "profit_factor": null,
+    "expectancy": null,
+    "maximum_drawdown": null,
+    "gross_entry_notional": "0.00",
+    "capital_utilization_pct": "0.00",
+    "mover_trade_win_rate": null,
+    "avg_mover_trade_return": null,
+    "verified_early_movers": 0,
+    "measurable_discovery_alpha": null,
+    "missed_high_quality_movers": "External examples BROS, SNDK and late local U; exact count of actionable misses unknown.",
+    "late_detection": "APP 10:50; U 13:55; RUN 12:40; ARQ 10:20; QCOM 15:55 are first retained research observations only.",
+    "data_integrity_faults": [
+      "TypeError in 16:05 EOD certification",
+      "No immutable verified 07:00 catalyst board",
+      "09:15 archive generated after cutoff",
+      "Two noncanonical provisional closed simulations exist",
+      "Current week marker stale",
+      "Coverage 1088/12711, quote/spread unverified"
+    ]
+  },
+  "grades": {
+    "analysis": "C",
+    "mover_discovery": "D-",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "C",
+    "risk_control": "B-",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_hindsight": "A",
+    "overall": "D",
+    "daily_price_jumps_scanner": "D-"
+  },
+  "learning_loop": {
+    "worked": [
+      "Correct canonical ledger binding, zero fabricated entries and exits",
+      "Scanner evaluation improved to 8.56% final-cycle from 7.54% prior session",
+      "Issuer-backed external 09:15 research distinguished ARQ from structurally weak ZNB"
+    ],
+    "lost_money_or_opportunity": [
+      "No canonical realized trading loss; zero executed positions",
+      "Late historical observation of APP, U, RUN, ARQ and QCOM; BROS bearish catalyst not on 09:15 leading board",
+      "No certified return despite flat account"
+    ],
+    "scanner_misses_late": [
+      "BROS guided below expectations after Nov 4 close, first local research 13:05",
+      "U 07:00 news but first local research 13:55",
+      "QCOM negative news first local research 15:55",
+      "ZNB no retained local observation (correct structural rejection only reconstructed)"
+    ],
+    "scoring_defects": [
+      "Premarket/full-day RVOL proxy not time matched",
+      "Premarket VWAP is not RTH VWAP; no verified completed opening range",
+      "Spreads measured at 09:18–09:19 cannot certify 09:15",
+      "Move-consumed and historical analog scores are unvalidated, small sample"
+    ],
+    "allocation_risk_defects": [
+      "No settled buying power certification",
+      "Watchlist combined notional $1274.10 > $1000; all unapproved",
+      "Noncanonical provisional worker must never alter canonical risk or learning"
+    ],
+    "tomorrow_proposals": [
+      "A069: traceback and deterministic flat-session accounting certificate",
+      "A070: provisional/canonical isolation assertions",
+      "A071: issuer-priority news timestamps, price-confirmation, capital reservation shadow tests"
+    ],
+    "next_session_experiments": [
+      {
+        "adjustment": "A069",
+        "test": {
+          "flat_replays": 20,
+          "error_injections": 20,
+          "minimum_shadow_sessions": 5,
+          "pass": "20/20 correct flat-session certificates, 20/20 errors surfaced with traceback, zero fabricated fills, zero cross-episode balances",
+          "fail": "any false equity certification or missing exception provenance"
+        }
+      },
+      {
+        "adjustment": "A070",
+        "test": {
+          "migration_replays": 20,
+          "provisional_event_replays": 10,
+          "pass": "zero provisional modeled cash/closures promoted into canonical scoreboard or Codex effectiveness; all clashes flagged",
+          "fail": "any unauthorized score/ledger mutation"
+        }
+      },
+      {
+        "adjustment": "A071",
+        "test": {
+          "issuer_events": 30,
+          "shadow_sessions": 5,
+          "cash_reservation_scenarios": 20,
+          "pass": ">=85% issuers noticed <=5min; >=95% timestamp integrity; 20/20 risk/cash reservation tests; zero hindsight credits",
+          "fail": "any unverified quote entry, oversubscribed capital or fabricated trade"
+        }
+      }
+    ],
+    "accept_reject_metrics": [
+      {
+        "adjustment": "A069",
+        "pass": "20/20 correct flat-session certificates, 20/20 errors surfaced with traceback, zero fabricated fills, zero cross-episode balances",
+        "fail": "any false equity certification or missing exception provenance"
+      },
+      {
+        "adjustment": "A070",
+        "pass": "zero provisional modeled cash/closures promoted into canonical scoreboard or Codex effectiveness; all clashes flagged",
+        "fail": "any unauthorized score/ledger mutation"
+      },
+      {
+        "adjustment": "A071",
+        "pass": ">=85% issuers noticed <=5min; >=95% timestamp integrity; 20/20 risk/cash reservation tests; zero hindsight credits",
+        "fail": "any unverified quote entry, oversubscribed capital or fabricated trade"
+      }
+    ],
+    "unresolved_data_integrity": [
+      "Persistent 16:05 TypeError",
+      "Old weekly marker 2026-10-26",
+      "No official day-end valuation",
+      "No verified 07:00 board or on-time 09:15 snapshot",
+      "Cash/settlement unverified",
+      "Only 8.56% of final target had strategy evaluation",
+      "2 provisional modeled closes quarantined"
+    ],
+    "prior_adjustments": {
+      "range": "A001-A068",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "policy_designations_preserved": true,
+      "zero_evidence_based_promotions": true
+    },
+    "new_adjustments": [
+      "A069",
+      "A070",
+      "A071"
+    ],
+    "deployment": "PROPOSED_SHADOW_ONLY",
+    "execution_enabled": false,
+    "auto_learning_enabled": false
+  },
+  "sources": {
+    "canonical_ledger": "Mac local control.sqlite3/portfolio.json as read on Nov 5",
+    "morning_archive": "reports/2026-11-05/TRADER_BRAIN_PAPER_1000_2026-11-05_0915_snapshot.json",
+    "prior_registry": "knowledge/daily-paper-handoffs/2026-11-04-adjustment-registry-summary.json",
+    "arq_issuer": "https://ir.arq.com/news/arq-reports-third-quarter-2026-results/02c37ec9-5954-4de4-9ada-2aa14502735b",
+    "app_issuer": "https://investors.applovin.com/news/news-details/2026/AppLovin-Announces-Third-Quarter-2026-Financial-Results/default.aspx",
+    "run_issuer": "https://investors.sunrun.com/news-events/press-releases/detail/386/sunrun-reports-third-quarter-2026-financial-results",
+    "market_close": "https://apnews.com/article/7ee9c212805aa5e70cf34d25aab7a36e",
+    "mover_close": "https://247wallst.com/cards/applovin-s-30-7-close-to-355-27-topped-a-380-name-board-wh-app-session-movers-01m6prvhr31vvavxtygtw6599c"
+  }
+}
