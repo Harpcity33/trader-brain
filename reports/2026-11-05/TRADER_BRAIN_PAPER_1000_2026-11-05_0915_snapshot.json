@@ -149,6 +149,20 @@
       "published_et": "2026-11-04 afterclose",
       "source": "https://www.reuters.com/business/retail-consumer/qualcomm-slumps-weak-smartphone-chip-sales-overshadow-data-center-momentum-2026-11-05/",
       "facts": "Core handset business disappointing, semiconductor sector weak"
+    },
+    {
+      "ticker": "TPR",
+      "grade": "A-",
+      "published_et": "2026-11-05 premarket",
+      "source": "https://www.reuters.com/business/retail-consumer/tapestry-lifts-annual-forecasts-young-shoppers-snap-up-coach-bags-2026-11-05/",
+      "facts": "Tapestry raised fiscal 2027 revenue outlook to $8.5-$8.6B and EPS outlook $8.25-$8.35; Coach +16% sales, Kate Spade -10%"
+    },
+    {
+      "ticker": "ZNB",
+      "grade": "C",
+      "published_et": "no verified fresh 2026-11-05 issuer event",
+      "source": "https://www.prnewswire.com/news-releases/zeta-network-group-announces-reverse-share-split-302833292.html",
+      "facts": "March 1-for-100 and July 1-for-8 reverse splits in 2026; thin float and micro-cap"
     }
   ],
   "movers": [
@@ -158,7 +172,7 @@
       "change_pct": 23.55,
       "premarket_shares": 512599,
       "premarket_turnover_musd": 166.94,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.093,
       "pm_vwap": 325.6655,
       "pm_low": 309,
       "pm_high": 338,
@@ -175,7 +189,8 @@
         "d5_pct": -4.16,
         "gapfade": "3/6"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread"
     },
     {
       "ticker": "U",
@@ -183,7 +198,7 @@
       "change_pct": 18.64,
       "premarket_shares": 2887704,
       "premarket_turnover_musd": 143,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.289,
       "pm_vwap": 49.5217,
       "pm_low": 41,
       "pm_high": 54.3461,
@@ -200,7 +215,8 @@
         "d5_pct": 7.35,
         "gapfade": "4/9"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "7.3% below premarket high and volatile but still above PM VWAP"
     },
     {
       "ticker": "RUN",
@@ -208,7 +224,7 @@
       "change_pct": 19.11,
       "premarket_shares": 1209838,
       "premarket_turnover_musd": 12.72,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.134,
       "pm_vwap": 10.5157,
       "pm_low": 9.71,
       "pm_high": 11.0868,
@@ -225,7 +241,8 @@
         "d5_pct": -4.51,
         "gapfade": "4/9"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread"
     },
     {
       "ticker": "WRBY",
@@ -233,7 +250,7 @@
       "change_pct": 21.37,
       "premarket_shares": 149914,
       "premarket_turnover_musd": 3.85,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.052,
       "pm_vwap": 25.6716,
       "pm_low": 23.3,
       "pm_high": 26.1799,
@@ -242,7 +259,7 @@
       "REMAINING_MOVE_CAPACITY": 32,
       "spread_after_cutoff_pct": 0.309,
       "float_m": 102.2,
-      "catalyst_grade": "B+",
+      "catalyst_grade": "C+ (issuer result detail not verified)",
       "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
       "analog_90d": {
         "n": 10,
@@ -250,7 +267,8 @@
         "d5_pct": -2.7,
         "gapfade": "5/7"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread; result specifics not independently verified"
     },
     {
       "ticker": "EPAM",
@@ -258,7 +276,7 @@
       "change_pct": 11.4,
       "premarket_shares": 53216,
       "premarket_turnover_musd": 8.34,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.04,
       "pm_vwap": 156.7245,
       "pm_low": 132.48,
       "pm_high": 172,
@@ -275,7 +293,8 @@
         "d5_pct": 4.79,
         "gapfade": "4/9"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "11% below premarket high and below PM VWAP"
     },
     {
       "ticker": "TPR",
@@ -283,7 +302,7 @@
       "change_pct": 14.52,
       "premarket_shares": 27248,
       "premarket_turnover_musd": 3.78,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.009,
       "pm_vwap": 138.7482,
       "pm_low": 127,
       "pm_high": 145.5,
@@ -300,7 +319,8 @@
         "d5_pct": -4.87,
         "gapfade": "1/1"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread"
     },
     {
       "ticker": "SEZL",
@@ -308,7 +328,7 @@
       "change_pct": 31.61,
       "premarket_shares": 26183,
       "premarket_turnover_musd": 4.58,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.044,
       "pm_vwap": 174.8879,
       "pm_low": 170.01,
       "pm_high": 179.9,
@@ -325,7 +345,8 @@
         "d5_pct": -7.38,
         "gapfade": "6/11"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread"
     },
     {
       "ticker": "QCOM",
@@ -333,7 +354,7 @@
       "change_pct": -12.18,
       "premarket_shares": 259133,
       "premarket_turnover_musd": 40.18,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 0.021,
       "pm_vwap": 155.0544,
       "pm_low": 151.61,
       "pm_high": 158.59,
@@ -350,7 +371,8 @@
         "d5_pct": 2.19,
         "gapfade": "9/10"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "No confirmed actual 09:15 executable spread"
     },
     {
       "ticker": "ARQ",
@@ -358,7 +380,7 @@
       "change_pct": 28.01,
       "premarket_shares": 1771550,
       "premarket_turnover_musd": 4.16,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 7.499,
       "pm_vwap": 2.3506,
       "pm_low": 2.21,
       "pm_high": 2.69,
@@ -375,7 +397,8 @@
         "d5_pct": -1.39,
         "gapfade": "3/3"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "12% below PM high and quote spread over 0.8%; small company funding review needed"
     },
     {
       "ticker": "ZNB",
@@ -383,7 +406,7 @@
       "change_pct": 104.18,
       "premarket_shares": 19628366,
       "premarket_turnover_musd": 27.84,
-      "pm_vs_90d_full_day_volume": null,
+      "pm_vs_90d_full_day_volume": 16.079,
       "pm_vwap": 1.4185,
       "pm_low": 0.9665,
       "pm_high": 1.8298,
@@ -400,7 +423,8 @@
         "d5_pct": -13.45,
         "gapfade": "10/14"
       },
-      "approved_allocation": 0
+      "approved_allocation": 0,
+      "note": "March 1:100 and July 1:8 reverse splits; microcap structure"
     }
   ],
   "watches_only": [
