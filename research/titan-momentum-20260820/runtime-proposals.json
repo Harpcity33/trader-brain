@@ -1,0 +1,27 @@
+{
+  "source": "Titan Momentum Intelligence Lab 2026-08-20 handoff",
+  "status": "RESEARCH_PROPOSAL_UNAPPROVED",
+  "mode": "shadow_test_only",
+  "study_window_sessions": 90,
+  "date_max": "2026-08-19",
+  "guardrail": "Do not load these values into live execution without explicit owner approval and independent forward validation.",
+  "priority_hypotheses": [
+    {"rule":"acceleration_score_role","proposal":"Use score to select movement candidates, not predict direction or size conviction","confidence":"SUPPORTED"},
+    {"rule":"preferred_entry","proposal":"Prioritize VWAP_RECLAIM; deprioritize HOD_BREAKOUT","confidence":"SUPPORTED"},
+    {"rule":"momentum_state","proposal":"Retain BUILDING/ACCELERATING/BREAKOUT focus","confidence":"PROMISING_NEEDS_MORE_DATA"},
+    {"rule":"exit_management","proposal":"Shadow-test active trails; TRAIL_1M strongest pooled","confidence":"SUPPORTED"},
+    {"rule":"entry_exit_pair","proposal":"Shadow-test VWAP_RECLAIM + TRAIL_5M","confidence":"PROMISING_NEEDS_MORE_DATA"},
+    {"rule":"pcs","proposal":"Prefer Position Continuation Score over entry score for open-position management","confidence":"SUPPORTED"},
+    {"rule":"extension","proposal":"Measure VWAP extension explicitly and avoid extreme chase entries","confidence":"SUPPORTED"},
+    {"rule":"exhaustion","proposal":"Require large upper wick; strongest tested combo also well off highs + sector reversal","confidence":"SUPPORTED"},
+    {"rule":"under5_reverse_split","proposal":"Retain recent reverse-split rejection","confidence":"SUPPORTED"},
+    {"rule":"under5_listing_risk","proposal":"Retain severe listing-risk rejection","confidence":"SUPPORTED"},
+    {"rule":"late_entry","proposal":"Apply extra skepticism to 14:30-15:30 ET entries","confidence":"PROMISING_NEEDS_MORE_DATA"}
+  ],
+  "explicit_non_promotions": [
+    "Do not change live Acceleration Score 75/85/92 band edges from this study",
+    "Do not use reconstructed score as a directional ranking signal",
+    "Do not weaken dilution rejection from this single in-sample result",
+    "Do not alter option delta or spread filters; they were untestable under source entitlements"
+  ]
+}
