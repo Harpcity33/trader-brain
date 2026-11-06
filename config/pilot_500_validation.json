@@ -1,0 +1,16 @@
+{
+  "version": "pilot-validation-500-v1",
+  "mode": "validation_only",
+  "live_submission_enabled": false,
+  "active_daemon_integration": false,
+  "broker_transport": null,
+  "capital_limit_usd": "500.00",
+  "draft_weekly_loss_limit_usd": "50.00",
+  "draft_planned_trade_loss_limit_usd": "15.00",
+  "modeled_round_trip_cost_usd": "1.30",
+  "maximum_contracts_per_candidate": 1,
+  "note": "The user specified $500 of potential test capital. Funding has not been verified. Loss/cost limits here are validation assumptions derived from the earlier paper plan, not a loss guarantee or live-trading activation.",
+  "account_binding": "Full account identity must come from fresh authenticated broker evidence; no personal account number is stored in this public configuration.",
+  "existing_paper_ledgers": "unchanged",
+  "new_spending_authorized": false
+}
