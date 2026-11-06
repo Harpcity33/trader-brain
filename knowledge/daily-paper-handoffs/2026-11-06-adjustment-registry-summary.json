@@ -1,0 +1,833 @@
+{
+  "schema": "trader-brain-cumulative-adjustment-index-v7",
+  "date": "2026-11-06",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "active_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "previous_full_registry": "knowledge/daily-paper-handoffs/2026-11-05-adjustment-registry-summary.json",
+  "previous_full_registry_blob_sha": "eec5275bd74efad30b758808c09b890c8df910e1",
+  "retained_prior_patch_details_by_reference": true,
+  "measured_effectiveness_rule": "A001–A072: causal impact INCONCLUSIVE until prospective event-level certified evidence. ACTIVE designations are historical policy labels, not proof of implementation or effectiveness.",
+  "adjustments": [
+    {
+      "id": "A001",
+      "title": "Catalyst quality gate for scores >90",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A002",
+      "title": "Remaining Move Capacity penalty",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A003",
+      "title": "Same ticker attempt limit",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A004",
+      "title": "Institutional catalyst priority",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A005",
+      "title": "Fresh 9:15 rebuild",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A006",
+      "title": "Discovery vs execution separation",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A007",
+      "title": "Meaningful allocation",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A008",
+      "title": "Exact ledger integrity",
+      "policy_designation": "ACTIVE",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A009",
+      "title": "Catalyst-direction validation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A010",
+      "title": "Corporate-action / reverse-split structure penalty",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A011",
+      "title": "Authoritative state isolation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A012",
+      "title": "Immutable scanner snapshots",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A013",
+      "title": "Premarket fresh-news coverage",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A014",
+      "title": "Overnight quote health",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A015",
+      "title": "Decision-time catalyst direction and corporate-action gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A016",
+      "title": "Immutable fresh-news / 9:15 / first-detection snapshots",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A017",
+      "title": "Authoritative ledger identity and cash settlement reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A018",
+      "title": "Overnight quote health, partial fill and stop-overrun logging",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A019",
+      "title": "Decision-time high-score evidence quarantine",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A020",
+      "title": "Institutional event sector adjacency discovery",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A021",
+      "title": "Stop-overshoot and quote-health emergency guard",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A022",
+      "title": "Explicit new-impulse reentry gating",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A023",
+      "title": "Canonical-only cash-account journal and GitHub learning ingest",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A024",
+      "title": "Stop-loss sequence breaker",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A025",
+      "title": "Market-regime long-only gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A026",
+      "title": "Pre-market catalyst coverage reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A027",
+      "title": "As-converted supply and transaction structure gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A028",
+      "title": "Immutable 09:15 catalyst sweep and mover timestamping",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A029",
+      "title": "Overnight quote-health fail-closed review",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A030",
+      "title": "Same-ticker repeat-entry counterfactual",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A031",
+      "title": "Quarantine-aware canonical ledger and exact decimal settlement journal",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A032",
+      "title": "Recent reverse split and ADS-ratio structural veto for extreme-score speculative longs",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A033",
+      "title": "Fresh institutional catalyst and market breadth ranking experiment",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A034",
+      "title": "Stop overshoot and quote-data-health pre-entry veto",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A035",
+      "title": "Separate discovered mover, validated watch, and executed edge attribution",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A036",
+      "title": "Hard catalyst-polarity gate for adverse guidance",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A037",
+      "title": "Security-type normalization for warrants and rights",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A038",
+      "title": "Quote-unavailability severity gate and stop reconstruction",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A039",
+      "title": "Resilient immutable canonical EOD snapshot independent of desktop availability",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A040",
+      "title": "Attribute every paper trade notification to an experiment and immutable ledger entry",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A041",
+      "title": "Fail-closed EOD missing-source alert and catch-up reconciliation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A042",
+      "title": "Immutable 9:15 primary-source catalyst sweep across stock sectors",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A043",
+      "title": "Fixed-cash takeover price ceiling and remaining-move gate",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A044",
+      "title": "Replace paid-only market-data dependency with permissioned free/read-only provider chain",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A045",
+      "title": "Fail-closed swing quote-health and independent reference-mark provenance",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A046",
+      "title": "Weekly risk lock calendar rollover and identity invariant",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A047",
+      "title": "Provider entitlement and rate-limit circuit breaker",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A048",
+      "title": "Bounded quote-retry budget and timely swing-monitor outage escalation",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A049",
+      "title": "Certified recovery gate and preauthorized swing-deadline fail-closed protocol",
+      "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A050",
+      "title": "Canonical episode lineage and archived unresolved swing deadline exception",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A051",
+      "title": "Immutable 7AM and 9:15 issuer-event board with decision-time quote and VWAP quality gates",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A052",
+      "title": "Event-prioritized issuer-news discovery ahead of alphabetical rotation",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A053",
+      "title": "Separate technical signal observations from executable quote-validated paper entries",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A054",
+      "title": "Tamper-evident flat-session EOD certification and archived-episode exception ledger",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A055",
+      "title": "Canonical episode resolver for every morning, desk, and EOD snapshot",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A056",
+      "title": "Auto-refresh stale research inventory or fail closed with explicit coverage outage",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A057",
+      "title": "Post-9:15 issuer-event interrupt scanner with timestamped first detection",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A058",
+      "title": "Codex adjustment causal-status evidence gate",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false
+    },
+    {
+      "id": "A059",
+      "title": "As-of cutoff immutable chronology and correct active episode binding",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A054",
+        "A055",
+        "A058"
+      ],
+      "exact_patch": {
+        "canonical_pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+        "reject_legacy_source": true,
+        "require_event_observed_before_cutoff": true,
+        "after_cutoff_status": "RETROSPECTIVE_RECONSTRUCTION_NO_EARLY_CREDIT",
+        "apply_to": [
+          "07:00",
+          "09:15",
+          "desk",
+          "16:00"
+        ],
+        "execution_enabled": false
+      },
+      "test": {
+        "replays": 30,
+        "shadow_sessions": 5,
+        "success": "zero wrong-source acceptance, zero aftercutoff early-credit, 100% source/timestamp lineage",
+        "reject": "any fabricated early discovery or unauthorized fill"
+      }
+    },
+    {
+      "id": "A060",
+      "title": "One-minute bar signal validation and same-symbol direction-flip cooldown",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A022",
+        "A035",
+        "A053"
+      ],
+      "exact_patch": {
+        "use_permitted_one_minute_bars_only": true,
+        "require_completed_bars": true,
+        "require_atomic_quote_and_spread": true,
+        "require_vwap_opening_range": true,
+        "flag_direction_flip_within_minutes": 30,
+        "compare_shadow_cooldown_minutes": 15,
+        "dedupe_key": "episode|ticker|lane|candle_et|direction",
+        "leave_execution_enabled": false
+      },
+      "test": {
+        "shadow_signals": 50,
+        "direction_flips_min": 10,
+        "provider_failure_cases": 20,
+        "success": "at least 95% signal lineage, zero fabricated fills; measure MFE/MAE, whipsaw rate and opportunity cost",
+        "reject": "any unverified quote promoted or missing counterfactual"
+      }
+    },
+    {
+      "id": "A061",
+      "title": "Fail-closed report publication on wrong canonical ledger and cutoff contamination",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A054",
+        "A055",
+        "A059"
+      ],
+      "exact_patch": {
+        "assert_pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+        "required_ledger_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+        "reject_source_prefix": "/Users/harp/.local/state/trader-brain/control-center/",
+        "require_verified_before_cutoff": true,
+        "wrong_source_response": "QUARANTINED_BAD_SOURCE",
+        "new_paper_entries_enabled": false
+      },
+      "test": {
+        "replays": 30,
+        "success": "zero retired-ledger acceptance, zero retrospective early discovery credit",
+        "reject": "any wrong-source official allocation"
+      }
+    },
+    {
+      "id": "A062",
+      "title": "Zero-fresh-scan SLA alert with immutable inventory-age source and coverage counter",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A044",
+        "A056",
+        "A057"
+      ],
+      "exact_patch": {
+        "stale_catalog_max_hours": 24,
+        "no_fresh_scan_alert_minutes": 5,
+        "auto_refresh_if_authorized": true,
+        "on_refresh_failure": "SCANNER_COVERAGE_OUTAGE",
+        "count_seeds_as_scanned": false,
+        "live_scan_coverage_min_pct": 95,
+        "execution_enabled": false
+      },
+      "test": {
+        "sessions": 5,
+        "success": "at least 95% fresh scan-window coverage; outage alert within 5min",
+        "reject": "stale scanner presented as no trading opportunities"
+      }
+    },
+    {
+      "id": "A063",
+      "title": "Differentiate FDA generic ANDA milestone from novel NDA approval in microcap catalyst scores",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A001",
+        "A010",
+        "A015",
+        "A027"
+      ],
+      "exact_patch": {
+        "regulatory_classes": [
+          "ANDA_GENERIC_APPROVAL",
+          "NDA_INDICATION_APPROVAL",
+          "FDA_ACCEPTANCE_FOR_REVIEW",
+          "TRIAL_TOPLINE"
+        ],
+        "require_source_url_and_timestamp": true,
+        "require_as_converted_dilution_check": true,
+        "shadow_only": true,
+        "no_auto_Aplus_for_ANDA_without_market_size_evidence": true
+      },
+      "test": {
+        "cases": 25,
+        "success": "100% correct class; no ANDA incorrectly labeled novel indication; measure A-grade precision",
+        "reject": "any false new-drug label or unsupported A+ promotion"
+      }
+    },
+    {
+      "id": "A064",
+      "title": "Deterministic EOD exception surfacing and source-bound flat-session certification",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "proposal_date": "2026-11-02",
+      "depends_on": [
+        "A054",
+        "A055",
+        "A061"
+      ],
+      "acceptance": "20 injected report errors and 20 flat replays, zero false certifications, source-bound 16:00 snapshots"
+    },
+    {
+      "id": "A065",
+      "title": "Unify effective scanner coverage and timestamp quality across dual inventories",
+      "proposal_date": "2026-11-03",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A044",
+        "A056",
+        "A062"
+      ],
+      "exact_patch": {
+        "inventory_sources": [
+          "legacy_heartbeat_catalog",
+          "active_research_inventory"
+        ],
+        "report_both_separately": true,
+        "freshness_clock_per_source": true,
+        "do_not_count_catalog_seeds_as_scanned": true,
+        "effective_coverage_denominator": "targeted_tradable_symbol_candidates",
+        "valid_evaluation_requires": [
+          "current_session_completed_bars",
+          "provider_eligible",
+          "security_type_normalized",
+          "minimum_bars",
+          "effective_coverage_denominator"
+        ],
+        "threshold_min_pct": 95,
+        "outage_alert_minutes": 5,
+        "execution_enabled": false
+      },
+      "experiment": {
+        "sessions": 5,
+        "inject_stale_heartbeat_catalog": 10,
+        "inject_partial_iex_history": 10,
+        "pass": "100% correct source freshness attribution, >=95% complete actual signal coverage when provider permits, no false full-market claim",
+        "fail": "any heartbeat presented as completed scanner or partial IEX considered consolidated market"
+      }
+    },
+    {
+      "id": "A066",
+      "title": "Event-prioritized cross-source news and late-technical-detection reconciliation",
+      "proposal_date": "2026-11-03",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A051",
+        "A052",
+        "A057",
+        "A059"
+      ],
+      "exact_patch": {
+        "primary_source_first": true,
+        "require_event_publication_at": true,
+        "require_immutable_first_local_news_detection_at": true,
+        "require_separate_first_price_observation_at": true,
+        "do_not_credit_0915_reconstruction": true,
+        "report_lag_minutes": true,
+        "prioritize_catalyst_watch_before_alphabetical_rotation": true,
+        "do_not_promote_without_nbbo_spread_vwap_or_opening_range": true,
+        "cash_account_no_same_day_unsettled_recycling": true,
+        "execution_enabled": false
+      },
+      "experiment": {
+        "event_cases": 30,
+        "shadow_sessions": 5,
+        "priority_tickers": [
+          "GRAB",
+          "LSCC",
+          "BLZE",
+          "AEHR",
+          "NBIX",
+          "MERC",
+          "SHOP"
+        ],
+        "pass": "at least 85% primary-source event recall <=5min for eligible events and >=95% timestamp provenance; 0 fabricated early detections",
+        "fail": "event chronologies retroactively credited, missing data passed as executable"
+      }
+    },
+    {
+      "id": "A067",
+      "title": "EOD TypeError regression and flat-account source-bound exception contract",
+      "policy_designation": "PROPOSED_SHADOW",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "builds_on": [
+        "A064"
+      ],
+      "next_session_test": "20 valid flats + 20 injected TypeError, no false certified return and zero retrospective fills"
+    },
+    {
+      "id": "A068",
+      "title": "Primary-source event priority and distinct first-news versus bar-observation timestamps",
+      "policy_designation": "PROPOSED_SHADOW",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "builds_on": [
+        "A066"
+      ],
+      "next_session_test": "30 primary-source events, >=85% detection <=5min, >=95% chronology coverage, zero retro early credit"
+    },
+    {
+      "id": "A069",
+      "title": "EOD TypeError root-cause traceback and source-bound flat-ledger certification",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A054",
+        "A064",
+        "A067"
+      ],
+      "exact_patch": {
+        "capture_exception_type_message_stack_and_input_hash": true,
+        "canonical_ledger_pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+        "certify_flat_only_after_exact_decimal_cash_position_and_settlement_replay": true,
+        "on_error": "QUARANTINED_OFFICIAL_NULL",
+        "execution_enabled": false
+      },
+      "experiment": {
+        "flat_replays": 20,
+        "error_injections": 20,
+        "minimum_shadow_sessions": 5,
+        "pass": "20/20 correct flat-session certificates, 20/20 errors surfaced with traceback, zero fabricated fills, zero cross-episode balances",
+        "fail": "any false equity certification or missing exception provenance"
+      }
+    },
+    {
+      "id": "A070",
+      "title": "Hard isolation of provisional-signal-book from sole authoritative $1,000 episode",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A011",
+        "A023",
+        "A050",
+        "A055",
+        "A058"
+      ],
+      "exact_patch": {
+        "canonical_strategy_id": "TRADER_BRAIN_PAPER_1000",
+        "canonical_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+        "provisional_book_noncanonical": true,
+        "prohibit_modeling_provisional_closed_trades_as_canonical": true,
+        "require_source_episode_and_contemporaneous_event_chain": true,
+        "learning_enabled": false
+      },
+      "experiment": {
+        "migration_replays": 20,
+        "provisional_event_replays": 10,
+        "pass": "zero provisional modeled cash/closures promoted into canonical scoreboard or Codex effectiveness; all clashes flagged",
+        "fail": "any unauthorized score/ledger mutation"
+      }
+    },
+    {
+      "id": "A071",
+      "title": "Issuer-event priority scanning with market-regime-aware alternative cash/risk reservation",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A002",
+        "A007",
+        "A051",
+        "A060",
+        "A065",
+        "A066",
+        "A068"
+      ],
+      "exact_patch": {
+        "primary_source_alert_priority": true,
+        "news_detected_at_and_quote_observed_at_separate": true,
+        "regime_breadth_gate": true,
+        "require_completed_opening_range_vwap_atomic_spread_and_clock_time_rvol": true,
+        "illustrative_watches_are_mutually_exclusive_until_budget_reserved": true,
+        "reject_total_notional_exceeding_certified_settled_cash": true,
+        "reject_risk_policy_violation": true,
+        "no_unsettled_proceeds_recycling": true,
+        "shadow_only": true
+      },
+      "experiment": {
+        "issuer_events": 30,
+        "shadow_sessions": 5,
+        "cash_reservation_scenarios": 20,
+        "pass": ">=85% issuers noticed <=5min; >=95% timestamp integrity; 20/20 risk/cash reservation tests; zero hindsight credits",
+        "fail": "any unverified quote entry, oversubscribed capital or fabricated trade"
+      }
+    },
+    {
+      "id": "A072",
+      "title": "Host-independent source-bound 16:00 canonical ledger certification and offline fail-closed alert",
+      "proposal_date": "2026-11-06",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "dependencies": [
+        "A039",
+        "A041",
+        "A054",
+        "A055",
+        "A061",
+        "A064",
+        "A067",
+        "A069",
+        "A070"
+      ],
+      "exact_patch": {
+        "strategy_id": "TRADER_BRAIN_PAPER_1000",
+        "canonical_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+        "immutable_snapshot_at_et": "16:00",
+        "source": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+        "publish_read_only_source_bound_snapshot_to": "GitHub knowledge/canonical-checkpoints/YYYY-MM-DD/",
+        "snapshot_fields": [
+          "episode_id",
+          "strategy_id",
+          "ledger_file_sha256",
+          "event_chain_checksum",
+          "event_time_et",
+          "verified_opening_equity",
+          "exact_decimal_cash",
+          "settled_cash",
+          "unsettled_proceeds",
+          "position_lots",
+          "realized_pnl",
+          "fresh_close_marks",
+          "verified_ending_equity",
+          "official_return",
+          "risk_state",
+          "simulation_enabled"
+        ],
+        "on_source_offline": "QUARANTINED_SOURCE_OFFLINE",
+        "on_missing_intraday_events": "QUARANTINED_INCOMPLETE_AUDIT",
+        "on_accounting_exception": "QUARANTINED_EXCEPTION_WITH_TRACEBACK",
+        "never_infer_zero_trades_from_offline_device": true,
+        "never_backfill_fills": true,
+        "always_separate_retired_and_provisional_stores": true,
+        "execution_enabled": false,
+        "adaptive_learning_enabled": false
+      },
+      "experiment": {
+        "flat_session_replays": 20,
+        "offline_disconnect_cases": 10,
+        "corrupt_ledger_cases": 10,
+        "with_recorded_trades_cases": 10,
+        "shadow_sessions": 5,
+        "pass": "100% source+event-chain provenance; zero false 0% returns; zero invented or cross-ledger fills; valid online flat cases certify exact return; outage detected <=5 minutes and explicitly marked null",
+        "fail": "any noncanonical source accepted, stale cash treated as live, missing close mark silently valued, or fabricated trade"
+      },
+      "measured_status": "INCONCLUSIVE"
+    }
+  ],
+  "ledger_sha256_last_verified": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0",
+  "today_additions": [
+    "A072"
+  ],
+  "current_host_status": "OFFLINE; no canonical 2026-11-06 read",
+  "retired_episode_merge_forbidden": true
+}
