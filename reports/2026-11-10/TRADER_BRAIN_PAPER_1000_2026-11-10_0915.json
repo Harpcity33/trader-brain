@@ -16,8 +16,7 @@
     "quote_spreads": "Near 09:15:35 ET or later, NOT exact atomic cutoff NBBO; some stale; not eligible fills",
     "scanner_run_time": "AFTER 09:15 cutoff",
     "daily_jumps_count": 243,
-    "under5_count": null,
-    "under5_count_note": "Run attempted; response count not captured in current audited checkpoint",
+    "under5_count": 340,
     "macro_cpi": {
       "headline_mom_pct": 0.4,
       "consensus_pct": 0.3,
@@ -33,7 +32,8 @@
       "XLV": 0.12,
       "XLF": 0.34,
       "IWM": -0.91
-    }
+    },
+    "under5_count_note": "340 live results retrieved after 09:15; not certified cutoff inventory"
   },
   "canonical": {
     "strategy_id": "TRADER_BRAIN_PAPER_1000",
