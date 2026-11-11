@@ -1,0 +1,1216 @@
+{
+  "schema": "trader-brain-eod-codex-handoff-v11",
+  "date": "2026-11-11",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "paper_only": true,
+  "real_brokerage_claims": false,
+  "report_status": "PARTIAL_CANONICAL_SOURCE_OFFLINE",
+  "active_episode": {
+    "id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+    "pointer": "/Users/harp/.local/state/trader-brain-paper-episodes/canonical-episode.json",
+    "host": "Mac.attlocal.net",
+    "online": false,
+    "last_seen_hours_about": 142,
+    "last_verified": "2026-11-05",
+    "historical_seed_usd": "1000.00",
+    "historical_cash_usd": "1000.00",
+    "historical_positions_count": 0,
+    "historical_closed_trades": 0,
+    "hash_last_read": "61f213a35147dee89d3ba08e4c7eaa9cbe28143d7cfbf73ddb8e6d53b9dc89a0"
+  },
+  "excluded": {
+    "legacy_500_ended": "2026-10-06",
+    "legacy_500_excluded": true,
+    "retired_previous_1000_noncanonical": true,
+    "provisional_signal_book_noncanonical": true,
+    "historical_XLAB_noncanonical": true
+  },
+  "checkpoints": [
+    {
+      "time": "07:00",
+      "status": "NOT_RECOVERED",
+      "first_seen_verified": false
+    },
+    {
+      "time": "09:15",
+      "status": "AFTER_CUTOFF_RECONSTRUCTION",
+      "file": "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-11/TRADER_BRAIN_PAPER_1000_2026-11-11_0915_snapshot.json",
+      "blob_sha": "6dedad0c861fafb8ae85fcba49900466fe4ef164",
+      "daily_jump_results": 238,
+      "under5_results": 389,
+      "first_seen_available": false,
+      "reconstructed_approved_allocation": "0.00",
+      "reconstructed_approved_shares": 0,
+      "reconstructed_approved_contracts": 0
+    },
+    {
+      "time": "09:30-16:00",
+      "status": "CANONICAL_EVENTS_UNAVAILABLE",
+      "actual_simulated_trades": null
+    },
+    {
+      "time": "16:00",
+      "status": "NO_VERIFIED_SOURCE_BOUND_CLOSE",
+      "liquidation_compliance": null,
+      "swing_exception_compliance": null
+    }
+  ],
+  "official_daily_paper_ledger": {
+    "status": "UNVERIFIED_NOT_CONFIRMED_EMPTY",
+    "rows": null,
+    "required_fields": [
+      "ticker",
+      "structure",
+      "catalyst_conviction",
+      "Day_Trade_Score",
+      "entry_time",
+      "entry_price",
+      "quantity_contracts",
+      "entry_notional",
+      "allocation_pct_equity",
+      "stop_invalidation",
+      "T1",
+      "T2",
+      "partial_exits",
+      "final_exit_time_price",
+      "realized_pnl_dollars_pct",
+      "unrealized_pnl_predesignated_swings",
+      "settled_cash",
+      "unsettled_proceeds",
+      "gross_entry_notional",
+      "ending_equity",
+      "daily_return"
+    ],
+    "today_opening_equity_usd": null,
+    "today_ending_equity_usd": null,
+    "today_return_pct": null,
+    "today_realized_pnl_usd": null,
+    "today_unrealized_pnl_usd": null,
+    "today_settled_cash_usd": null,
+    "today_unsettled_proceeds_usd": null,
+    "today_entry_notional_usd": null,
+    "today_entries": null,
+    "today_exits": null
+  },
+  "cumulative_scoreboard": {
+    "start_seed_usd": "1000.00",
+    "historical_last_cash_usd": "1000.00",
+    "historical_as_of": "2026-11-05",
+    "status": "UNVERIFIED_NOT_CARRIED_FORWARD",
+    "compounded_balance": null,
+    "cumulative_pnl": null,
+    "cumulative_return": null,
+    "closed_trades": null,
+    "wins": null,
+    "losses": null,
+    "win_rate": null,
+    "avg_win": null,
+    "avg_loss": null,
+    "largest_win": null,
+    "largest_loss": null,
+    "profit_factor": null,
+    "expectancy": null,
+    "max_drawdown": null,
+    "mean_utilization": null,
+    "peak_utilization": null,
+    "early_movers": null,
+    "missed_high_quality_movers": null,
+    "late_detections": null,
+    "mover_trades": null,
+    "mover_win_rate": null,
+    "average_mover_return": null,
+    "discovery_alpha": null,
+    "execution_alpha": null,
+    "integrity_faults": [
+      "Mac offline approximately 142 hours, canonical episode inaccessible",
+      "Missing immutable 7AM board and first-seen timestamps",
+      "9:15 report constructed after cutoff and 9:20 indicative spreads not decision NBBO",
+      "Intraday scanner and paper-fill event chain inaccessible",
+      "No certified 4PM account positions, equity, settlement or return",
+      "Previous closing TypeError unresolved; A072 not deployed",
+      "Prior stale weekly marker and provisional book isolation not verified",
+      "Massive daily bar access returned NOT_ENTITLED; external prices do not establish executable paper quotes"
+    ]
+  },
+  "market_context": {
+    "Reuters_market_close": "S&P 500 +1.29%, Nasdaq +1.59%, tech led",
+    "source": "https://www.reuters.com/business/sp-500-nasdaq-futures-rise-after-coreweave-soothes-ai-spending-fears-2026-11-11/",
+    "estimated_0915_sector_breadth": {
+      "SPY": 0.95,
+      "QQQ": 1.89,
+      "SOXX": 4.89,
+      "XLK": 2.85,
+      "IWM": 0.87,
+      "XLE": 1.08,
+      "XLV": -0.77
+    },
+    "Massive_subscription_daily_prices_available": false,
+    "external_market_quotes_are_not_canonical": true
+  },
+  "mover_audit": [
+    {
+      "ticker": "CRWV",
+      "reconstructed_rank": 1,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "A",
+      "primary_source_release_time_et": "2026-11-10T16:05:00-05:00",
+      "issuer_source": "https://www.nasdaq.com/press-release/coreweave-reports-strong-third-quarter-2026-results-2026-11-10",
+      "primary_source_catalyst": "$3.66B revenue, higher FY guidance",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 55.1709,
+      "premarket_change_pct": 13.22,
+      "premarket_volume_shares": 6542311,
+      "time_matched_rvol_proxy_max7days": 4.24,
+      "premarket_turnover_musd": 365.65,
+      "spread_indicative_after_cutoff_0920_pct": 0.11,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 55.8894,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 16,
+      "90day_analog_D1_avg_pct": -0.47,
+      "90day_analog_D5_avg_pct": -7.05,
+      "90day_gap_fade_model": "16/22",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 68.7,
+      "remaining_move_score_unverified": 57,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external reported 11/11 close $61.32, +25.84%",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "NVDA",
+      "reconstructed_rank": 2,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "B+ sympathy",
+      "primary_source_release_time_et": null,
+      "issuer_source": null,
+      "primary_source_catalyst": null,
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 174.38,
+      "premarket_change_pct": 3.25,
+      "premarket_volume_shares": 9099367,
+      "time_matched_rvol_proxy_max7days": 2.35,
+      "premarket_turnover_musd": 1596.65,
+      "spread_indicative_after_cutoff_0920_pct": 0.01,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 175.4684,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 3,
+      "90day_analog_D1_avg_pct": -2.59,
+      "90day_analog_D5_avg_pct": -1.93,
+      "90day_gap_fade_model": "6/12",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 58,
+      "remaining_move_score_unverified": 49,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": null,
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "RSKD",
+      "reconstructed_rank": 3,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "A",
+      "primary_source_release_time_et": "2026-11-11T06:45:00-05:00",
+      "issuer_source": "https://ir.riskified.com/news-releases/news-release-details/riskified-reports-strong-third-quarter-2026-accelerating-revenue",
+      "primary_source_catalyst": "+41% revenue, increased outlook",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 10.44,
+      "premarket_change_pct": 23.11,
+      "premarket_volume_shares": 190223,
+      "time_matched_rvol_proxy_max7days": 58.73,
+      "premarket_turnover_musd": 1.96,
+      "spread_indicative_after_cutoff_0920_pct": 0.29,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 10.3207,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 9,
+      "90day_analog_D1_avg_pct": 0.1,
+      "90day_analog_D5_avg_pct": -1.67,
+      "90day_gap_fade_model": "1/3",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 85.6,
+      "remaining_move_score_unverified": 54,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external 12:42 ET $10.12 +19.34%, not final close",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "NBIS",
+      "reconstructed_rank": 4,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "B sympathy",
+      "primary_source_release_time_et": null,
+      "issuer_source": null,
+      "primary_source_catalyst": null,
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 148.38,
+      "premarket_change_pct": 10.73,
+      "premarket_volume_shares": 1567683,
+      "time_matched_rvol_proxy_max7days": 2.36,
+      "premarket_turnover_musd": 236.86,
+      "spread_indicative_after_cutoff_0920_pct": 0.01,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 151.0896,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 19,
+      "90day_analog_D1_avg_pct": 1.23,
+      "90day_analog_D5_avg_pct": -8.35,
+      "90day_gap_fade_model": "15/23",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 70.5,
+      "remaining_move_score_unverified": 43,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": null,
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "FOSL",
+      "reconstructed_rank": 5,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "A-",
+      "primary_source_release_time_et": "2026-11-10T16:05:00-05:00",
+      "issuer_source": "https://www.globenewswire.com/fr/news-release/2026/11/10/3400207/0/en/fossil-group-inc-reports-third-quarter-2026-financial-results.html",
+      "primary_source_catalyst": "Returned to profit and raised outlook",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 9.87,
+      "premarket_change_pct": 25.41,
+      "premarket_volume_shares": 70762,
+      "time_matched_rvol_proxy_max7days": 38.4,
+      "premarket_turnover_musd": 0.69,
+      "spread_indicative_after_cutoff_0920_pct": 0.2,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 9.8173,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 14,
+      "90day_analog_D1_avg_pct": 1.13,
+      "90day_analog_D5_avg_pct": 7.94,
+      "90day_gap_fade_model": "6/11",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 90.1,
+      "remaining_move_score_unverified": 45,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external 10:32 ET $10 +27%, not final close",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "SATL",
+      "reconstructed_rank": 6,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "A-",
+      "primary_source_release_time_et": "2026-11-10T16:05:00-05:00",
+      "issuer_source": "https://www.globenewswire.com/news-release/2026/11/10/3400199/0/en/satellogic-reports-third-quarter-2026-financial-results.html",
+      "primary_source_catalyst": "$16M revenue +342%, $37M sovereign satellite deal; convertible capital risk",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 4.6,
+      "premarket_change_pct": 17.95,
+      "premarket_volume_shares": 456427,
+      "time_matched_rvol_proxy_max7days": 7.59,
+      "premarket_turnover_musd": 2.13,
+      "spread_indicative_after_cutoff_0920_pct": 1.91,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 4.6685,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 20,
+      "90day_analog_D1_avg_pct": -0.46,
+      "90day_analog_D5_avg_pct": 5.93,
+      "90day_gap_fade_model": "7/17",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 80.5,
+      "remaining_move_score_unverified": 39,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external 14:09 ET $4.02 +3.08%, vs reconstructed $4.60 morning",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "GEVO",
+      "reconstructed_rank": 7,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "A-",
+      "primary_source_release_time_et": "2026-11-10T16:01:00-05:00",
+      "issuer_source": "https://www.globenewswire.com/news-release/2026/11/10/3400173/0/en/gevo-reports-record-third-quarter-2026-financial-results.html",
+      "primary_source_catalyst": "$83M revenue, $23M net income, carbon credit nonrecurring component",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 1.68,
+      "premarket_change_pct": 20.86,
+      "premarket_volume_shares": 416570,
+      "time_matched_rvol_proxy_max7days": 24.69,
+      "premarket_turnover_musd": 0.69,
+      "spread_indicative_after_cutoff_0920_pct": 0.59,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 1.6472,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 11,
+      "90day_analog_D1_avg_pct": -2.64,
+      "90day_analog_D5_avg_pct": -3.17,
+      "90day_gap_fade_model": "1/3",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 93.5,
+      "remaining_move_score_unverified": 36,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external Nov 11 daily bar $1.79 +28.78%, high $2.08",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "IREN",
+      "reconstructed_rank": 8,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "B sympathy",
+      "primary_source_release_time_et": null,
+      "issuer_source": null,
+      "primary_source_catalyst": null,
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 21.03,
+      "premarket_change_pct": 6.59,
+      "premarket_volume_shares": 2275702,
+      "time_matched_rvol_proxy_max7days": 1.13,
+      "premarket_turnover_musd": 48.26,
+      "spread_indicative_after_cutoff_0920_pct": null,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 21.206,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 17,
+      "90day_analog_D1_avg_pct": -1.18,
+      "90day_analog_D5_avg_pct": -3.62,
+      "90day_gap_fade_model": "15/27",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 65.3,
+      "remaining_move_score_unverified": 29,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": null,
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "BV",
+      "reconstructed_rank": 9,
+      "decision": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "catalyst_grade": "B+",
+      "primary_source_release_time_et": null,
+      "issuer_source": "https://www.brightview.com/resources/press-release/brightview-reports-fourth-quarter-and-fiscal-2026-results",
+      "primary_source_catalyst": "Land maintenance growth but declining service revenue",
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 9.96,
+      "premarket_change_pct": -12.86,
+      "premarket_volume_shares": 5185,
+      "time_matched_rvol_proxy_max7days": null,
+      "premarket_turnover_musd": 0.05,
+      "spread_indicative_after_cutoff_0920_pct": 19.56,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 9.8629,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 7,
+      "90day_analog_D1_avg_pct": 0.6,
+      "90day_analog_D5_avg_pct": -2.48,
+      "90day_gap_fade_model": "1/2",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 74.6,
+      "remaining_move_score_unverified": 13,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": "external intraday -15.4% around 13:04 ET",
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "SNXX",
+      "reconstructed_rank": 10,
+      "decision": "STRUCTURAL_REJECT",
+      "catalyst_grade": "Leveraged ETF",
+      "primary_source_release_time_et": null,
+      "issuer_source": null,
+      "primary_source_catalyst": null,
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 4.03,
+      "premarket_change_pct": 16.81,
+      "premarket_volume_shares": 6964580,
+      "time_matched_rvol_proxy_max7days": 0.96,
+      "premarket_turnover_musd": 27.76,
+      "spread_indicative_after_cutoff_0920_pct": 0.25,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 3.9861,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 24,
+      "90day_analog_D1_avg_pct": 2.18,
+      "90day_analog_D5_avg_pct": -14.66,
+      "90day_gap_fade_model": "21/36",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 87.9,
+      "remaining_move_score_unverified": 0,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": null,
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    },
+    {
+      "ticker": "HUHU",
+      "reconstructed_rank": 11,
+      "decision": "STRUCTURAL_REJECT",
+      "catalyst_grade": "No verified same-day issuer catalyst",
+      "primary_source_release_time_et": null,
+      "issuer_source": null,
+      "primary_source_catalyst": null,
+      "canonical_first_seen_time": null,
+      "canonical_first_actionable_setup": null,
+      "premarket_price_proxy": 0.4991,
+      "premarket_change_pct": 25.4,
+      "premarket_volume_shares": 28873280,
+      "time_matched_rvol_proxy_max7days": 24.24,
+      "premarket_turnover_musd": 18.83,
+      "spread_indicative_after_cutoff_0920_pct": null,
+      "atomic_decision_NBBO_spread_pct": null,
+      "decision_time_volume": null,
+      "displayed_depth": null,
+      "float_verified": false,
+      "dilution_split_checks_verified": false,
+      "sector_breadth_proxy": {
+        "SPY": 0.95,
+        "QQQ": 1.89,
+        "SOXX": 4.89,
+        "XLK": 2.85,
+        "IWM": 0.87,
+        "XLE": 1.08,
+        "XLV": -0.77
+      },
+      "premarket_HLC3_vwap_proxy": 0.6522,
+      "RTH_VWAP_verified": false,
+      "opening_range_verified": false,
+      "90day_analog_n": 15,
+      "90day_analog_D1_avg_pct": -1.98,
+      "90day_analog_D5_avg_pct": -10.48,
+      "90day_gap_fade_model": "11/15",
+      "catalyst_matched_90day_validation": false,
+      "move_consumed_estimate_unverified_pct": 24.5,
+      "remaining_move_score_unverified": 2,
+      "remaining_executable_move_pct": null,
+      "external_session_outcome_unverified_for_fill": null,
+      "prospective_discovery_credit": false,
+      "execution_credit": false,
+      "canonical_fill": null
+    }
+  ],
+  "best_under5": {
+    "reconstructed_0915_choice": "SATL",
+    "alternative_external_comparison": "GEVO",
+    "SATL_morning_usd": 4.6,
+    "SATL_0920_spread_pct": 1.91,
+    "SATL_external_1409_usd": 4.02,
+    "GEVO_morning_usd": 1.68,
+    "GEVO_0920_spread_pct": 0.59,
+    "GEVO_external_reported_close_usd": 1.79,
+    "GEVO_intraday_high_usd": 2.08,
+    "conclusion": "SATL had late-session fade versus morning; GEVO continuation appears stronger externally, but no prospective executed trade or early discovery credited",
+    "qualified_executable_paper_trade": null
+  },
+  "illustrative_alternatives": [
+    {
+      "ticker": "CRWV",
+      "shares": 12,
+      "entry_usd": 56.2,
+      "stop_usd": 54.4,
+      "T1": 58.1,
+      "T2": 60.4,
+      "notional_usd": 674.4,
+      "stop_risk_usd": 21.6
+    },
+    {
+      "ticker": "RSKD",
+      "shares": 30,
+      "entry_usd": 10.8,
+      "stop_usd": 10.15,
+      "T1": 11.5,
+      "T2": 12.2,
+      "notional_usd": 324,
+      "stop_risk_usd": 19.5
+    },
+    {
+      "ticker": "FOSL",
+      "shares": 30,
+      "entry_usd": 10.2,
+      "stop_usd": 9.61,
+      "T1": 10.8,
+      "T2": 11.5,
+      "notional_usd": 306,
+      "stop_risk_usd": 17.7
+    }
+  ],
+  "illustrative_simultaneous_notional_usd": 1304.4,
+  "illustrative_simultaneous_risk_usd": 58.8,
+  "illustrative_total_notional_pct_last_seed": 130.44,
+  "illustrative_stop_risk_pct_last_seed": 5.88,
+  "not_authorized_or_executed": true,
+  "current_risk_policy_verified": false,
+  "never_recycle_same_day_unsettled_cash": true,
+  "grades": {
+    "analysis": "C",
+    "mover_discovery": "F_UNVERIFIABLE",
+    "execution": "NOT_GRADABLE",
+    "allocation": "NOT_GRADABLE",
+    "risk_control": "NOT_GRADABLE",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_hindsight": "A",
+    "overall": "F_AUDITABILITY",
+    "daily_price_jumps": "F_UNVERIFIABLE"
+  },
+  "learning": {
+    "what_worked": [
+      "Correct strategy identity in 09:15 reconstructed snapshot and zero approved capital",
+      "Primary issuer evidence corroborated CRWV, RSKD, FOSL, SATL and GEVO",
+      "No fabricated ledger entries or hindsight-based discovery credit"
+    ],
+    "lost_money_or_opportunity": [
+      "Actual trading P&L and missed profits unmeasurable with host offline",
+      "External CRWV, RSKD, FOSL and GEVO gains cannot be credited",
+      "SATL appeared to fade strongly from $4.60 morning reference to $4.02 external intraday, highlighting qualification risk"
+    ],
+    "scanner_misses_late": [
+      "Canonical missed/late detections unknown, not proven zero",
+      "No immutable 7AM board",
+      "After-cutoff 9:15 scan lacked first detection timestamps"
+    ],
+    "scoring_defects": [
+      "Seven-session RVOL estimates weak",
+      "HLC3 premarket proxy VWAP is not RTH VWAP",
+      "9:20 indicative spread cannot validate 9:15 execution",
+      "Unvalidated 90-day analog matched samples",
+      "Remaining capacity not executable profit",
+      "SATL vs GEVO shows need to measure post-gap fades prospectively"
+    ],
+    "allocation_risk_defects": [
+      "Current equity/settled cash/daily risk policy unverified",
+      "Unapproved alternatives would exceed historical $1K seed by $304.40 and risk $58.80 at stops",
+      "Cannot verify 4PM closures or settlement, no recycling permitted"
+    ],
+    "rule_changes_next_session": [
+      {
+        "id": "A072",
+        "status": "CARRY_FORWARD",
+        "action": "Immutable, independently retrievable and source-hashed 4PM canonical cash/position/settlement/P&L checkpoint; offline yields NULL"
+      },
+      {
+        "id": "A069",
+        "status": "CARRY_FORWARD",
+        "action": "Capture TypeError traceback, test exact-decimal flat/replay cases"
+      },
+      {
+        "id": "A070",
+        "status": "CARRY_FORWARD",
+        "action": "Prohibit retired and provisional book crossover"
+      },
+      {
+        "id": "A074",
+        "status": "CARRY_FORWARD",
+        "action": "Under-$5 issuer event ranked-or-excluded log with first-seen timestamps"
+      },
+      {
+        "id": "A075",
+        "status": "PROPOSED_SHADOW_ONLY",
+        "action": "Prospective gap fade, liquidity, RTH VWAP and opening range screens at 5/15/30min; no extra risk or execution permission"
+      }
+    ],
+    "tests": [
+      {
+        "id": "A072",
+        "design": "20 flat, 10 offline, 10 corrupt, 10 trade replay fixtures",
+        "pass": "0 false certifications or false 0% returns; exact-decimal and hashes matched",
+        "reject": "any synthetic fill"
+      },
+      {
+        "id": "A074",
+        "design": "30 issuer events, 5 shadow sessions",
+        "pass": ">=90% five minute recall, >=95% timestamp provenance",
+        "reject": "retrospective detection counted as early"
+      },
+      {
+        "id": "A075",
+        "design": "30 under-$5 primary-source events in 5 shadow sessions",
+        "pass": "0 unverified fills and improved prospective favorable MFE/MAE without >10% recall loss",
+        "reject": "degraded risk adjusted result or missing quote accepted"
+      },
+      {
+        "id": "A071",
+        "design": "20 capital allocation scenarios",
+        "pass": "20/20 proper settled-cash reservation",
+        "reject": "any settled cash double counted"
+      }
+    ],
+    "metrics": [
+      "source/hash certificate rate",
+      "false return count",
+      "event recall and latency",
+      "candidate quote spread and RTH VWAP eligibility",
+      "5/15/30 minute MFE MAE and gap fades",
+      "risk-reservation pass rate"
+    ],
+    "unresolved_integrity": [
+      "Mac offline approximately 142 hours, canonical episode inaccessible",
+      "Missing immutable 7AM board and first-seen timestamps",
+      "9:15 report constructed after cutoff and 9:20 indicative spreads not decision NBBO",
+      "Intraday scanner and paper-fill event chain inaccessible",
+      "No certified 4PM account positions, equity, settlement or return",
+      "Previous closing TypeError unresolved; A072 not deployed",
+      "Prior stale weekly marker and provisional book isolation not verified",
+      "Massive daily bar access returned NOT_ENTITLED; external prices do not establish executable paper quotes"
+    ]
+  },
+  "cumulative_registry": "knowledge/daily-paper-handoffs/2026-11-11-adjustment-registry-summary.json",
+  "adjustments_count": 75,
+  "all_measured_effectiveness": "INCONCLUSIVE",
+  "adjustments": [
+    {
+      "id": "A001",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A002",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A003",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A004",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A005",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A006",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A007",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A008",
+      "designation": "ACTIVE",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A009",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A010",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A011",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A012",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A013",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A014",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A015",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A016",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A017",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A018",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A019",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A020",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A021",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A022",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A023",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A024",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A025",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A026",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A027",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A028",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A029",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A030",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A031",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A032",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A033",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A034",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A035",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A036",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A037",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A038",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A039",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A040",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A041",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A042",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A043",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A044",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A045",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A046",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A047",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A048",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A049",
+      "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A050",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A051",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A052",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A053",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A054",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A055",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A056",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A057",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A058",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A059",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A060",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A061",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A062",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A063",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A064",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A065",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A066",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A067",
+      "designation": "PROPOSED_SHADOW",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A068",
+      "designation": "PROPOSED_SHADOW",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A069",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A070",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A071",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A072",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A073",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A074",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    },
+    {
+      "id": "A075",
+      "designation": "PROPOSED_SHADOW_ONLY",
+      "effectiveness": "INCONCLUSIVE"
+    }
+  ],
+  "highest_priority_next_session": "Implement A072 immutable source-bound 16:00 canonical paper-account checkpoint and recover host connectivity",
+  "sources": [
+    "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-11/TRADER_BRAIN_PAPER_1000_2026-11-11_0915_snapshot.json",
+    "https://github.com/Harpcity33/trader-brain/blob/main/knowledge/daily-paper-handoffs/2026-11-11-adjustment-registry-summary.json",
+    "https://www.nasdaq.com/press-release/coreweave-reports-strong-third-quarter-2026-results-2026-11-10",
+    "https://ir.riskified.com/news-releases/news-release-details/riskified-reports-strong-third-quarter-2026-accelerating-revenue",
+    "https://www.globenewswire.com/fr/news-release/2026/11/10/3400207/0/en/fossil-group-inc-reports-third-quarter-2026-financial-results.html",
+    "https://www.globenewswire.com/news-release/2026/11/10/3400199/0/en/satellogic-reports-third-quarter-2026-financial-results.html",
+    "https://www.globenewswire.com/news-release/2026/11/10/3400173/0/en/gevo-reports-record-third-quarter-2026-financial-results.html",
+    "https://www.brightview.com/resources/press-release/brightview-reports-fourth-quarter-and-fiscal-2026-results",
+    "https://chartexchange.com/symbol/nasdaq-gevo/historical/",
+    "https://stockanalysis.com/stocks/satl/history/"
+  ]
+}
