@@ -53,7 +53,8 @@
     "move_consumed": "net previous-close directional movement / maximum same-direction premarket displacement; can mask failed spikes",
     "remaining_move_capacity": "subjective 0-100 score, not calibrated profit probability",
     "analogs": "previous ~90 completed regular sessions; up >=4%, down <=-3%, D+1/D+5 close returns",
-    "gapfade": "prior opening gaps >=2% with same sign; close below/above opening; separate from analog events"
+    "gapfade": "prior opening gaps >=2% with same sign; close below/above opening; separate from analog events",
+    "daily_price_jumps_live_matches_after_cutoff": 248
   },
   "sector_breadth_at_0915_pct": {
     "SPY": 0.47,
