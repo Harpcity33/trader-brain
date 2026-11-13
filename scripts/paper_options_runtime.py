@@ -30,13 +30,15 @@ from titan_brain.paper_options_engine import (
     new_entry_capacity, update_weekly_lock, open_paper_position, close_paper_position,
 )
 
+from titan_brain.paper_reporting import EXPERIMENT_ID, audit_snapshot, report_key, quarantine_legacy_eod
+
 from titan_brain.robinhood_options import PaperMarketData, OptionsUnavailable, probe_robinhood_options
 
 CONFIG_PATH = ROOT / "config/paper_options_v1_runtime.json"
 ENGINE_CONFIG_PATH = ROOT / "config/paper_options_signal_engine.json"
 LOCAL_ENV_PATH = Path.home() / ".config/trader-brain/paper-options.env"
 DEFAULT_STATE_PATH = Path.home() / ".local/state/trader-brain/paper-options-v1.json"
-RUNTIME_VERSION = "paper-v1.2-robinhood-options"
+RUNTIME_VERSION = "paper-v1.3-report-quarantine"
 
 
 def load_local_env(path: Path = LOCAL_ENV_PATH) -> None:
@@ -201,6 +203,8 @@ def queue_notice(state: dict[str, Any], event_id: str, subject: str, body: str,
 
 
 def flush_outbox(state: dict[str, Any], path: Path, now: datetime, sender=send_gmail) -> None:
+    if quarantine_legacy_eod(state["outbox"]):
+        save_state(path, state)
     for item in state["outbox"]:
         if item["status"] != "pending":
             continue
@@ -256,6 +260,9 @@ def maybe_enter(client, cfg, engine, state, signal, now, *, clock=None) -> dict[
     def reject(reason):
         day["audit"].append({"signal": signal_key(signal), "at": now.isoformat(), "result": reason})
         return None
+    if (state.get("starting_equity") != cfg["starting_equity_usd"]
+            or state.get("strategy_id", EXPERIMENT_ID) != EXPERIMENT_ID):
+        return reject("EXPERIMENT_BASIS_MISMATCH")
     if signal_key(signal) in state["notified_signals"]:
         return reject("DUPLICATE_SIGNAL")
     if (state["weekly_lock"] or len(state["positions"]) >= engine["max_open_positions"]
@@ -414,34 +421,46 @@ def premarket_brief(client, engine, state, now) -> None:
     day["premarket_sent"] = True
 
 
-def eod_report(cfg, state, now, close_at) -> None:
+def eod_report(cfg, state, now, close_at, *, source_path=None) -> None:
+    now = now.astimezone(NY)
     day = daily_bucket(state, now.date())
-    if day["eod_sent"] or now < close_at + timedelta(minutes=5):
+    source_path = source_path or state_path()
+    key = report_key(source_path, state, now.date())
+    if day.get("eod_report_key") == key or now < close_at + timedelta(minutes=5):
         return
-    trades = [t for t in state["closed_trades"] if t["closed_at"][:10] == now.date().isoformat()]
-    lines = [f"PAPER REPORT — {now.date()}", f"Indicative equity: ${mark_equity(state):.2f}",
-             f"Realized P&L after modeled slippage/fees: ${sum(t['pnl'] for t in trades):.2f}",
-             f"Open positions (not presumed flat): {len(state['positions'])}",
-             f"Remaining weekly new-entry capacity: ${new_entry_capacity(state, 10, .65):.2f}",
-             f"Weekly loss lock: {state['weekly_lock']}", f"Completed lane scans: {day['scan_count']}"]
-    for lane in ("5m_momentum", "15m_options"):
-        items = [t for t in trades if t["lane"] == lane]
-        gains = sum(max(0, t["pnl"]) for t in items)
-        losses = -sum(min(0, t["pnl"]) for t in items)
-        pnl = sum(t["pnl"] for t in items)
-        factor = f"{gains / losses:.2f}" if losses else "N/A (no losses)"
-        lines.append(f"{lane}: {len(items)} closed, net ${pnl:.2f}, profit factor {factor}, "
-                     f"expectancy {pnl / len(items):.2f}" if items else f"{lane}: no closed trades; statistics N/A")
-    lines += ["Signal/entry/exit quality grades: UNASSESSED — no validated grading rubric yet.",
-              "Risk adherence: " + ("FAIL" if day["risk_violations"] else "PASS on recorded checks" if day["scan_count"] else "N/A"),
-              "Data integrity: " + ("REVIEW" if day["errors"] else "no recorded errors; not a completeness guarantee"),
+    report = audit_snapshot(state, source_path=source_path, trading_date=now.date())
+    day["reporting"] = report
+    day["learning_eligible"] = False
+    observed = report["observed"]
+    lines = [f"PAPER REPORT QUARANTINED — {now.date()}",
+             f"Experiment: {report['experiment_id']}",
+             f"Local source: {report['source_id']} (options-state schema)",
+             f"Runtime: {RUNTIME_VERSION}; report schema: {report['report_version']}",
+             f"Evidence SHA-256: {report['snapshot_sha256']}",
+             "Official experiment equity / daily return: UNAVAILABLE.",
+             "The authoritative stock/options ledger and historical funding basis are unresolved.",
+             "Do not combine, average, select a winning balance, or use these observations for strategy adjustment.",
+             "Local observations below are diagnostic evidence only:"]
+    for field in ("starting_equity", "cash", "indicative_equity", "recorded_daily_realized_pnl",
+                  "recorded_cumulative_realized_pnl", "fill_derived_cash", "cash_discrepancy"):
+        if field in observed:
+            lines.append(f"  {field}: ${observed[field]:.2f}")
+    lines += [f"Open positions (not presumed flat): {observed.get('open_positions', 'UNKNOWN')}",
+              f"Local accounting: {report['local_accounting_status']}",
+              f"Accounting faults: {', '.join(report['faults']) or 'none detected; completeness unverified'}",
+              "Daily equity change: UNAVAILABLE; no verified same-source opening baseline.",
+              "Daily realized P&L is the net result of trades closed today, not a daily equity return.",
+              f"Completed lane scans: {day['scan_count']}",
+              "Data integrity: REVIEW — authoritative experiment reconciliation required.",
+              "Signal/entry/exit quality grades: UNASSESSED.",
               "Inactivity is not a failing grade. Missed setups outside recorded scans: UNKNOWN.",
               f"Recorded rejection reasons: {dict(Counter(a['result'] for a in day['audit']))}",
-              "MAE/MFE are sampled observations, not tick-level extremes.",
-              "Learning review: compare recorded lane outcomes and data gaps; no automatic strategy/risk changes.",
-              "Subscription costs are not deducted: allocations unavailable. No proven trading edge is claimed."]
-    queue_notice(state, f"eod:{now.date()}", "Trader Brain — End of Market Paper Report", "\n".join(lines), now)
+              "Learning eligibility: BLOCKED. Profit factor, expectancy and strategy-adjustment inputs withheld.",
+              "Existing ledgers and recorded positions are preserved; no live broker authority."]
+    queue_notice(state, key, f"Trader Brain — QUARANTINED Paper Evidence [{report['source_id']}]",
+                 "\n".join(lines), now, "EOD_QUARANTINE")
     day["eod_sent"] = True
+    day["eod_report_key"] = key
 
 
 def heartbeat_once(cfg, engine, now, *, client=None, path=None, sender=send_gmail, clock=None) -> dict[str, Any]:
@@ -506,18 +525,20 @@ def heartbeat_once(cfg, engine, now, *, client=None, path=None, sender=send_gmai
                     premarket_brief(client, engine, state, local)
                     if local >= closing and state["positions"]:
                         record_fault(state, day, "UNRESOLVED_AFTER_CLOSE_POSITION", local)
-                    eod_report(cfg, state, local, closing)
+                    eod_report(cfg, state, local, closing, source_path=path)
             except Exception as exc:
                 record_fault(state, day, safe_error(exc), local)
         save_state(path, state)
         if local.weekday() < 5:
             flush_outbox(state, path, clock(), sender)
+        reporting = audit_snapshot(state, source_path=path, trading_date=local.date())
         return {"runtime_version": RUNTIME_VERSION, "pid": os.getpid(), "python_version": sys.version.split()[0],
                 "market_data": cfg["market_data"], "timestamp": local.isoformat(), "mode": "paper_only",
                 "broker_write_authority": False, "openai_api_used": False, "session_open": session,
                 "cadence_seconds": 120, "scans": scans, "entries": entries,
                 "closed": [p["trade_id"] for p in closed], "open_positions": len(state["positions"]),
-                "paper_equity": mark_equity(state), "weekly_lock": state["weekly_lock"],
+                "paper_equity": None, "reporting": reporting, "learning_eligible": False,
+                "weekly_lock": state["weekly_lock"],
                 "decision": "PAPER_BUY" if entries else "NO_TRADE", "data_faults": len(day["errors"])}
 
 
@@ -558,3 +579,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print(json.dumps({"status": "FAIL_CLOSED", "error": safe_error(exc)}), file=sys.stderr)
         raise SystemExit(2)
+

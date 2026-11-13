@@ -111,3 +111,33 @@ class BaselineIntegration(unittest.TestCase):
         self.assertEqual(self.sent,[])
         self.store.enqueue('r','resume');self.engine.apply_commands()
         self.assertFalse(self.store.get('paused'))
+
+
+    def test_cached_heartbeat_and_statistics_are_quarantined(self):
+        self.tick()
+        cached = self.store.get('heartbeat')
+        cached['paper_equity'] = 870.85
+        cached['learning_eligible'] = True
+        self.store.put('heartbeat', cached)
+        before = self.engine.path.read_bytes()
+        snapshot = self.engine.snapshot()
+        self.assertIsNone(snapshot['paper_equity'])
+        self.assertIsNone(snapshot['heartbeat']['paper_equity'])
+        self.assertFalse(snapshot['heartbeat']['learning_eligible'])
+        self.assertFalse(snapshot['learning_eligible'])
+        self.assertEqual(snapshot['reporting']['status'], 'QUARANTINED')
+        self.assertEqual(snapshot['lane_stats'], [])
+        self.assertEqual(before, self.engine.path.read_bytes())
+        self.assertEqual(self.store.get('heartbeat')['paper_equity'], 870.85)
+
+    def test_malformed_portfolio_is_unavailable_without_reseeding(self):
+        for content in ('{', '[]', '{}', '{"cash": "invalid"}',
+                        '{"positions": [], "closed_trades": [], "daily": ["x"]}',
+                        '{"positions": [], "closed_trades": [], "daily": {"2026-10-12": null}}',
+                        '{"positions": [], "closed_trades": [], "daily": {"2026-10-12": {"research": null}}}') :
+            with self.subTest(content=content):
+                self.engine.path.write_text(content)
+                snapshot = self.engine.snapshot()
+                self.assertIsNone(snapshot['paper_equity'])
+                self.assertEqual(snapshot['reporting']['status'], 'QUARANTINED')
+                self.assertEqual(content, self.engine.path.read_text())

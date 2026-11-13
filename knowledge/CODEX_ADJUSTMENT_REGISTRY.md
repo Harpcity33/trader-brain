@@ -8,6 +8,10 @@
 - Legacy $500 experiment status: RETIRED as of 2026-10-06
 - Rule: never mix balances, trades, P&L, deployment metrics, or scoreboards between the retired $500 experiment and the active $1,000 experiment.
 - Rule: one authoritative ledger/state store must be used for EOD reporting and Codex learning. Duplicate state stores are non-authoritative until reconciled.
+- Reporting status as of 2026-10-13: QUARANTINED in the proposed repository fix.
+  No authoritative equity or daily return has been established. See
+  `validation/PAPER_REPORT_RECONCILIATION.md` for implemented guards, tests and
+  required host/history evidence. Repository tests do not establish deployment.
 
 ## Day-over-day learning contract
 
@@ -97,3 +101,4 @@ Each day append:
 8. exact next-session configuration/code changes
 
 Codex should read this registry before modifying ranking, scoring, allocation, risk, or persistence logic.
+
