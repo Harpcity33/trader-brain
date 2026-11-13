@@ -416,7 +416,7 @@
         "historical_d5_pct": -8.63,
         "prior_positive_gap_fades": "6/16",
         "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
-        "issuer_release_timestamp_et": null,
+        "issuer_release_timestamp_et": "2026-11-12T16:05:00-05:00",
         "canonical_first_seen_at_et": null,
         "verified_actionable_setup_at_et": null,
         "genuine_early_discovery_credit": false,
@@ -436,7 +436,8 @@
           "classification": "EXTERNAL_INTRADAY_BENCHMARK_NOT_CLOSE",
           "comment": "Positive company news/earnings; GAAP profit includes non-operating effects and adjusted EBITDA remains deeply negative."
         },
-        "paper_trade": null
+        "paper_trade": null,
+        "issuer_release_timestamp_source": "https://www.globenewswire.com/news-release/2026/11/12/3402187/0/en/merlin-inc-reports-third-quarter-2026-results.html"
       },
       {
         "ticker": "VTSI",
@@ -460,7 +461,7 @@
         "historical_d5_pct": -4.22,
         "prior_positive_gap_fades": "7/8",
         "classification": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
-        "issuer_release_timestamp_et": null,
+        "issuer_release_timestamp_et": "2026-11-12T16:05:00-05:00",
         "canonical_first_seen_at_et": null,
         "verified_actionable_setup_at_et": null,
         "genuine_early_discovery_credit": false,
@@ -480,7 +481,9 @@
           "classification": "EXTERNAL_INTRADAY_BENCHMARK_NOT_CLOSE",
           "comment": "External under-$5 positive earnings move, +42% Q3 revenue, net profitability and backlog; not verified as a timely scan or entry."
         },
-        "paper_trade": null
+        "paper_trade": null,
+        "issuer_release_timestamp_source": "https://www.stocktitan.net/news/VTSI/vir-tra-reports-third-quarter-and-nine-months-2026-financial-0u8vmcgxism1.html",
+        "catalyst_sec_filing_accepted_at_et": "2026-11-12T16:02:00-05:00"
       },
       {
         "ticker": "RZLT",
@@ -640,7 +643,7 @@
     "pm_shares": 6214188,
     "pm_turnover_musd": 8.44,
     "decision": "REJECT_CURRENT_ENTRY_KEEP_ACTIVE_WATCH",
-    "blocking": "0.80% indicative later spread, below PM VWAP proxy, six-week? no: 90-day D+5 -8.63%, adjusted EBITDA loss ~$24.1M and structure check incomplete",
+    "blocking": "Indicative ~09:16 spread 0.80%, below premarket VWAP proxy, non-catalyst-matched historical 90-day D+5 mean -8.63%, adjusted EBITDA loss approximately $24.1M and current capital structure incompletely verified",
     "external_comparison": "VTSI showed +50.76% around 13:22 ET and had strong earnings but 0.59% later spread, small float, and 7/8 positive gap fades in historical model",
     "financing_rejection": "RZLT simultaneous ~$100M equity offering; POAS/RAIN structural veto",
     "qualified_trade": null,
@@ -834,7 +837,7 @@
   },
   "prior_registry_path": "knowledge/daily-paper-handoffs/2026-11-12-adjustment-registry-summary.json",
   "prior_registry_sha": "04949de7096c869ec83d35cc2433ecf2e441e40d",
-  "github_persistence_status": "PENDING_PUBLICATION",
+  "github_persistence_status": "COMMITTED_AND_READ_BACK_VERIFIED",
   "source_links": [
     "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-13/TRADER_BRAIN_PAPER_1000_2026-11-13_0915.md",
     "https://www.reuters.com/business/nasdaq-futures-dip-nvidia-tumult-keeps-investors-edge-2026-11-13/",
