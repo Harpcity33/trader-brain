@@ -1,0 +1,985 @@
+{
+  "schema": "trader-brain-paper-0915-v2026-11-17",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "date": "2026-11-17",
+  "cutoff_time_et": "2026-11-17T09:15:00-05:00",
+  "paper_only": true,
+  "orders_placed": false,
+  "simulated_fills_created": false,
+  "legacy_500_experiment": "RETIRED_2026-10-06_EXCLUDED",
+  "canonical_episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "provenance": {
+    "canonical_host": "Mac.attlocal.net",
+    "canonical_host_online": false,
+    "canonical_host_last_seen_hours_approx": 279,
+    "current_authoritative_ledger_read": false,
+    "latest_recovered_portfolio_as_of": "2026-11-05",
+    "robinhood_scans": "live, after historical cutoff; counts not certified 9:15",
+    "robinhood_premarket_bars": "split-adjusted 5minute completed bars from 04:00-09:14:59 ET, no interpolated bars",
+    "robinhood_quotes": "observed near 09:14 ET, exact timestamp per ticker from quote feed; price book depth not verified",
+    "matched_time_rvol": "today 04:00-09:15 shares divided by median of previous five equivalent windows; null when insufficient previous trading observations",
+    "massive": "top-movers snapshot NOT_ENTITLED; not used for reported metrics",
+    "first_detected_at": null,
+    "actual_9_15_manifest_prospectively_certified": false
+  },
+  "account": {
+    "original_episode_seed_usd": 1000,
+    "last_recovered_paper_cash_usd": 1000,
+    "last_recovered_as_of": "2026-11-05",
+    "current_certified_equity_usd": null,
+    "settled_buying_power_usd": null,
+    "unsettled_proceeds_usd": null,
+    "open_positions": null,
+    "swing_positions": null,
+    "current_realized_pnl_usd": null,
+    "current_unrealized_pnl_usd": null,
+    "current_cumulative_scoreboard": null,
+    "current_week_risk_utilization_pct": null,
+    "continuous_original_1000_lifetime_pnl_usd": null,
+    "last_recorded_execution_enabled": false,
+    "last_recorded_learning_enabled": false,
+    "last_recorded_flags_stale": true,
+    "new_authorized_allocation_usd": 0,
+    "new_authorized_shares": 0,
+    "new_authorized_option_contracts": 0,
+    "new_authorized_stop_defined_risk_usd": 0
+  },
+  "risk_policy": {
+    "source": "config/risk_limits.json",
+    "normal_planned_risk_pct": 3,
+    "a_plus_planned_risk_pct": 4,
+    "pre_market_planned_risk_pct": 2,
+    "max_total_open_planned_risk_pct": 5,
+    "weekly_loss_lock_pct": 12,
+    "daily_new_entry_lock_pct": 6,
+    "hard_daily_loss_kill_pct": 8,
+    "positive_execution_reserve_required": true,
+    "current_applicability": "BLOCKED_NO_USABLE_EQUITY_CERTIFICATE"
+  },
+  "scan_results": {
+    "daily_price_jumps_results_live": 218,
+    "under5_results_live": 384,
+    "note": "Counts were live AFTER the 9:15 reconstruction, not contemporaneous historical count"
+  },
+  "breadth_pct": {
+    "SPY": -0.11,
+    "QQQ": 0.31,
+    "SOXX": 1.9,
+    "IWM": -0.4,
+    "XLF": -0.67,
+    "XLV": -0.94,
+    "XLE": 0.68
+  },
+  "movers": [
+    {
+      "rank": 1,
+      "ticker": "SLS",
+      "direction": "LONG",
+      "cutoff_price": 27.15,
+      "previous_close": 7.47,
+      "change_pct": 263.45,
+      "pm_shares": 10091817,
+      "pm_turnover_m_usd": 280.359,
+      "pm_high": 34,
+      "pm_low": 7.51,
+      "estimated_pm_vwap": 27.7808,
+      "quote_bid_at_snapshot": 27,
+      "quote_ask_at_snapshot": 27.3,
+      "indicative_spread_pct": 1.105,
+      "matched_time_rvol_5_sessions": 132.26,
+      "estimated_float_m_shares": 201.59,
+      "catalyst_grade": "A",
+      "price_pattern_90_session_analog_n": 17,
+      "analog_d1_mean_pct": -2.16,
+      "analog_d5_mean_pct": -4.1,
+      "move_already_consumed_pct": 74.2,
+      "remaining_move_capacity_score_0_to_100": 32,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 2,
+      "ticker": "MRVL",
+      "direction": "LONG",
+      "cutoff_price": 151.67,
+      "previous_close": 145.36,
+      "change_pct": 4.34,
+      "pm_shares": 520098,
+      "pm_turnover_m_usd": 78.75,
+      "pm_high": 155.68,
+      "pm_low": 142.66,
+      "estimated_pm_vwap": 151.4146,
+      "quote_bid_at_snapshot": 151.5,
+      "quote_ask_at_snapshot": 151.67,
+      "indicative_spread_pct": 0.112,
+      "matched_time_rvol_5_sessions": 1.48,
+      "estimated_float_m_shares": 872.326,
+      "catalyst_grade": "B+",
+      "price_pattern_90_session_analog_n": 18,
+      "analog_d1_mean_pct": 0.1,
+      "analog_d5_mean_pct": -2.1,
+      "move_already_consumed_pct": 61.1,
+      "remaining_move_capacity_score_0_to_100": 46,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 3,
+      "ticker": "COHR",
+      "direction": "LONG",
+      "cutoff_price": 218.41,
+      "previous_close": 203.43,
+      "change_pct": 7.36,
+      "pm_shares": 285481,
+      "pm_turnover_m_usd": 62.672,
+      "pm_high": 228.49,
+      "pm_low": 198.02,
+      "estimated_pm_vwap": 219.5296,
+      "quote_bid_at_snapshot": 218.4,
+      "quote_ask_at_snapshot": 218.55,
+      "indicative_spread_pct": 0.069,
+      "matched_time_rvol_5_sessions": 1.87,
+      "estimated_float_m_shares": 188.18,
+      "catalyst_grade": "B-",
+      "price_pattern_90_session_analog_n": 20,
+      "analog_d1_mean_pct": 0.88,
+      "analog_d5_mean_pct": -1.82,
+      "move_already_consumed_pct": 59.8,
+      "remaining_move_capacity_score_0_to_100": 35,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 4,
+      "ticker": "RCAT",
+      "direction": "BEARISH",
+      "cutoff_price": 2.4098,
+      "previous_close": 3.53,
+      "change_pct": -31.73,
+      "pm_shares": 1751796,
+      "pm_turnover_m_usd": 4.181,
+      "pm_high": 2.69,
+      "pm_low": 2.22,
+      "estimated_pm_vwap": 2.3868,
+      "quote_bid_at_snapshot": 2.39,
+      "quote_ask_at_snapshot": 2.42,
+      "indicative_spread_pct": 1.247,
+      "matched_time_rvol_5_sessions": 30.58,
+      "estimated_float_m_shares": 139.54,
+      "catalyst_grade": "A-",
+      "price_pattern_90_session_analog_n": 28,
+      "analog_d1_mean_pct": -0.31,
+      "analog_d5_mean_pct": -1.68,
+      "move_already_consumed_pct": 85.5,
+      "remaining_move_capacity_score_0_to_100": 20,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 5,
+      "ticker": "DIS",
+      "direction": "BEARISH",
+      "cutoff_price": 115.91,
+      "previous_close": 118.7,
+      "change_pct": -2.35,
+      "pm_shares": 175694,
+      "pm_turnover_m_usd": 20.697,
+      "pm_high": 121.98,
+      "pm_low": 114.93,
+      "estimated_pm_vwap": 117.8031,
+      "quote_bid_at_snapshot": 115.88,
+      "quote_ask_at_snapshot": 116.49,
+      "indicative_spread_pct": 0.525,
+      "matched_time_rvol_5_sessions": 52.75,
+      "estimated_float_m_shares": 1723.83,
+      "catalyst_grade": "A-",
+      "price_pattern_90_session_analog_n": 3,
+      "analog_d1_mean_pct": 1.15,
+      "analog_d5_mean_pct": 5.36,
+      "move_already_consumed_pct": 74,
+      "remaining_move_capacity_score_0_to_100": 24,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 6,
+      "ticker": "JD",
+      "direction": "BEARISH",
+      "cutoff_price": 25.76,
+      "previous_close": 27.54,
+      "change_pct": -6.46,
+      "pm_shares": 323429,
+      "pm_turnover_m_usd": 8.459,
+      "pm_high": 27.4,
+      "pm_low": 25.15,
+      "estimated_pm_vwap": 26.1552,
+      "quote_bid_at_snapshot": 25.75,
+      "quote_ask_at_snapshot": 25.82,
+      "indicative_spread_pct": 0.271,
+      "matched_time_rvol_5_sessions": 12.46,
+      "estimated_float_m_shares": 1201.43,
+      "catalyst_grade": "B+",
+      "price_pattern_90_session_analog_n": 3,
+      "analog_d1_mean_pct": -0.74,
+      "analog_d5_mean_pct": -3.55,
+      "move_already_consumed_pct": 74.5,
+      "remaining_move_capacity_score_0_to_100": 25,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 7,
+      "ticker": "HD",
+      "direction": "BEARISH",
+      "cutoff_price": 336.7685,
+      "previous_close": 347.51,
+      "change_pct": -3.09,
+      "pm_shares": 36002,
+      "pm_turnover_m_usd": 12.261,
+      "pm_high": 353,
+      "pm_low": 336.5,
+      "estimated_pm_vwap": 340.5546,
+      "quote_bid_at_snapshot": 336.1,
+      "quote_ask_at_snapshot": 337.74,
+      "indicative_spread_pct": 0.487,
+      "matched_time_rvol_5_sessions": 17.68,
+      "estimated_float_m_shares": 996.87,
+      "catalyst_grade": "B+",
+      "price_pattern_90_session_analog_n": 1,
+      "analog_d1_mean_pct": -0.5,
+      "analog_d5_mean_pct": 0.25,
+      "move_already_consumed_pct": 97.6,
+      "remaining_move_capacity_score_0_to_100": 18,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "rank": 8,
+      "ticker": "AYTU",
+      "direction": "LONG_EVENT",
+      "cutoff_price": 2.6505,
+      "previous_close": 1.82,
+      "change_pct": 45.63,
+      "pm_shares": 440621,
+      "pm_turnover_m_usd": 1.16,
+      "pm_high": 2.66,
+      "pm_low": 2.5201,
+      "estimated_pm_vwap": 2.6333,
+      "quote_bid_at_snapshot": 2.65,
+      "quote_ask_at_snapshot": 2.66,
+      "indicative_spread_pct": 0.377,
+      "matched_time_rvol_5_sessions": null,
+      "estimated_float_m_shares": 9.97,
+      "catalyst_grade": "A-",
+      "price_pattern_90_session_analog_n": 3,
+      "analog_d1_mean_pct": 1.26,
+      "analog_d5_mean_pct": 2.94,
+      "move_already_consumed_pct": 98.9,
+      "remaining_move_capacity_score_0_to_100": 6,
+      "status": "STRUCTURAL_REJECT"
+    },
+    {
+      "rank": 9,
+      "ticker": "GP",
+      "direction": "LONG",
+      "cutoff_price": 2.551,
+      "previous_close": 1.41,
+      "change_pct": 80.92,
+      "pm_shares": 30845352,
+      "pm_turnover_m_usd": 88.108,
+      "pm_high": 3.56,
+      "pm_low": 1.56,
+      "estimated_pm_vwap": 2.8564,
+      "quote_bid_at_snapshot": 2.55,
+      "quote_ask_at_snapshot": 2.56,
+      "indicative_spread_pct": 0.391,
+      "matched_time_rvol_5_sessions": 17995.51,
+      "estimated_float_m_shares": 1.216,
+      "catalyst_grade": "B",
+      "price_pattern_90_session_analog_n": 9,
+      "analog_d1_mean_pct": -3.25,
+      "analog_d5_mean_pct": -6.92,
+      "move_already_consumed_pct": 53.1,
+      "remaining_move_capacity_score_0_to_100": 2,
+      "status": "STRUCTURAL_REJECT"
+    }
+  ],
+  "approved_setups": [],
+  "research_only_setups": [
+    {
+      "ticker": "MRVL",
+      "direction": "LONG",
+      "structure": "STOCK",
+      "swing_designation": "INTRADAY_ONLY",
+      "trigger": "After 09:45 ET and a reset $149-$151 holding $147.40, completed 5-min close >153.30 and above RTH VWAP and actual OR15 high; spread<=0.25%, volume >=1.5x prior 5-bar median, SOXX breadth positive",
+      "illustrative_entry": 153.4,
+      "illustrative_quantity": 4,
+      "illustrative_notional": 613.6,
+      "illustrative_stop": 147.4,
+      "t1": 159.4,
+      "t2": 165.4,
+      "illustrative_nominal_stop_risk_usd": 24,
+      "actual_approved_allocation_usd": 0,
+      "catalyst_grade": "B+",
+      "sector_breadth": "SOXX +1.90%",
+      "historical_d5_pct": -2.1,
+      "remaining_move_capacity_score": 46,
+      "conviction": "MODERATE_DISCOVERY_LOW_CONDITIONAL_ENTRY",
+      "skip": "Any support failure, spread >0.25%, no volume confirmation, OR15 high beyond reference trigger, deteriorating sector breadth, stale buying power, or permissions disabled"
+    }
+  ],
+  "under5": {
+    "best_verified_catalyst": "RCAT bearish earnings/guidance withdrawal; AYTU cash acquisition $2.70; GP small-float earnings spike",
+    "approved_ticker": null,
+    "approved_allocation_usd": 0,
+    "GP": "STRUCTURAL_REJECT tiny float + noncompliance",
+    "AYTU": "STRUCTURAL_REJECT momentum capped by $2.70 cash acquisition and completion risk",
+    "RCAT": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH spread 1.25%, deep down-gap, corporate risk"
+  },
+  "learning": {
+    "registry_source": "knowledge/daily-paper-handoffs/2026-11-16-adjustment-registry-summary.json",
+    "prior_eod_source": "reports/2026-11-16/TRADER_BRAIN_PAPER_1000_2026-11-16_EOD_review.md",
+    "assessments": [
+      {
+        "id": "A001",
+        "title": "Catalyst quality gate for scores >90",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A002",
+        "title": "Remaining Move Capacity penalty",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A003",
+        "title": "Same ticker attempt limit",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A004",
+        "title": "Institutional catalyst priority",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A005",
+        "title": "Fresh 9:15 rebuild",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A006",
+        "title": "Discovery vs execution separation",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A007",
+        "title": "Meaningful allocation",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A008",
+        "title": "Exact ledger integrity",
+        "policy_designation": "ACTIVE",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A009",
+        "title": "Catalyst-direction validation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A010",
+        "title": "Corporate-action / reverse-split structure penalty",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A011",
+        "title": "Authoritative state isolation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A012",
+        "title": "Immutable scanner snapshots",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A013",
+        "title": "Premarket fresh-news coverage",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A014",
+        "title": "Overnight quote health",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A015",
+        "title": "Decision-time catalyst direction and corporate-action gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A016",
+        "title": "Immutable fresh-news / 9:15 / first-detection snapshots",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A017",
+        "title": "Authoritative ledger identity and cash settlement reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A018",
+        "title": "Overnight quote health, partial fill and stop-overrun logging",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A019",
+        "title": "Decision-time high-score evidence quarantine",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A020",
+        "title": "Institutional event sector adjacency discovery",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A021",
+        "title": "Stop-overshoot and quote-health emergency guard",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A022",
+        "title": "Explicit new-impulse reentry gating",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A023",
+        "title": "Canonical-only cash-account journal and GitHub learning ingest",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A024",
+        "title": "Stop-loss sequence breaker",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A025",
+        "title": "Market-regime long-only gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A026",
+        "title": "Pre-market catalyst coverage reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A027",
+        "title": "As-converted supply and transaction structure gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A028",
+        "title": "Immutable 09:15 catalyst sweep and mover timestamping",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A029",
+        "title": "Overnight quote-health fail-closed review",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A030",
+        "title": "Same-ticker repeat-entry counterfactual",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A031",
+        "title": "Quarantine-aware canonical ledger and exact decimal settlement journal",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A032",
+        "title": "Recent reverse split and ADS-ratio structural veto for extreme-score speculative longs",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A033",
+        "title": "Fresh institutional catalyst and market breadth ranking experiment",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A034",
+        "title": "Stop overshoot and quote-data-health pre-entry veto",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A035",
+        "title": "Separate discovered mover, validated watch, and executed edge attribution",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A036",
+        "title": "Hard catalyst-polarity gate for adverse guidance",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A037",
+        "title": "Security-type normalization for warrants and rights",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A038",
+        "title": "Quote-unavailability severity gate and stop reconstruction",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A039",
+        "title": "Resilient immutable canonical EOD snapshot independent of desktop availability",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A040",
+        "title": "Attribute every paper trade notification to an experiment and immutable ledger entry",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A041",
+        "title": "Fail-closed EOD missing-source alert and catch-up reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A042",
+        "title": "Immutable 9:15 primary-source catalyst sweep across stock sectors",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A043",
+        "title": "Fixed-cash takeover price ceiling and remaining-move gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A044",
+        "title": "Replace paid-only market-data dependency with permissioned free/read-only provider chain",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A045",
+        "title": "Fail-closed swing quote-health and independent reference-mark provenance",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A046",
+        "title": "Weekly risk lock calendar rollover and identity invariant",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A047",
+        "title": "Provider entitlement and rate-limit circuit breaker",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A048",
+        "title": "Bounded quote-retry budget and timely swing-monitor outage escalation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A049",
+        "title": "Certified recovery gate and preauthorized swing-deadline fail-closed protocol",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A050",
+        "title": "Canonical episode lineage and archived unresolved swing deadline exception",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A051",
+        "title": "Immutable 7AM and 9:15 issuer-event board with decision-time quote and VWAP quality gates",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A052",
+        "title": "Event-prioritized issuer-news discovery ahead of alphabetical rotation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A053",
+        "title": "Separate technical signal observations from executable quote-validated paper entries",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A054",
+        "title": "Tamper-evident flat-session EOD certification and archived-episode exception ledger",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A055",
+        "title": "Canonical episode resolver for every morning, desk, and EOD snapshot",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A056",
+        "title": "Auto-refresh stale research inventory or fail closed with explicit coverage outage",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A057",
+        "title": "Post-9:15 issuer-event interrupt scanner with timestamped first detection",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A058",
+        "title": "Codex adjustment causal-status evidence gate",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A059",
+        "title": "As-of cutoff immutable chronology and correct active episode binding",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A060",
+        "title": "One-minute bar signal validation and same-symbol direction-flip cooldown",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A061",
+        "title": "Fail-closed report publication on wrong canonical ledger and cutoff contamination",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A062",
+        "title": "Zero-fresh-scan SLA alert with immutable inventory-age source and coverage counter",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A063",
+        "title": "Differentiate FDA generic ANDA milestone from novel NDA approval in microcap catalyst scores",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A064",
+        "title": "Deterministic EOD exception surfacing and source-bound flat-session certification",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A065",
+        "title": "Unify effective scanner coverage and timestamp quality across dual inventories",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A066",
+        "title": "Event-prioritized cross-source news and late-technical-detection reconciliation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A067",
+        "title": "EOD TypeError regression and flat-account source-bound exception contract",
+        "policy_designation": "PROPOSED_SHADOW",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A068",
+        "title": "Primary-source event priority and distinct first-news versus bar-observation timestamps",
+        "policy_designation": "PROPOSED_SHADOW",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A069",
+        "title": "EOD TypeError root-cause traceback and source-bound flat-ledger certification",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A070",
+        "title": "Hard isolation of provisional-signal-book from sole authoritative $1,000 episode",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A071",
+        "title": "Issuer-event priority scanning with market-regime-aware alternative cash/risk reservation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A072",
+        "title": "Host-independent source-bound 16:00 canonical ledger certification and offline fail-closed alert",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A073",
+        "title": "Normalize M&A consideration currency, election rights and price ceiling before momentum scoring",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A074",
+        "title": "Primary-source under-$5 candidate recall and ranked-board omission audit",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A075",
+        "title": "Prospective under-$5 post-gap liquidity and gap-fade calibration (SATL versus GEVO)",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A076",
+        "title": "Catalyst-conditioned downside gap reversal versus persistent selling; prospective path-first validation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A077",
+        "title": "Prospective event-score confidence from timestamped analog sample size and sector-regime flip",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      },
+      {
+        "id": "A078",
+        "title": "Independently retrievable immutable 07:00/09:15 research and approval manifest during host outage",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "evidence_verdict": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "reason": "No prospectively certified canonical paper fills/outcomes establish a causal improvement; retain protective guard only, not claimed alpha."
+      }
+    ],
+    "adjustments_promoted": [],
+    "experiments": [
+      {
+        "id": "A072",
+        "metric": "Zero false certified equity/returns or fills across 20 valid,10 offline,10 corrupted,10 eventful replay cases; cash discrepancy <=$0.01"
+      },
+      {
+        "id": "A078",
+        "metric": "Five prospective sessions; 10 immutable 07:00/09:15 manifests, 10 outages, 10 timestamp faults; zero retrospective attribution"
+      },
+      {
+        "id": "A075",
+        "metric": "30 under-$5 issuer-event audits; record spreads, rejection and 5/15/30min MFE/MAE, float and corporate-action recall"
+      },
+      {
+        "id": "A002_A005",
+        "metric": "MRVL vs SLS initial chase versus VWAP/OR-confirmed entry; 1R/2R, 30/60m MFE/MAE, adverse excursion, fillable spreads"
+      },
+      {
+        "id": "A007",
+        "metric": "Concentrated MRVL stock notional vs same dollar-risk distributed shadow basket; log capital utilization, slippage, expectancy"
+      }
+    ]
+  }
+}
