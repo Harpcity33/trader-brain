@@ -1,0 +1,1443 @@
+{
+  "schema": "TRADER_BRAIN_PAPER_1000_EOD_HANDOFF_v2026_11_18",
+  "date": "2026-11-18",
+  "local_close_timezone": "America/New_York",
+  "review_generated_for": "after 4:00 PM ET regular-session close",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "paper_only": true,
+  "real_brokerage_execution": false,
+  "classification": "RESEARCH_AUDIT_COMPLETE_OFFICIAL_PAPER_ACCOUNT_UNCERTIFIED",
+  "authoritative_host": {
+    "name": "Mac.attlocal.net",
+    "status": "OFFLINE",
+    "last_seen_hours_approx": 310,
+    "ledger_read_today": false,
+    "source": "Desktop Commander device status at review",
+    "historical_last_recovered_cash_usd": "1000.00",
+    "historical_cash_date": "2026-11-05",
+    "historical_only": true
+  },
+  "canonical_daily_ledger": {
+    "certification": "UNAVAILABLE_SOURCE_OFFLINE",
+    "confirmed_empty": false,
+    "official_starting_equity_usd": null,
+    "official_ending_equity_usd": null,
+    "official_daily_return_pct": null,
+    "official_daily_pnl_usd": null,
+    "certified_settled_cash_usd": null,
+    "certified_unsettled_proceeds_usd": null,
+    "verified_open_positions": null,
+    "verified_pre_designated_swings": null,
+    "verified_closed_trades": null,
+    "gross_entry_notional_usd": null,
+    "realized_pnl_usd": null,
+    "unrealized_pnl_usd": null,
+    "trades": null,
+    "required_trade_fields": [
+      "ticker",
+      "instrument",
+      "side",
+      "catalyst_grade",
+      "conviction_grade",
+      "day_trade_score",
+      "entry_timestamp",
+      "simulated_entry_price",
+      "quantity",
+      "entry_notional",
+      "percent_current_equity",
+      "stop_or_invalidation",
+      "t1",
+      "t2",
+      "partial_exits",
+      "final_exit_timestamp",
+      "final_exit_price",
+      "realized_pnl_usd",
+      "realized_pnl_pct",
+      "pre_designated_swing_unrealized_pnl_usd"
+    ],
+    "liquidation_at_16_et_verified": false,
+    "no_retroactive_fills": true
+  },
+  "timeline": [
+    {
+      "checkpoint": "07:00",
+      "immutable_source": "NOT_RECOVERED",
+      "discovery_credit": false
+    },
+    {
+      "checkpoint": "09:15",
+      "source": "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-18/TRADER_BRAIN_PAPER_1000_2026-11-18_0915_snapshot.json",
+      "status": "RECONSTRUCTED_AS_OF_CUTOFF_ARCHIVAL",
+      "as_of_et": "2026-11-18T09:15:00-05:00",
+      "approved_new_notional_usd": 0,
+      "approved_shares": 0,
+      "approved_contracts": 0,
+      "cutoff_provenance": "quote snapshots approximately 09:14:25-09:14:36 ET; first_seen missing; entire checkpoint not immutable by 09:15",
+      "note": "research approval zero only, not proof no subsequent trades"
+    },
+    {
+      "checkpoint": "intraday",
+      "source": "canonical desktop event chain",
+      "status": "INACCESSIBLE",
+      "verified_first_detection_times": 0
+    },
+    {
+      "checkpoint": "16:00",
+      "source": "authoritative cash-account close certificate",
+      "status": "MISSING",
+      "position_close_verified": false
+    },
+    {
+      "checkpoint": "16:20",
+      "source": "post-close review",
+      "status": "MARKET_RESEARCH_ONLY_NOT_OFFICIAL_LEDGER"
+    }
+  ],
+  "morning_scanner": {
+    "positive_jumps_count_observed_after_cutoff": 216,
+    "under5_count_observed_after_cutoff": 395,
+    "counts_immutable_0915": false,
+    "negative_mover_coverage_limited": true
+  },
+  "mover_audit": [
+    {
+      "ticker": "NVDA",
+      "ranking": 1,
+      "side": "LONG",
+      "catalyst_grade": "A",
+      "catalyst_freshness": "2026-11-17 after close",
+      "catalyst_timestamp_et": "2026-11-17T16:20:00-05:00",
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 159.08,
+      "prior_close_usd": 155.46,
+      "premarket_change_pct": 2.33,
+      "premarket_volume_shares": 7804219,
+      "premarket_turnover_usd": 1249932437,
+      "matched_time_rvol_5_sessions": 0.96,
+      "indicative_spread_pct_at_cutoff": 0.044,
+      "estimated_float_m_shares": 23188.5,
+      "premarket_vwap_proxy_usd": 160.16,
+      "pm_high_usd": 161.68,
+      "pm_low_usd": 156.88,
+      "sector_breadth_proxy": "SOXX +1.62% approximately",
+      "analog_sample_n": 3,
+      "analog_d1_return_pct": -2.59,
+      "analog_d5_return_pct": -1.93,
+      "positive_gap_fades": "6/12",
+      "premarket_extension_retained_pct": 58.2,
+      "remaining_move_capacity_subjective_score_0_100": 53,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "2026-11-18 regular-session close $150.96, -2.90% (third-party quote); positive +2.33% reconstructed PM reversed despite strong Nov 17 after-close earnings",
+      "source_url": "https://www.fool.com/coverage/stock-market-today/2026/11/17/stock-market-today-nov-17-nvidia-slides-ahead-of-earnings-but-soars-in-after-hours-trading/",
+      "structure_dilution_risk": "Large institutional earnings beat; below premarket VWAP at cutoff; pullback from premarket peak; no RTH confirmation yet",
+      "after_close_research_classification": "No verified original first_seen, RTH VWAP or OR15; no simulated execution credit",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "BRBR",
+      "ranking": 2,
+      "side": "LONG",
+      "catalyst_grade": "B+",
+      "catalyst_freshness": "2026-11-18 07:00 ET",
+      "catalyst_timestamp_et": "2026-11-18T07:00:00-05:00",
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 13.26,
+      "prior_close_usd": 11.01,
+      "premarket_change_pct": 20.44,
+      "premarket_volume_shares": 148296,
+      "premarket_turnover_usd": 1887501,
+      "matched_time_rvol_5_sessions": null,
+      "indicative_spread_pct_at_cutoff": 0.226,
+      "estimated_float_m_shares": 114.1,
+      "premarket_vwap_proxy_usd": 12.73,
+      "pm_high_usd": 13.53,
+      "pm_low_usd": 10.98,
+      "sector_breadth_proxy": "XLP -0.66% approximately, sparse quote",
+      "analog_sample_n": 12,
+      "analog_d1_return_pct": -0.29,
+      "analog_d5_return_pct": 1.44,
+      "positive_gap_fades": "5/7",
+      "premarket_extension_retained_pct": 89.3,
+      "remaining_move_capacity_subjective_score_0_100": 37,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Final regular-session close not independently verified here",
+      "source_url": "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-18/TRADER_BRAIN_PAPER_1000_2026-11-18_0915.md",
+      "structure_dilution_risk": "Fresh Q4 sales and outlook, but EPS down and CFO exit; absolute premarket trading is only ~$1.9M; extended gap",
+      "after_close_research_classification": "morning $13.26 +20.44%, $1.89M PM turnover, 0.226% quote proxy, no approved fill",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "NBIS",
+      "ranking": 3,
+      "side": "LONG",
+      "catalyst_grade": "B",
+      "catalyst_freshness": "2026-11-18 AI earnings sympathy",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 110.24,
+      "prior_close_usd": 106.035,
+      "premarket_change_pct": 3.97,
+      "premarket_volume_shares": 858043,
+      "premarket_turnover_usd": 96048078,
+      "matched_time_rvol_5_sessions": 0.7,
+      "indicative_spread_pct_at_cutoff": 0.272,
+      "estimated_float_m_shares": 222.5,
+      "premarket_vwap_proxy_usd": 111.94,
+      "pm_high_usd": 115.5,
+      "pm_low_usd": 109.21,
+      "sector_breadth_proxy": "SOXX +1.62%",
+      "analog_sample_n": 21,
+      "analog_d1_return_pct": 1.31,
+      "analog_d5_return_pct": -9.21,
+      "positive_gap_fades": "15/23",
+      "premarket_extension_retained_pct": 44.4,
+      "remaining_move_capacity_subjective_score_0_100": 34,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Independent regular-session closing price not verified",
+      "source_url": null,
+      "structure_dilution_risk": "Strong AI sympathy but below PM VWAP; funding/capex risks",
+      "after_close_research_classification": "AI sympathy, not own fresh positive issuer event; PM spread proxy 0.272%, PM close-price VWAP proxy above mark",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "CRWV",
+      "ranking": 4,
+      "side": "LONG",
+      "catalyst_grade": "B-",
+      "catalyst_freshness": "2026-11-18 AI sector sympathy",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 51.25,
+      "prior_close_usd": 49.89,
+      "premarket_change_pct": 2.73,
+      "premarket_volume_shares": 1345346,
+      "premarket_turnover_usd": 70186091,
+      "matched_time_rvol_5_sessions": 0.98,
+      "indicative_spread_pct_at_cutoff": 0.117,
+      "estimated_float_m_shares": null,
+      "premarket_vwap_proxy_usd": 52.17,
+      "pm_high_usd": 53.6,
+      "pm_low_usd": 51.11,
+      "sector_breadth_proxy": "SOXX +1.62%",
+      "analog_sample_n": 18,
+      "analog_d1_return_pct": -0.13,
+      "analog_d5_return_pct": -5.36,
+      "positive_gap_fades": "16/22",
+      "premarket_extension_retained_pct": 36.7,
+      "remaining_move_capacity_subjective_score_0_100": 29,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Independent regular-session closing price not verified",
+      "source_url": null,
+      "structure_dilution_risk": "Below PM VWAP; high capital needs, no new company catalyst verified",
+      "after_close_research_classification": "No independent fresh positive issuer event; gap fade risk and funding exposure",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "PONY",
+      "ranking": 5,
+      "side": "LONG",
+      "catalyst_grade": "A-",
+      "catalyst_freshness": "2026-11-18 04:00 ET",
+      "catalyst_timestamp_et": "2026-11-18T04:00:00-05:00",
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 4.4,
+      "prior_close_usd": 3.99,
+      "premarket_change_pct": 10.28,
+      "premarket_volume_shares": 382482,
+      "premarket_turnover_usd": 1672521,
+      "matched_time_rvol_5_sessions": null,
+      "indicative_spread_pct_at_cutoff": 1.585,
+      "estimated_float_m_shares": 286.5,
+      "premarket_vwap_proxy_usd": 4.37,
+      "pm_high_usd": 4.5,
+      "pm_low_usd": 4.0608,
+      "sector_breadth_proxy": "Autonomous driving; sector breadth unverified",
+      "analog_sample_n": 9,
+      "analog_d1_return_pct": -2.42,
+      "analog_d5_return_pct": -3.99,
+      "positive_gap_fades": "6/12",
+      "premarket_extension_retained_pct": 80.4,
+      "remaining_move_capacity_subjective_score_0_100": 23,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Fresh Nov 18 earnings; regular-session close not independently verified; no qualified entry",
+      "source_url": "https://www.stocktitan.net/news/PONY/pony-ai-inc-reports-third-quarter-2026-financial-results-total-o7mrwg3rdasa.html",
+      "structure_dilution_risk": "Fresh robotaxi sales growth, large GAAP net loss, low premarket turnover and 1.59% spread; structurally relatively broad float",
+      "after_close_research_classification": "PM spread 1.585%, ~$1.67M PM turnover, insufficient matched RVOL; rejected",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "AMD",
+      "ranking": 6,
+      "side": "LONG",
+      "catalyst_grade": "B-",
+      "catalyst_freshness": "2026-11-18 sector sympathy",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 510.1301,
+      "prior_close_usd": 503.41,
+      "premarket_change_pct": 1.34,
+      "premarket_volume_shares": 283014,
+      "premarket_turnover_usd": 145575411,
+      "matched_time_rvol_5_sessions": 0.41,
+      "indicative_spread_pct_at_cutoff": 0.118,
+      "estimated_float_m_shares": null,
+      "premarket_vwap_proxy_usd": 514.38,
+      "pm_high_usd": 519.928,
+      "pm_low_usd": 508.73,
+      "sector_breadth_proxy": "SOXX +1.62%",
+      "analog_sample_n": 13,
+      "analog_d1_return_pct": 1.85,
+      "analog_d5_return_pct": -1.77,
+      "positive_gap_fades": "7/21",
+      "premarket_extension_retained_pct": 40.7,
+      "remaining_move_capacity_subjective_score_0_100": 27,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Independent regular-session closing price not verified",
+      "source_url": null,
+      "structure_dilution_risk": "Institutional liquidity but weak relative volume and below PM VWAP; expensive for $1K whole shares",
+      "after_close_research_classification": "Sector sympathy, low matched RVOL 0.41x, PM VWAP proxy above 9:15 quote",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "HIHO",
+      "ranking": 7,
+      "side": "LONG",
+      "catalyst_grade": "A-/STRUCTURAL",
+      "catalyst_freshness": "2026-11-18 06:00 ET",
+      "catalyst_timestamp_et": "2026-11-18T06:00:00-05:00",
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 1.7918,
+      "prior_close_usd": 1.23,
+      "premarket_change_pct": 45.67,
+      "premarket_volume_shares": 15500026,
+      "premarket_turnover_usd": 25336847,
+      "matched_time_rvol_5_sessions": null,
+      "indicative_spread_pct_at_cutoff": 0.557,
+      "estimated_float_m_shares": 3.23,
+      "premarket_vwap_proxy_usd": 1.63,
+      "pm_high_usd": 1.97,
+      "pm_low_usd": 1.19,
+      "sector_breadth_proxy": "Industrials positive single-name; breadth unverified",
+      "analog_sample_n": 13,
+      "analog_d1_return_pct": 2.09,
+      "analog_d5_return_pct": -1.19,
+      "positive_gap_fades": "9/11",
+      "premarket_extension_retained_pct": 75.9,
+      "remaining_move_capacity_subjective_score_0_100": 7,
+      "original_research_status": "STRUCTURAL_REJECT",
+      "actual_session_outcome": "Third-party delayed intraday approximately $1.65 (+34.15%), NOT confirmed 4pm close; $1.19-$1.97 tracked range",
+      "source_url": "https://www.stocktitan.net/news/HIHO/highway-holdings-returns-to-strong-revenue-growth-and-operating-o98b6uuss2yo.html",
+      "structure_dilution_risk": "Fresh 107% sales growth, but 3.23M float, Nasdaq noncompliance, and unusual investment/dividend/spin-off structure",
+      "after_close_research_classification": "Fresh revenue +107%, tiny 3.23M estimated float; complex investment/spin-off/dividend and exchange-compliance risk; correct structural research rejection",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "CUE",
+      "ranking": 8,
+      "side": "LONG",
+      "catalyst_grade": "C",
+      "catalyst_freshness": "No verified Nov18 catalyst; Nov16 results",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 3.51,
+      "prior_close_usd": 2.83,
+      "premarket_change_pct": 24.03,
+      "premarket_volume_shares": 493623,
+      "premarket_turnover_usd": 1674650,
+      "matched_time_rvol_5_sessions": null,
+      "indicative_spread_pct_at_cutoff": 0.568,
+      "estimated_float_m_shares": 5.83,
+      "premarket_vwap_proxy_usd": 3.39,
+      "pm_high_usd": 3.6599,
+      "pm_low_usd": 3.06,
+      "sector_breadth_proxy": "Biotech; broad sector unverified",
+      "analog_sample_n": 21,
+      "analog_d1_return_pct": -0.47,
+      "analog_d5_return_pct": -9.01,
+      "positive_gap_fades": "9/12",
+      "premarket_extension_retained_pct": 82,
+      "remaining_move_capacity_subjective_score_0_100": 10,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Close not independently verified",
+      "source_url": null,
+      "structure_dilution_risk": "November 16 financial results weak, no fresh same-day catalyst and spread too wide",
+      "after_close_research_classification": "Nov 16 prior results; no independently verified fresh Nov 18 issuer catalyst; wide proxy spread",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "GMM",
+      "ranking": 9,
+      "side": "LONG",
+      "catalyst_grade": "D",
+      "catalyst_freshness": "No verified fresh issuer catalyst",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 1.6611,
+      "prior_close_usd": 1.39,
+      "premarket_change_pct": 19.5,
+      "premarket_volume_shares": 8962762,
+      "premarket_turnover_usd": 15143392,
+      "matched_time_rvol_5_sessions": 8.42,
+      "indicative_spread_pct_at_cutoff": 0.601,
+      "estimated_float_m_shares": 9.53,
+      "premarket_vwap_proxy_usd": 1.69,
+      "pm_high_usd": 2.11,
+      "pm_low_usd": 1.42,
+      "sector_breadth_proxy": "AI microcap; breadth unverified",
+      "analog_sample_n": 12,
+      "analog_d1_return_pct": -3.18,
+      "analog_d5_return_pct": -9.88,
+      "positive_gap_fades": "11/16",
+      "premarket_extension_retained_pct": 37.7,
+      "remaining_move_capacity_subjective_score_0_100": 8,
+      "original_research_status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "actual_session_outcome": "Close not independently verified",
+      "source_url": null,
+      "structure_dilution_risk": "Premarket high faded; no same-day verified news, poor historical analogs, financing/corporate actions unverified",
+      "after_close_research_classification": "No independently verified fresh Nov18 catalyst, proxy spread 0.601%, 11/16 prior positive-gap fades",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    },
+    {
+      "ticker": "GP",
+      "ranking": 10,
+      "side": "LONG",
+      "catalyst_grade": "D",
+      "catalyst_freshness": "Recent earnings, not verified new Nov18 issuer event",
+      "catalyst_timestamp_et": null,
+      "canonical_first_seen_at_et": null,
+      "early_actionability_verified": false,
+      "premarket_asof_reference_usd": 3.02,
+      "prior_close_usd": 2.62,
+      "premarket_change_pct": 15.27,
+      "premarket_volume_shares": 3747846,
+      "premarket_turnover_usd": 11748667,
+      "matched_time_rvol_5_sessions": null,
+      "indicative_spread_pct_at_cutoff": 1.681,
+      "estimated_float_m_shares": 1.22,
+      "premarket_vwap_proxy_usd": 3.13,
+      "pm_high_usd": 3.4499,
+      "pm_low_usd": 2.59,
+      "sector_breadth_proxy": "Small-cap EV; breadth unverified",
+      "analog_sample_n": 10,
+      "analog_d1_return_pct": -2.99,
+      "analog_d5_return_pct": -5.42,
+      "positive_gap_fades": "11/15",
+      "premarket_extension_retained_pct": 48.2,
+      "remaining_move_capacity_subjective_score_0_100": 2,
+      "original_research_status": "STRUCTURAL_REJECT",
+      "actual_session_outcome": "Close not independently verified",
+      "source_url": null,
+      "structure_dilution_risk": "1-for-5 reverse split effective October 19, tiny float, compliance and dilution risks, weak quotes",
+      "after_close_research_classification": "Recent reverse split, 1.22M estimated float, 1.681% proxy spread, structural reject",
+      "rth_vwap": null,
+      "completed_opening_range": null,
+      "atomic_executable_spread_depth": null,
+      "verified_day_trade_score": null,
+      "verified_execution_edge": false
+    }
+  ],
+  "additional_benchmarks": [
+    {
+      "ticker": "TJX",
+      "date": "2026-11-18",
+      "external_observation": "+10.8% approximately per session mover source",
+      "catalyst": "Q3 sales $15.95B, stronger comp sales; raised FY forecast",
+      "source_url": "https://www.reuters.com/business/off-price-retailer-tjx-beats-quarterly-sales-estimates-2026-11-18/",
+      "morning_top10_rank": null,
+      "full_scanner_membership": "UNAVAILABLE",
+      "first_detection_et": null,
+      "discovery_credit": false,
+      "execution_credit": false,
+      "classification": "external ranked-board omission benchmark only"
+    },
+    {
+      "ticker": "TGT",
+      "date": "2026-11-18",
+      "external_observation": "+6.5% approximately per session mover source",
+      "catalyst": "Q3 $27.07B net sales, +7.1%; earnings beat and higher outlook",
+      "source_url": "https://apnews.com/article/7a0f5f6ddbc171095b060a903595f074",
+      "morning_top10_rank": null,
+      "full_scanner_membership": "UNAVAILABLE",
+      "first_detection_et": null,
+      "discovery_credit": false,
+      "execution_credit": false,
+      "classification": "external ranked-board omission benchmark only"
+    },
+    {
+      "ticker": "AAOI",
+      "date": "2026-11-18",
+      "external_observation": "approximately -9% premarket at 9:08 ET; final session return not verified",
+      "catalyst": "$550M at-the-market common-share sale announced after Nov17 close",
+      "source_url": "https://www.benzinga.com/trading-ideas/movers/26/11/63383084/applied-optoelectronics-stock-slides-on-dollar550m-atm-weeks-after-dollar600m-raise",
+      "morning_top10_rank": null,
+      "full_scanner_membership": "UNAVAILABLE",
+      "first_detection_et": null,
+      "discovery_credit": false,
+      "execution_credit": false,
+      "classification": "bearish issuer-event discovery benchmark"
+    },
+    {
+      "ticker": "UNH",
+      "date": "2026-11-18",
+      "external_observation": "approximately -9% during session per S&P500 movers",
+      "catalyst": "not verified in this audit",
+      "source_url": "https://www.chartmill.com/news/MPC/Chartmill-58889-SP-500-Top-Movers-Gainers-and-Losers-in-the-Nov-18-2026-US-Session",
+      "morning_top10_rank": null,
+      "full_scanner_membership": "UNAVAILABLE",
+      "first_detection_et": null,
+      "discovery_credit": false,
+      "execution_credit": false,
+      "classification": "external sector stress benchmark, cause unverified"
+    }
+  ],
+  "discoveries": {
+    "verified_early_count": null,
+    "verified_late_count": null,
+    "missed_high_quality_count": null,
+    "ranked_board_omissions_in_top10": [
+      "TJX",
+      "TGT",
+      "AAOI"
+    ],
+    "full_scanner_misses_not_proven": true,
+    "discovery_alpha_usd": null,
+    "execution_alpha_usd": null
+  },
+  "best_under_5": {
+    "original_candidate": "PONY",
+    "classification": "FRESH_PRIMARY_EVENT_BUT_REJECT_CURRENT_ENTRY",
+    "why": "Premarket +10.28% at $4.40 on November 18 4am earnings; 382482 PM shares, $1.67M turnover, proxy spread 1.585%, RVOL baseline unavailable, previous D+5 analog mean -3.99% n9; no verified post-open setup or executable quote",
+    "structural_rejects": [
+      "HIHO",
+      "GP"
+    ],
+    "other_unqualified": [
+      "CUE",
+      "GMM"
+    ],
+    "external_hiho_intraday": "HIHO around $1.65, +34.15% in delayed record; not confirmed close",
+    "approved_entry": null,
+    "simulated_pnl": null
+  },
+  "capital_risk": {
+    "policy_source": "config/risk_limits.json reported in archived morning snapshot",
+    "risk_policy": {
+      "source": "config/risk_limits.json",
+      "equity_basis": "broker_confirmed_current_usable_equity",
+      "normal_risk_pct": 3,
+      "exceptional_a_plus_risk_pct": 4,
+      "premarket_risk_pct": 2,
+      "max_total_open_planned_risk_pct": 5,
+      "daily_new_entry_lock_pct": 6,
+      "hard_daily_kill_pct": 8,
+      "weekly_lock_pct": 12,
+      "positive_execution_reserve_required": true,
+      "current_eligibility": "BLOCKED_NO_CERTIFIED_EQUITY_AND_PERMISSIONS"
+    },
+    "current_verified_buying_power": null,
+    "mode": "CASH_ACCOUNT_ASSUMED_FROM_STRATEGY_POLICY_NOT_CONFIRMED_TODAY",
+    "research_only_setups": [
+      {
+        "ticker": "NVDA",
+        "direction": "LONG",
+        "instrument": "stock",
+        "designation": "INTRADAY",
+        "trigger": "after 09:45, 5-minute close above 162.10 AND RTH VWAP AND OR15 high after controlled 157.40-159.00 reset holding 156.80",
+        "reference_entry": 162.2,
+        "stop": 156.7,
+        "t1": 168,
+        "t2": 174,
+        "illustrative_shares": 5,
+        "illustrative_notional_usd": 811,
+        "illustrative_risk_usd": 27.5,
+        "approved_allocation_usd": 0,
+        "skip": "no reset, break of 156.80, opening range high >=162.10, spread >0.25%, sector strength failure, buying power unverified",
+        "conviction": "HIGH_DISCOVERY_LOW_ENTRY"
+      },
+      {
+        "ticker": "BRBR",
+        "direction": "LONG",
+        "instrument": "stock",
+        "designation": "INTRADAY",
+        "trigger": "after 09:45 reset into 12.75-13.05 holding 12.70 then completed 5-minute close above 13.60 AND RTH VWAP AND OR15 high",
+        "reference_entry": 13.7,
+        "stop": 12.95,
+        "t1": 14.55,
+        "t2": 15.5,
+        "illustrative_shares": 30,
+        "illustrative_notional_usd": 411,
+        "illustrative_risk_usd": 22.5,
+        "approved_allocation_usd": 0,
+        "skip": "insufficient institutional RTH volume, no reset, spread >0.30%, opening range above 13.60, unsupported equity",
+        "conviction": "MEDIUM_DISCOVERY_LOW_ENTRY"
+      }
+    ],
+    "illustrative_total_notional_usd": "1222.00",
+    "illustrative_total_stop_risk_usd": "50.00",
+    "percentage_of_original_seed_not_current_equity": "122.20%",
+    "planned_open_risk_seed_pct": "5.00%",
+    "cash_oversubscription_warning": true,
+    "active_approved_new_allocations_from_snapshot_usd": "0.00",
+    "realized_daily_risk_verified": false,
+    "risk_policy_compliance": "UNVERIFIED",
+    "no_unsettled_proceeds_recycling": true
+  },
+  "cumulative_scoreboard": {
+    "initial_seed_usd": "1000.00",
+    "historical_last_recovered_cash_usd": "1000.00",
+    "last_recovered_date": "2026-11-05",
+    "compounded_equity_usd": null,
+    "cumulative_pnl_usd": null,
+    "cumulative_return_pct": null,
+    "closed_trades": null,
+    "wins": null,
+    "losses": null,
+    "win_rate": null,
+    "average_win_usd": null,
+    "average_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "max_drawdown_pct": null,
+    "capital_utilization_avg_pct": null,
+    "capital_utilization_max_pct": null,
+    "verified_discovered_movers": null,
+    "verified_missed_high_quality_movers": null,
+    "stale_or_late_detections": null,
+    "mover_trade_win_rate": null,
+    "average_mover_trade_return_pct": null,
+    "faults": [
+      "Canonical Mac inaccessible",
+      "7am immutable board missing",
+      "09:15 snapshot retrospective provenance and no first_seen",
+      "intraday canonical event chain unavailable",
+      "No source-bound 4pm account certificate",
+      "prior TypeError resolution unverified",
+      "historic administrative episode continuity uncertified"
+    ]
+  },
+  "grades": {
+    "analysis_quality": "C",
+    "mover_discovery": "F_UNVERIFIABLE",
+    "execution": "NOT_GRADABLE",
+    "allocation_concentration": "NOT_GRADABLE",
+    "risk_control": "NOT_GRADABLE",
+    "risk_adjusted_result": "NOT_GRADABLE",
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "overall": "F_AUDITABILITY",
+    "daily_price_jumps_scanner": "F_UNVERIFIABLE"
+  },
+  "learning_loop": {
+    "what_worked": [
+      "Reconstructed 09:15 snapshot bound to correct canonical ID and correctly rejected unauthorized paper entries",
+      "News-backed NVDA/BRBR/PONY and HIHO issuer catalysts identified in research",
+      "Structural rejects for HIHO/GP and risk quarantines retained",
+      "No retrospective simulated fills invented"
+    ],
+    "what_lost_money_or_opportunity": [
+      "No certified trading losses or opportunity P&L available",
+      "Positive Nvidia earnings gap failed: premarket reference +2.33% yet regular close -2.90%; illustrative stock long would have needed independent 09:45 qualification, not automatic buy",
+      "TJX/TGT earnings gains and AAOI dilution decline omitted from recovered top-10 ranked board but full scanner coverage unknown"
+    ],
+    "scanner_misses_late": [
+      "No canonical first_seen timestamps or intraday desk events; exact misses/latencies unknown",
+      "Positive-price-jump screener alone underrepresents AAOI-style bearish disclosures",
+      "Retrospective counts 216/395 are not immutable at 09:15"
+    ],
+    "scoring_defects": [
+      "Premarket price-close-weighted VWAP proxy is not trade VWAP",
+      "NVDA analog n3 too weak for reliable follow-through calibration",
+      "Unverified post-open OR15, RTH VWAP, NBBO depth",
+      "Time-matched RVOL null on important under-$5 candidates",
+      "No daily sector regime inversion interrupt or all-sector earnings recall evidence"
+    ],
+    "allocation_risk_defects": [
+      "NVDA and BRBR illustrative concurrent notionals sum $1,222 versus original $1,000 seed, not feasible concurrently without additional verified buying power",
+      "Illustrative stop-defined total $50 equals 5% of stale seed; actual present risk budget and positions unknown",
+      "Cash settlement, current locks and risk-policy enforcement unverifiable"
+    ],
+    "exact_changes_proposed_for_next_session": [
+      {
+        "id": "A080",
+        "title": "Cross-sector earnings-event coverage and post-open regime divergence manifest, with source-bound first detection",
+        "proposal_date": "2026-11-18",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false,
+        "dependencies": [
+          "A004",
+          "A006",
+          "A042",
+          "A057",
+          "A065",
+          "A066",
+          "A071",
+          "A074",
+          "A077",
+          "A078",
+          "A079"
+        ],
+        "reason": "Nov 18 reconstructed top-10 primarily ranked AI and microcap movers; separately verified premarket TJX/TGT earnings and AAOI dilution announcement did not appear in the recovered top-10. NVDA changed from +2.33% reconstructed premarket to -2.90% regular-session close, so sector opening strength is not a persistent trade signal. Top-10 omission is not proof of full scanner miss.",
+        "exact_patch": {
+          "strategy_id": "TRADER_BRAIN_PAPER_1000",
+          "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+          "mode": "SHADOW_ONLY",
+          "execution_enabled": false,
+          "automatic_learning_enabled": false,
+          "source_news_manifest": {
+            "require_published_at_et": true,
+            "require_source_id": true,
+            "require_first_seen_at_et": true,
+            "require_time_source_monotonicity": true,
+            "industries": [
+              "semiconductors",
+              "software",
+              "retail",
+              "consumer",
+              "healthcare",
+              "energy",
+              "financials",
+              "microcap"
+            ],
+            "event_types": [
+              "earnings",
+              "guidance",
+              "dilution",
+              "regulatory",
+              "M&A",
+              "clinical",
+              "macro"
+            ],
+            "maintain_full_observed_manifest": true,
+            "require_top10_inclusion_or_exclusion_reason": true,
+            "require_bearish_event_scan_separate_from_positive_jump_screener": true,
+            "missing_timestamp_state": "PROVENANCE_MISSING_NO_EARLY_DISCOVERY_CREDIT",
+            "after_cutoff_reconstruction_state": "RETROSPECTIVE_NO_DISCOVERY_CREDIT"
+          },
+          "intraday_refresh": {
+            "checkpoints_et": [
+              "09:45",
+              "10:30",
+              "12:00",
+              "14:15"
+            ],
+            "require_completed_5min_bars": true,
+            "require_rth_vwap": true,
+            "require_opening_range_15m": true,
+            "require_atomic_spread_and_depth": true,
+            "require_sector_breadth_revalidation": true,
+            "flag_sector_direction_inversion": true,
+            "guard_positive_earnings_gaps_against_failed_opening_breakout": true
+          },
+          "accounting": {
+            "require_source_bound_canonical_4pm_certificate": true,
+            "require_current_settled_buying_power": true,
+            "no_unsettled_proceeds_recycling": true,
+            "no_legacy_import": true,
+            "no_retroactive_fills": true,
+            "existing_risk_limits_unchanged": true
+          }
+        },
+        "prospective_tests": {
+          "shadow_sessions": 5,
+          "issuer_events_min": 40,
+          "sector_groups_min": 6,
+          "negative_catalysts_min": 10,
+          "false_timestamp_injections": 10,
+          "outage_injections": 10,
+          "measure": [
+            "event_recall",
+            "first_seen_latency_seconds",
+            "top10_omission_rate",
+            "sector_inversion_rate",
+            "quote_validation_coverage",
+            "15m_30m_60m_MFE_MAE",
+            "false_chase_rate",
+            "qualified_candidate_recall",
+            "simulated_settlement_violations"
+          ],
+          "accept": "At least 90% of timestamped eligible issuer events discovered within 5 minutes when source online; 100% ranked-board inclusions or exclusions documented; 10/10 bad timestamps and 10/10 outages quarantined; at least 20% fewer false open-gap chases without >10% reduction in eligible event recall; zero fabricated fills and zero cross-ledger contamination.",
+          "reject": "Any retroactive discovery credited, stale quote passed as executable, omission treated as full scanner miss without raw records, unsettled proceeds reused, or prospective risk-adjusted shadow outcome worsens."
+        }
+      }
+    ],
+    "prior_adjustments": [
+      {
+        "id": "A001",
+        "title": "Catalyst quality gate for scores >90",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A002",
+        "title": "Remaining Move Capacity penalty",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A003",
+        "title": "Same ticker attempt limit",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A004",
+        "title": "Institutional catalyst priority",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A005",
+        "title": "Fresh 9:15 rebuild",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A006",
+        "title": "Discovery vs execution separation",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A007",
+        "title": "Meaningful allocation",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A008",
+        "title": "Exact ledger integrity",
+        "policy_designation": "ACTIVE",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A009",
+        "title": "Catalyst-direction validation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A010",
+        "title": "Corporate-action / reverse-split structure penalty",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A011",
+        "title": "Authoritative state isolation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A012",
+        "title": "Immutable scanner snapshots",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A013",
+        "title": "Premarket fresh-news coverage",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A014",
+        "title": "Overnight quote health",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A015",
+        "title": "Decision-time catalyst direction and corporate-action gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A016",
+        "title": "Immutable fresh-news / 9:15 / first-detection snapshots",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A017",
+        "title": "Authoritative ledger identity and cash settlement reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A018",
+        "title": "Overnight quote health, partial fill and stop-overrun logging",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A019",
+        "title": "Decision-time high-score evidence quarantine",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A020",
+        "title": "Institutional event sector adjacency discovery",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A021",
+        "title": "Stop-overshoot and quote-health emergency guard",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A022",
+        "title": "Explicit new-impulse reentry gating",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A023",
+        "title": "Canonical-only cash-account journal and GitHub learning ingest",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A024",
+        "title": "Stop-loss sequence breaker",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A025",
+        "title": "Market-regime long-only gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A026",
+        "title": "Pre-market catalyst coverage reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A027",
+        "title": "As-converted supply and transaction structure gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A028",
+        "title": "Immutable 09:15 catalyst sweep and mover timestamping",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A029",
+        "title": "Overnight quote-health fail-closed review",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A030",
+        "title": "Same-ticker repeat-entry counterfactual",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A031",
+        "title": "Quarantine-aware canonical ledger and exact decimal settlement journal",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A032",
+        "title": "Recent reverse split and ADS-ratio structural veto for extreme-score speculative longs",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A033",
+        "title": "Fresh institutional catalyst and market breadth ranking experiment",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A034",
+        "title": "Stop overshoot and quote-data-health pre-entry veto",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A035",
+        "title": "Separate discovered mover, validated watch, and executed edge attribution",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A036",
+        "title": "Hard catalyst-polarity gate for adverse guidance",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A037",
+        "title": "Security-type normalization for warrants and rights",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A038",
+        "title": "Quote-unavailability severity gate and stop reconstruction",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A039",
+        "title": "Resilient immutable canonical EOD snapshot independent of desktop availability",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A040",
+        "title": "Attribute every paper trade notification to an experiment and immutable ledger entry",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A041",
+        "title": "Fail-closed EOD missing-source alert and catch-up reconciliation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A042",
+        "title": "Immutable 9:15 primary-source catalyst sweep across stock sectors",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A043",
+        "title": "Fixed-cash takeover price ceiling and remaining-move gate",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A044",
+        "title": "Replace paid-only market-data dependency with permissioned free/read-only provider chain",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A045",
+        "title": "Fail-closed swing quote-health and independent reference-mark provenance",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A046",
+        "title": "Weekly risk lock calendar rollover and identity invariant",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A047",
+        "title": "Provider entitlement and rate-limit circuit breaker",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A048",
+        "title": "Bounded quote-retry budget and timely swing-monitor outage escalation",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A049",
+        "title": "Certified recovery gate and preauthorized swing-deadline fail-closed protocol",
+        "policy_designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A050",
+        "title": "Canonical episode lineage and archived unresolved swing deadline exception",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A051",
+        "title": "Immutable 7AM and 9:15 issuer-event board with decision-time quote and VWAP quality gates",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A052",
+        "title": "Event-prioritized issuer-news discovery ahead of alphabetical rotation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A053",
+        "title": "Separate technical signal observations from executable quote-validated paper entries",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A054",
+        "title": "Tamper-evident flat-session EOD certification and archived-episode exception ledger",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A055",
+        "title": "Canonical episode resolver for every morning, desk, and EOD snapshot",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A056",
+        "title": "Auto-refresh stale research inventory or fail closed with explicit coverage outage",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A057",
+        "title": "Post-9:15 issuer-event interrupt scanner with timestamped first detection",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A058",
+        "title": "Codex adjustment causal-status evidence gate",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A059",
+        "title": "As-of cutoff immutable chronology and correct active episode binding",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A060",
+        "title": "One-minute bar signal validation and same-symbol direction-flip cooldown",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A061",
+        "title": "Fail-closed report publication on wrong canonical ledger and cutoff contamination",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A062",
+        "title": "Zero-fresh-scan SLA alert with immutable inventory-age source and coverage counter",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A063",
+        "title": "Differentiate FDA generic ANDA milestone from novel NDA approval in microcap catalyst scores",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A064",
+        "title": "Deterministic EOD exception surfacing and source-bound flat-session certification",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A065",
+        "title": "Unify effective scanner coverage and timestamp quality across dual inventories",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A066",
+        "title": "Event-prioritized cross-source news and late-technical-detection reconciliation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A067",
+        "title": "EOD TypeError regression and flat-account source-bound exception contract",
+        "policy_designation": "PROPOSED_SHADOW",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A068",
+        "title": "Primary-source event priority and distinct first-news versus bar-observation timestamps",
+        "policy_designation": "PROPOSED_SHADOW",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A069",
+        "title": "EOD TypeError root-cause traceback and source-bound flat-ledger certification",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A070",
+        "title": "Hard isolation of provisional-signal-book from sole authoritative $1,000 episode",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A071",
+        "title": "Issuer-event priority scanning with market-regime-aware alternative cash/risk reservation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A072",
+        "title": "Host-independent source-bound 16:00 canonical ledger certification and offline fail-closed alert",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A073",
+        "title": "Normalize M&A consideration currency, election rights and price ceiling before momentum scoring",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A074",
+        "title": "Primary-source under-$5 candidate recall and ranked-board omission audit",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A075",
+        "title": "Prospective under-$5 post-gap liquidity and gap-fade calibration (SATL versus GEVO)",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A076",
+        "title": "Catalyst-conditioned downside gap reversal versus persistent selling; prospective path-first validation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A077",
+        "title": "Prospective event-score confidence from timestamped analog sample size and sector-regime flip",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A078",
+        "title": "Independently retrievable immutable 07:00/09:15 research and approval manifest during host outage",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      },
+      {
+        "id": "A079",
+        "title": "Quarantine extreme matched-time RVOL from near-zero historical baselines and require post-open liquidity/gap-path confirmation",
+        "policy_designation": "PROPOSED_SHADOW_ONLY",
+        "causal_effectiveness": "INCONCLUSIVE",
+        "implementation_verified": false
+      }
+    ],
+    "effectiveness_evaluation": {
+      "helped": [],
+      "hurt": [],
+      "inconclusive_count": 80,
+      "reason": "No certified prospective performance or causally valid tests; historical policy ACTIVE does not establish implementation."
+    },
+    "experiments_to_test_next_session": [
+      {
+        "id": "CERT_A072_A069",
+        "design": "20 flat, 10 eventful, 10 disconnect and 20 exception-injection source-bound EOD replays",
+        "pass": "Zero false return/fill certifications; exact episode/settlement; exceptions surfaced and traceback stored",
+        "reject": "Any uncertified return, fabricated fill, or recurrent TypeError"
+      },
+      {
+        "id": "MANIFEST_A078_A080",
+        "design": "5 shadow sessions with >=40 issuer events across >=6 sectors, 10 stale timestamp and 10 host outage injections",
+        "pass": "At least 90% of timestamped eligible issuer events discovered within 5 minutes when source online; 100% ranked-board inclusions or exclusions documented; 10/10 bad timestamps and 10/10 outages quarantined; at least 20% fewer false open-gap chases without >10% reduction in eligible event recall; zero fabricated fills and zero cross-ledger contamination.",
+        "reject": "Any retroactive discovery credited, stale quote passed as executable, omission treated as full scanner miss without raw records, unsettled proceeds reused, or prospective risk-adjusted shadow outcome worsens."
+      },
+      {
+        "id": "GAP_PATH_A075_A077",
+        "design": "Prospective NVDA/BRBR/PONY and comparable 50 events; compare 09:15 hypothetical chase vs 09:45 verified OR/VWAP trigger, with 5/15/30/60min MFE/MAE and realistic bid/ask slippage",
+        "pass": "Fewer false chases >=20% while keeping qualified-event recall within 10% of baseline; no inferred paper fills",
+        "reject": "Lower prospective risk-adjusted shadow result or missing timestamp fidelity"
+      },
+      {
+        "id": "CASH_A071",
+        "design": "20 concurrent alternative allocations, identical settlement schedules under $1,000 cash-account model",
+        "pass": "No notional exceeds settled available buying power, no daily-proceeds reuse, all preexisting risk counted",
+        "reject": "Any cash deficit, unsettled spend, or risk-lock violation"
+      }
+    ],
+    "metrics_confirm_reject": [
+      "issuer-event recall and first-seen latency",
+      "top10 exclusion provenance",
+      "MFE/MAE and false chase rate",
+      "quote-spread and depth provenance",
+      "valid qualified candidate recall",
+      "current settled cash and risk-budget guard",
+      "event-and-episode source checksum",
+      "source-bound return certification rate"
+    ],
+    "unresolved_data_integrity": [
+      "canonical device offline 310h at review",
+      "Nov18 7am source absent",
+      "Nov18 morning first-seen unavailable",
+      "Nov18 intraday scanner events unavailable",
+      "Nov18 4pm canonical certificate unavailable",
+      "EOD TypeError fix unverified",
+      "provisional ledgers remain non-authoritative",
+      "older episode historical continuity remains quarantined",
+      "Codex ingestion/deployment not independently verified"
+    ]
+  },
+  "single_highest_priority_improvement": "Implement/verify A072 immutable host-independent source-bound 4pm canonical paper-account certificate and restore host access; do not infer flat returns.",
+  "source_links": {
+    "morning": "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-18/TRADER_BRAIN_PAPER_1000_2026-11-18_0915.md",
+    "snapshot": "https://github.com/Harpcity33/trader-brain/blob/main/reports/2026-11-18/TRADER_BRAIN_PAPER_1000_2026-11-18_0915_snapshot.json",
+    "reuters": "https://www.reuters.com/business/nasdaq-futures-jump-nvidia-forecast-lifts-ai-trade-ahead-anthropic-pricing-2026-11-18/",
+    "nvda": "https://www.fool.com/coverage/stock-market-today/2026/11/17/stock-market-today-nov-17-nvidia-slides-ahead-of-earnings-but-soars-in-after-hours-trading/",
+    "tjx": "https://www.reuters.com/business/off-price-retailer-tjx-beats-quarterly-sales-estimates-2026-11-18/",
+    "target": "https://apnews.com/article/7a0f5f6ddbc171095b060a903595f074",
+    "hiho": "https://www.stocktitan.net/news/HIHO/highway-holdings-returns-to-strong-revenue-growth-and-operating-o98b6uuss2yo.html",
+    "pony": "https://www.stocktitan.net/news/PONY/pony-ai-inc-reports-third-quarter-2026-financial-results-total-o7mrwg3rdasa.html",
+    "aaoi": "https://www.benzinga.com/trading-ideas/movers/26/11/63383084/applied-optoelectronics-stock-slides-on-dollar550m-atm-weeks-after-dollar600m-raise",
+    "sp500": "https://www.chartmill.com/news/MPC/Chartmill-58889-SP-500-Top-Movers-Gainers-and-Losers-in-the-Nov-18-2026-US-Session"
+  },
+  "persistence": {
+    "intended_github_paths": [
+      "knowledge/daily-paper-handoffs/2026-11-18-TRADER_BRAIN_PAPER_1000.json",
+      "knowledge/daily-paper-handoffs/2026-11-18-adjustment-registry-summary.json",
+      "reports/2026-11-18/TRADER_BRAIN_PAPER_1000_2026-11-18_EOD_review.md"
+    ],
+    "codex_ingestion_confirmed": false,
+    "deployment_confirmed": false
+  }
+}
