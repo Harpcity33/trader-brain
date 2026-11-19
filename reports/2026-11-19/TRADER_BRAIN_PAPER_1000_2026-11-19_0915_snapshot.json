@@ -1,0 +1,1062 @@
+{
+  "schema": "Trader-Brain-0915-2026-11-19",
+  "strategy": "TRADER_BRAIN_PAPER_1000",
+  "episodeId": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "paperOnly": true,
+  "asOfCutoffET": "2026-11-19T09:15:00-05:00",
+  "capturedLater": true,
+  "classification": "RECONSTRUCTED_RESEARCH_ARCHIVE_NOT_CANONICAL_LEDGER_CERTIFICATE",
+  "dataMethod": "Robinhood 04:00-09:14:59 ET noninterpolated 5m bars and prior 90 regular sessions, same-clock median five preceding sessions for RVOL; quote spreads sampled 09:18-09:19 ET not decision-time. Daily Price Jumps and Under-$5 live scans post-cutoff (first 200 sorted positive rows).",
+  "firstDetectionProvenance": null,
+  "scanner": {
+    "dailyPriceJumps": 206,
+    "under5Leaders": 389,
+    "frozenAt0915": false
+  },
+  "marketBreadth": {
+    "SPY": 1.11,
+    "QQQ": 1.94,
+    "SOXX": 3.38,
+    "SMH": 3.05,
+    "IWM": 0.42,
+    "XLF": 0.4
+  },
+  "movers": [
+    {
+      "ticker": "PANW",
+      "side": "LONG",
+      "px": 362.49,
+      "prev": 339.92,
+      "change": 6.64,
+      "pmVol": 227745,
+      "pmTurn": 84224468,
+      "low": 361.36,
+      "high": 376.7499,
+      "vwap": 369.8192,
+      "rvol": 7.76,
+      "consumed": 61.3,
+      "spread": 0.166,
+      "floatM": 811,
+      "analogs": 11,
+      "d1": -0.2,
+      "d5": -2.32,
+      "gapFades": 7,
+      "gapN": 9,
+      "catalystGrade": "A",
+      "remaining": 45,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Nov18 after-close earnings +39% revenue and raised forecast, $4.5B stock-funded AI acquisition"
+    },
+    {
+      "ticker": "GOOGL",
+      "side": "LONG",
+      "px": 294.4458,
+      "prev": 282.44,
+      "change": 4.25,
+      "pmVol": 668860,
+      "pmTurn": 195872733,
+      "low": 283.146,
+      "high": 294.75,
+      "vwap": 292.8456,
+      "rvol": 3.29,
+      "consumed": 97.5,
+      "spread": 0.01,
+      "floatM": 5848.2,
+      "analogs": 2,
+      "d1": 2.99,
+      "d5": -2.4,
+      "gapFades": 2,
+      "gapN": 4,
+      "catalystGrade": "B+",
+      "remaining": 30,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Anthropic IPO direct-investor sympathy, not new standalone earnings"
+    },
+    {
+      "ticker": "PDD",
+      "side": "LONG",
+      "px": 80.82,
+      "prev": 77.45,
+      "change": 4.35,
+      "pmVol": 896212,
+      "pmTurn": 74373656,
+      "low": 75.2,
+      "high": 85.8,
+      "vwap": 82.9867,
+      "rvol": 18.74,
+      "consumed": 40.4,
+      "spread": 0.345,
+      "floatM": 1388.5,
+      "analogs": 0,
+      "d1": null,
+      "d5": null,
+      "gapFades": 3,
+      "gapN": 5,
+      "catalystGrade": "B+",
+      "remaining": 39,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Nov19 earnings RMB108.3B revenue flat YoY; mixed operating quality"
+    },
+    {
+      "ticker": "CRWV",
+      "side": "LONG",
+      "px": 50.2,
+      "prev": 47.83,
+      "change": 4.96,
+      "pmVol": 1566137,
+      "pmTurn": 78692316,
+      "low": 48.4,
+      "high": 51,
+      "vwap": 50.2461,
+      "rvol": 1.16,
+      "consumed": 74.8,
+      "spread": 0.119,
+      "floatM": 349.3,
+      "analogs": 18,
+      "d1": -0.5,
+      "d5": -5.74,
+      "gapFades": 15,
+      "gapN": 22,
+      "catalystGrade": "B-",
+      "remaining": 29,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "AI-sector IPO sympathy; no fresh issuer release"
+    },
+    {
+      "ticker": "NBIS",
+      "side": "LONG",
+      "px": 112.6,
+      "prev": 106.96,
+      "change": 5.27,
+      "pmVol": 807195,
+      "pmTurn": 91255687,
+      "low": 108.64,
+      "high": 114.7,
+      "vwap": 113.0528,
+      "rvol": 0.95,
+      "consumed": 72.9,
+      "spread": 0.071,
+      "floatM": 242.3,
+      "analogs": 21,
+      "d1": 0.51,
+      "d5": -10.31,
+      "gapFades": 14,
+      "gapN": 23,
+      "catalystGrade": "B-",
+      "remaining": 27,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "AI capacity IPO sympathy and financing risks"
+    },
+    {
+      "ticker": "AVGO",
+      "side": "LONG",
+      "px": 364.19,
+      "prev": 354.05,
+      "change": 2.86,
+      "pmVol": 187822,
+      "pmTurn": 68307648,
+      "low": 357.0183,
+      "high": 365.89,
+      "vwap": 363.6829,
+      "rvol": 0.95,
+      "consumed": 85.6,
+      "spread": 0.044,
+      "floatM": 4683.3,
+      "analogs": 4,
+      "d1": 0.89,
+      "d5": 2.11,
+      "gapFades": 9,
+      "gapN": 16,
+      "catalystGrade": "B",
+      "remaining": 29,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Anthropic AI-chip investment sympathy"
+    },
+    {
+      "ticker": "BABA",
+      "side": "BEARISH_WATCH",
+      "px": 83.1,
+      "prev": 84.37,
+      "change": -1.51,
+      "pmVol": 1462759,
+      "pmTurn": 122065028,
+      "low": 81.86,
+      "high": 88.01,
+      "vwap": 83.4485,
+      "rvol": 4.1,
+      "consumed": 50.6,
+      "spread": 0.144,
+      "floatM": 2485.4,
+      "analogs": 6,
+      "d1": -1.5,
+      "d5": -3.6,
+      "gapFades": 6,
+      "gapN": 10,
+      "catalystGrade": "A-",
+      "remaining": 28,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Nov19 earnings cloud +53% but negative free cash flow"
+    },
+    {
+      "ticker": "SLS",
+      "side": "BEARISH_WATCH",
+      "px": 15.47,
+      "prev": 17.95,
+      "change": -13.82,
+      "pmVol": 3312800,
+      "pmTurn": 47609745,
+      "low": 13.36,
+      "high": 15.7732,
+      "vwap": 14.3715,
+      "rvol": 11.91,
+      "consumed": 54,
+      "spread": 1.5,
+      "floatM": 201.6,
+      "analogs": 26,
+      "d1": -0.02,
+      "d5": -0.92,
+      "gapFades": 10,
+      "gapN": 15,
+      "catalystGrade": "A",
+      "remaining": 9,
+      "status": "STRUCTURAL_REJECT",
+      "news": "Nov18 9:59pm $150M offering at $13 for 11,538,462 new shares"
+    },
+    {
+      "ticker": "NTES",
+      "side": "BEARISH_WATCH",
+      "px": 112.68,
+      "prev": 118.43,
+      "change": -4.86,
+      "pmVol": 40498,
+      "pmTurn": 4602983,
+      "low": 110.3,
+      "high": 119.7,
+      "vwap": 113.6595,
+      "rvol": 21.52,
+      "consumed": 70.7,
+      "spread": 2.509,
+      "floatM": 636.7,
+      "analogs": 9,
+      "d1": -0.02,
+      "d5": -0.63,
+      "gapFades": 4,
+      "gapN": 12,
+      "catalystGrade": "A-",
+      "remaining": 20,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "news": "Nov19 revenue -1.8%, very wide spread"
+    },
+    {
+      "ticker": "SEAT",
+      "side": "NONE",
+      "px": 2.59,
+      "prev": 1.28,
+      "change": 102.34,
+      "pmVol": 23046331,
+      "pmTurn": 50098337,
+      "low": 1.12,
+      "high": 2.85,
+      "vwap": 2.1738,
+      "rvol": null,
+      "consumed": 83.4,
+      "spread": 0.755,
+      "floatM": 3.8,
+      "analogs": 9,
+      "d1": -1.76,
+      "d5": -6.91,
+      "gapFades": 6,
+      "gapN": 12,
+      "catalystGrade": "A event",
+      "remaining": 2,
+      "status": "STRUCTURAL_REJECT",
+      "news": "Nov19 debt exchange proposes ~45.8M new shares, existing owners retain ~20%"
+    },
+    {
+      "ticker": "GMM",
+      "side": "NONE",
+      "px": 1.9089,
+      "prev": 1.55,
+      "change": 23.15,
+      "pmVol": 7823452,
+      "pmTurn": 15680995,
+      "low": 1.68,
+      "high": 2.22,
+      "vwap": 2.0044,
+      "rvol": 1.56,
+      "consumed": 53.6,
+      "spread": 0.542,
+      "floatM": 9.5,
+      "analogs": 11,
+      "d1": -1.24,
+      "d5": -6.77,
+      "gapFades": 10,
+      "gapN": 15,
+      "catalystGrade": "C+",
+      "remaining": 5,
+      "status": "STRUCTURAL_REJECT",
+      "news": "Indirect undisclosed Anthropic investment announcement Nov16, reverse split June2026"
+    },
+    {
+      "ticker": "INHD",
+      "side": "NONE",
+      "px": 3.1781,
+      "prev": 2.3,
+      "change": 38.18,
+      "pmVol": 4074197,
+      "pmTurn": 13414739,
+      "low": 2.9,
+      "high": 4.74,
+      "vwap": 3.2926,
+      "rvol": null,
+      "consumed": 36,
+      "spread": 0.312,
+      "floatM": 2.5,
+      "analogs": 13,
+      "d1": 0.53,
+      "d5": -2.78,
+      "gapFades": 11,
+      "gapN": 14,
+      "catalystGrade": "D",
+      "remaining": 3,
+      "status": "STRUCTURAL_REJECT",
+      "news": "Microfloat no verified fresh issuer catalyst"
+    },
+    {
+      "ticker": "CHSN",
+      "side": "NONE",
+      "px": 0.1471,
+      "prev": 0.102,
+      "change": 44.22,
+      "pmVol": 32731339,
+      "pmTurn": 4140970,
+      "low": 0.0815,
+      "high": 0.16,
+      "vwap": 0.1265,
+      "rvol": 877.4,
+      "consumed": 77.8,
+      "spread": 14.932,
+      "floatM": 2.1,
+      "analogs": 14,
+      "d1": 0.68,
+      "d5": 18.15,
+      "gapFades": 9,
+      "gapN": 13,
+      "catalystGrade": "D",
+      "remaining": 0,
+      "status": "STRUCTURAL_REJECT",
+      "news": "Microfloat, severe quote width and distorted RVOL"
+    }
+  ],
+  "account": {
+    "historicalSeed": 1000,
+    "lastReadDate": "2026-11-05",
+    "lastReadCash": 1000,
+    "computer": "Mac.attlocal.net",
+    "online": false,
+    "lastSeenHoursApprox": 327,
+    "certifiedEquity": null,
+    "settledBuyingPower": null,
+    "unsettledCash": null,
+    "openPositions": null,
+    "swingPositions": null,
+    "realizedPnl": null,
+    "unrealizedPnl": null,
+    "cumulativeScoreboard": null,
+    "currentRiskUtilization": null,
+    "continuousOriginal1000Pnl": null,
+    "lastKnownExecutionEnabled": false,
+    "lastKnownLearningEnabled": false,
+    "approvalStatus": "BLOCKED",
+    "newApprovedAllocation": 0,
+    "newApprovedShares": 0,
+    "newApprovedOptionContracts": 0,
+    "newApprovedRisk": 0
+  },
+  "riskPolicy": {
+    "source": "config/risk_limits.json",
+    "equity_basis": "broker_confirmed_current_usable_equity",
+    "normal_risk_pct": 3,
+    "exceptional_a_plus_risk_pct": 4,
+    "premarket_risk_pct": 2,
+    "max_total_open_planned_risk_pct": 5,
+    "daily_new_entry_lock_pct": 6,
+    "hard_daily_kill_pct": 8,
+    "weekly_lock_pct": 12,
+    "positive_execution_reserve_required": true,
+    "current_eligibility": "BLOCKED_NO_CERTIFIED_EQUITY_AND_PERMISSIONS"
+  },
+  "approvedSetups": [],
+  "researchOnlyWatches": [
+    {
+      "ticker": "PANW",
+      "direction": "LONG",
+      "vehicle": "stock",
+      "holding": "INTRADAY",
+      "catalystGrade": "A",
+      "sector": "QQQ +1.94%; SOXX +3.38%",
+      "ninetyDay": "11 previous +4% analog events, D+5 mean -2.32%, 7/9 positive opening gaps faded",
+      "remaining": 45,
+      "conviction": "HIGH discovery, LOW execution",
+      "trigger": "After 09:45 ET hold reset $359-$362 with support $357.80, completed 5m close >$370.10 AND regular-session VWAP AND OR15 high, spread <=0.25% and volume >=1.5x previous five-bar median",
+      "entry": 370.2,
+      "qty": 2,
+      "allocation": 740.4,
+      "stop": 358,
+      "t1": 382.4,
+      "t2": 394.6,
+      "risk": 24.4,
+      "cancel": "OR15 high >=370.20 (reference unachievable), support fails, spread or depth deteriorates, negative new headline, or uncertified account",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "PDD",
+      "direction": "LONG",
+      "vehicle": "stock",
+      "holding": "INTRADAY",
+      "catalystGrade": "B+",
+      "sector": "QQQ +1.94%, mixed China Internet breadth",
+      "ninetyDay": "0 matched +4% close-to-close analogs; historical follow-through cannot be inferred",
+      "remaining": 39,
+      "conviction": "MEDIUM discovery, LOW execution",
+      "trigger": "After 09:45 ET hold $81.70, completed 5m close >$86 AND RTH VWAP AND OR15 high with spread <=0.25%",
+      "entry": 86.1,
+      "qty": 7,
+      "allocation": 602.7,
+      "stop": 82.2,
+      "t1": 90.1,
+      "t2": 94.1,
+      "risk": 27.3,
+      "cancel": "No spread tightening, OR15 high >=86.10, failure of support, or account uncertified",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    },
+    {
+      "ticker": "CRWV",
+      "direction": "LONG",
+      "vehicle": "stock",
+      "holding": "INTRADAY",
+      "catalystGrade": "B-",
+      "sector": "SOXX +3.38%",
+      "ninetyDay": "18 +4% analogs, D+5 -5.74%, 15/22 historical gap fades",
+      "remaining": 29,
+      "conviction": "MEDIUM discovery, LOW execution",
+      "trigger": "After 09:45 ET pullback $49.50-$50.10 holds $49.30; 5m close >$51.20, RTH VWAP and OR15 high; spread <=0.25%",
+      "entry": 51.25,
+      "qty": 12,
+      "allocation": 615,
+      "stop": 49.3,
+      "t1": 53.2,
+      "t2": 55.2,
+      "risk": 23.4,
+      "cancel": "Break $49.30, impossible opening-range cap, weakening sector, or account uncertified",
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH"
+    }
+  ],
+  "under5": {
+    "approved": false,
+    "bestEvent": "SEAT",
+    "status": "STRUCTURAL_REJECT",
+    "why": "~45.8M prospective new shares vs ~11.5M existing; existing holders ~20%, 3.8M float, 0.755% later indicative spread",
+    "secondary": [
+      "GMM: STRUCTURAL_REJECT",
+      "INHD: STRUCTURAL_REJECT",
+      "CHSN: STRUCTURAL_REJECT"
+    ]
+  },
+  "learning": {
+    "source": "2026-11-18 EOD quarantined; A001-A079 prior registry",
+    "allAdjustmentVerdicts": "INCONCLUSIVE",
+    "adjustments": [
+      {
+        "id": "A001",
+        "title": "Catalyst quality gate for scores >90",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A002",
+        "title": "Remaining Move Capacity penalty",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A003",
+        "title": "Same ticker attempt limit",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A004",
+        "title": "Institutional catalyst priority",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A005",
+        "title": "Fresh 9:15 rebuild",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A006",
+        "title": "Discovery vs execution separation",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A007",
+        "title": "Meaningful allocation",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A008",
+        "title": "Exact ledger integrity",
+        "designation": "ACTIVE",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A009",
+        "title": "Catalyst-direction validation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A010",
+        "title": "Corporate-action / reverse-split structure penalty",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A011",
+        "title": "Authoritative state isolation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A012",
+        "title": "Immutable scanner snapshots",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A013",
+        "title": "Premarket fresh-news coverage",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A014",
+        "title": "Overnight quote health",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A015",
+        "title": "Decision-time catalyst direction and corporate-action gate",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A016",
+        "title": "Immutable fresh-news / 9:15 / first-detection snapshots",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A017",
+        "title": "Authoritative ledger identity and cash settlement reconciliation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A018",
+        "title": "Overnight quote health, partial fill and stop-overrun logging",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A019",
+        "title": "Decision-time high-score evidence quarantine",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A020",
+        "title": "Institutional event sector adjacency discovery",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A021",
+        "title": "Stop-overshoot and quote-health emergency guard",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A022",
+        "title": "Explicit new-impulse reentry gating",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A023",
+        "title": "Canonical-only cash-account journal and GitHub learning ingest",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A024",
+        "title": "Stop-loss sequence breaker",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A025",
+        "title": "Market-regime long-only gate",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A026",
+        "title": "Pre-market catalyst coverage reconciliation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A027",
+        "title": "As-converted supply and transaction structure gate",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A028",
+        "title": "Immutable 09:15 catalyst sweep and mover timestamping",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A029",
+        "title": "Overnight quote-health fail-closed review",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A030",
+        "title": "Same-ticker repeat-entry counterfactual",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A031",
+        "title": "Quarantine-aware canonical ledger and exact decimal settlement journal",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A032",
+        "title": "Recent reverse split and ADS-ratio structural veto for extreme-score speculative longs",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A033",
+        "title": "Fresh institutional catalyst and market breadth ranking experiment",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A034",
+        "title": "Stop overshoot and quote-data-health pre-entry veto",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A035",
+        "title": "Separate discovered mover, validated watch, and executed edge attribution",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A036",
+        "title": "Hard catalyst-polarity gate for adverse guidance",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A037",
+        "title": "Security-type normalization for warrants and rights",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A038",
+        "title": "Quote-unavailability severity gate and stop reconstruction",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A039",
+        "title": "Resilient immutable canonical EOD snapshot independent of desktop availability",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A040",
+        "title": "Attribute every paper trade notification to an experiment and immutable ledger entry",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A041",
+        "title": "Fail-closed EOD missing-source alert and catch-up reconciliation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A042",
+        "title": "Immutable 9:15 primary-source catalyst sweep across stock sectors",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A043",
+        "title": "Fixed-cash takeover price ceiling and remaining-move gate",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A044",
+        "title": "Replace paid-only market-data dependency with permissioned free/read-only provider chain",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A045",
+        "title": "Fail-closed swing quote-health and independent reference-mark provenance",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A046",
+        "title": "Weekly risk lock calendar rollover and identity invariant",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A047",
+        "title": "Provider entitlement and rate-limit circuit breaker",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A048",
+        "title": "Bounded quote-retry budget and timely swing-monitor outage escalation",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A049",
+        "title": "Certified recovery gate and preauthorized swing-deadline fail-closed protocol",
+        "designation": "PROPOSED_OR_DEPLOYMENT_UNVERIFIED",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A050",
+        "title": "Canonical episode lineage and archived unresolved swing deadline exception",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A051",
+        "title": "Immutable 7AM and 9:15 issuer-event board with decision-time quote and VWAP quality gates",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A052",
+        "title": "Event-prioritized issuer-news discovery ahead of alphabetical rotation",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A053",
+        "title": "Separate technical signal observations from executable quote-validated paper entries",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A054",
+        "title": "Tamper-evident flat-session EOD certification and archived-episode exception ledger",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A055",
+        "title": "Canonical episode resolver for every morning, desk, and EOD snapshot",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A056",
+        "title": "Auto-refresh stale research inventory or fail closed with explicit coverage outage",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A057",
+        "title": "Post-9:15 issuer-event interrupt scanner with timestamped first detection",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A058",
+        "title": "Codex adjustment causal-status evidence gate",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A059",
+        "title": "As-of cutoff immutable chronology and correct active episode binding",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A060",
+        "title": "One-minute bar signal validation and same-symbol direction-flip cooldown",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A061",
+        "title": "Fail-closed report publication on wrong canonical ledger and cutoff contamination",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A062",
+        "title": "Zero-fresh-scan SLA alert with immutable inventory-age source and coverage counter",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A063",
+        "title": "Differentiate FDA generic ANDA milestone from novel NDA approval in microcap catalyst scores",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A064",
+        "title": "Deterministic EOD exception surfacing and source-bound flat-session certification",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A065",
+        "title": "Unify effective scanner coverage and timestamp quality across dual inventories",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A066",
+        "title": "Event-prioritized cross-source news and late-technical-detection reconciliation",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A067",
+        "title": "EOD TypeError regression and flat-account source-bound exception contract",
+        "designation": "PROPOSED_SHADOW",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A068",
+        "title": "Primary-source event priority and distinct first-news versus bar-observation timestamps",
+        "designation": "PROPOSED_SHADOW",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A069",
+        "title": "EOD TypeError root-cause traceback and source-bound flat-ledger certification",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A070",
+        "title": "Hard isolation of provisional-signal-book from sole authoritative $1,000 episode",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A071",
+        "title": "Issuer-event priority scanning with market-regime-aware alternative cash/risk reservation",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A072",
+        "title": "Host-independent source-bound 16:00 canonical ledger certification and offline fail-closed alert",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A073",
+        "title": "Normalize M&A consideration currency, election rights and price ceiling before momentum scoring",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A074",
+        "title": "Primary-source under-$5 candidate recall and ranked-board omission audit",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A075",
+        "title": "Prospective under-$5 post-gap liquidity and gap-fade calibration (SATL versus GEVO)",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A076",
+        "title": "Catalyst-conditioned downside gap reversal versus persistent selling; prospective path-first validation",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A077",
+        "title": "Prospective event-score confidence from timestamped analog sample size and sector-regime flip",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A078",
+        "title": "Independently retrievable immutable 07:00/09:15 research and approval manifest during host outage",
+        "designation": "PROPOSED_SHADOW_ONLY",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A079",
+        "title": "Quarantine abnormal matched-time RVOL based on tiny historical volume denominators; require complete provenance and spread gates",
+        "designation": "PROPOSED_SHADOW_ONLY_2026-11-17",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "No certified trading P&L effect; existing protective gates maintained, unverified changes shadow-only"
+      },
+      {
+        "id": "A080",
+        "title": "Issuer-event cross-sector recall and regime-inversion detection",
+        "designation": "PROPOSED_SHADOW_ONLY_FROM_2026-11-18_EOD",
+        "verdict": "INCONCLUSIVE",
+        "evidence": "Test same-day PDD, BABA, NTES, PANW and SEAT including bearish event coverage; immutable first-seen timestamp required"
+      }
+    ],
+    "experiments": [
+      {
+        "adjustment": "A080/A074",
+        "test": "First-observed issuer-event coverage of PANW PDD BABA NTES SLS SEAT and ANT; rank or document exclusion",
+        "metrics": "90% recall within 5 minutes of source publication when connectors online, 100% documented exclusions, 0 hindsight first-seen claims"
+      },
+      {
+        "adjustment": "A072/A069",
+        "test": "20 valid, 10 offline, 10 corrupt, 10 eventful canonical $1K replay cases",
+        "metrics": "0 false fills/equity certificates, 0 TypeErrors, cash mismatch <= $0.01"
+      },
+      {
+        "adjustment": "A002/A077",
+        "test": "Compare immediate gap chase versus post-9:45 RTH VWAP/OR15 confirmation for PANW GOOGL PDD CRWV",
+        "metrics": "5/15/30/60min MFE MAE, net R, stop frequency, 1R/2R; false chases down 20% without losing >10% eligible recall"
+      },
+      {
+        "adjustment": "A079/A075",
+        "test": "Audit SEAT GMM INHD CHSN financing structure, float, spread, RVOL denominator",
+        "metrics": "0 structural false accepts, 20/20 injected RVOL denominator anomalies quarantined"
+      },
+      {
+        "adjustment": "A007/A071",
+        "test": "Two-share PANW study vs equal-risk diversified basket; concurrent allocation reservations",
+        "metrics": "All allocations <= certified settled BP less reserve, total planned open risk <= 5%; compare net risk-adjusted R and drawdown"
+      }
+    ]
+  },
+  "noRealOrders": true,
+  "noPaperFills": true,
+  "legacy500": "RETIRED 2026-10-06 AND EXCLUDED"
+}
