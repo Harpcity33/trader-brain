@@ -13,9 +13,12 @@
   "capture": "after 09:15 cutoff using noninterpolated completed bars to 09:14:59 and near-cutoff quotes",
   "scanner": {
     "dailyPriceJumpsTotal": 214,
-    "under5LeadersTotal": null,
+    "under5LeadersTotal": 306,
     "immutableAt915": false,
-    "positiveSortedLimitedToFirst200": true
+    "positiveSortedLimitedToFirst200": true,
+    "under5CountCapturedAfterCutoff": true,
+    "initialDailyCountCapturedAroundCutoff": true,
+    "warning": "Scanner counts are run-time observations not immutable historical 09:15 data; under5 rerun yielded 306 and can change."
   },
   "breadth": {
     "SPY": -0.55,
