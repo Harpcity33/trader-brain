@@ -1,0 +1,51 @@
+{
+  "strategy": "TRADER_BRAIN_PAPER_1000",
+  "date": "2026-11-20",
+  "episode": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "sourceReport": "reports/2026-11-20/TRADER_BRAIN_PAPER_1000_2026-11-20_0915.md",
+  "snapshot": "reports/2026-11-20/TRADER_BRAIN_PAPER_1000_2026-11-20_0915_snapshot.json",
+  "sourceReadOnly": true,
+  "approvedTrades": 0,
+  "allPriorAdjustments": "A001-A081 INCONCLUSIVE",
+  "focusTests": [
+    {
+      "ids": [
+        "A081",
+        "A078",
+        "A080"
+      ],
+      "metrics": "5 sessions, 50 events, 15 negative catalysts, 5 IPOs, >=90% detection within 5min online, 100% excluded/first-seen reason, 0 phantom prelisting trades"
+    },
+    {
+      "ids": [
+        "A002",
+        "A075",
+        "A079"
+      ],
+      "metrics": "5/15/30/60min MFE/MAE, gap fade, quote width, matched RVOL denominator, 1R/2R, 20% fewer false chases <=10% lost valid recall"
+    },
+    {
+      "ids": [
+        "A007",
+        "A071"
+      ],
+      "metrics": "20 injected concurrent allocation cases, no oversubscription, no use unsettled proceeds, compare GAP concentration vs equal-risk basket"
+    },
+    {
+      "ids": [
+        "A008",
+        "A069",
+        "A072"
+      ],
+      "metrics": "20 valid + 10 offline + 10 corrupted + 10 eventful ledger cases, 0 false fills/return, no TypeError, <=$0.01 reconciliation error"
+    },
+    {
+      "ids": [
+        "A006"
+      ],
+      "metrics": "100% rejected entries kept out of official fill ledger"
+    }
+  ],
+  "canonicalStatus": "OFFLINE_NOT_CERTIFIED",
+  "legacy500Excluded": true
+}
