@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import statistics
 import tempfile
+import uuid
 from typing import Any, Iterable, Mapping, Sequence
 from urllib import error, parse, request
 from zoneinfo import ZoneInfo
@@ -307,7 +308,8 @@ def default_state(starting_equity: float, now: datetime) -> dict[str, Any]:
     if number(starting_equity) <= 0 or now.tzinfo is None:
         raise ValueError("positive equity and aware timestamp required")
     local = now.astimezone(NY)
-    return {"version": 2, "starting_equity": starting_equity, "cash": starting_equity,
+    return {"version": 2, "strategy_id": "TRADER_BRAIN_PAPER_1000", "ledger_id": str(uuid.uuid4()),
+            "starting_equity": starting_equity, "cash": starting_equity,
             "week_start": (local - timedelta(days=local.weekday())).date().isoformat(),
             "week_start_equity": starting_equity, "weekly_lock": False,
             "positions": [], "closed_trades": [], "notified_signals": [], "daily": {}, "outbox": []}
@@ -442,3 +444,4 @@ def close_paper_position(state: dict[str, Any], trade_id: str, *, fill: float, r
             del state["positions"][index]
             return closed
     raise KeyError(trade_id)
+

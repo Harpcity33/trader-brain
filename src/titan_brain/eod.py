@@ -33,10 +33,16 @@ def build_eod_learning_packet(
     created_at: datetime,
     reviews: Sequence[EODReviewItem],
     operational_errors: Sequence[str] = (),
+    paper_report: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if created_at.tzinfo is None:
         raise ValueError("created_at must be timezone-aware")
     normalized: list[dict[str, Any]] = []
+    if paper_report is not None:
+        # The current paper reporting schema has no verified reconciliation path.
+        # Reject even hand-edited eligibility/status flags rather than ingesting
+        # missing or contradictory funding histories into learning.
+        raise ValueError("paper experiment learning quarantined pending ledger reconciliation")
     for item in reviews:
         classification = classify_process_outcome(
             item.process_adherent, realized_r=item.realized_r
@@ -65,4 +71,5 @@ def write_eod_learning_packet(path: str | Path, packet: Mapping[str, Any]) -> Pa
 
 
 __all__ = ["EODReviewItem", "build_eod_learning_packet", "write_eod_learning_packet"]
+
 
