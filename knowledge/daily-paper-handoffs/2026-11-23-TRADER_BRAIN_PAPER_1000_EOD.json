@@ -1,0 +1,1830 @@
+{
+  "schema": "TRADER_BRAIN_PAPER_1000_OFFICIAL_EOD_AUDIT_HANDOFF_v2",
+  "date": "2026-11-23",
+  "strategy_id": "TRADER_BRAIN_PAPER_1000",
+  "episode_id": "d0eb2031-8dfb-4e1b-b53d-9bb1bd0b90ac",
+  "paper_only": true,
+  "real_brokerage_execution": false,
+  "review_status": "RESEARCH_COMPLETED_CANONICAL_LEDGER_UNAVAILABLE",
+  "source_integrity": {
+    "device_state": "OFFLINE",
+    "last_seen_hours_approx": 430,
+    "source_snapshot": "reports/2026-11-23/TRADER_BRAIN_PAPER_1000_2026-11-23_0915_snapshot.json",
+    "source_snapshot_blob_sha": "c93c3d3a90f56d0ba731d62b9a77a0143d15945e",
+    "historical_reference_date": "2026-11-05",
+    "historical_reference_usd": "1000.00",
+    "retired_experiment_excluded": true,
+    "duplicate_stores_excluded": true,
+    "ledger_directory": "ledgers/paper-aggressive contains README only",
+    "source_conflicts": [
+      "Nov20 prior report NVDA -13.65% vs current historical vendor -14.01%; do not silently alter history",
+      "ChartMill intraday/closing-like marks differ from vendor 16:00 marks; retain timestamps",
+      "LITE/STX malformed >100x scanner fields quarantined by morning report",
+      "CAPR call rescheduled; morning narrative stale",
+      "Separate Titan research is not this account"
+    ]
+  },
+  "checkpoints": [
+    {
+      "time_et": "07:00",
+      "status": "NO_CANONICAL_IMMUTABLE_BOARD_FOUND",
+      "related_late_research": "research/daily-strategy/2026-11-23.md generated 08:09:26 ET; separate research workflow, not ledger or timely discovery"
+    },
+    {
+      "time_et": "09:15",
+      "status": "RECONSTRUCTED_ARCHIVED",
+      "approved_allocation_usd": "0.00",
+      "approved_shares": 0,
+      "approved_contracts": 0,
+      "approved_additional_risk_usd": "0.00"
+    },
+    {
+      "time_et": "09:30-16:00",
+      "status": "CANONICAL_EVENTS_UNAVAILABLE"
+    },
+    {
+      "time_et": "16:00",
+      "status": "FLATTENING_AND_SWING_EXCEPTIONS_UNVERIFIED"
+    }
+  ],
+  "official_daily_ledger": {
+    "status": "UNVERIFIED_NOT_CONFIRMED_EMPTY",
+    "trades": null,
+    "required_trade_fields": [
+      "ticker",
+      "stock_options_structure",
+      "catalyst_grade",
+      "Day_Trade_Score",
+      "entry_timestamp",
+      "entry_price",
+      "quantity",
+      "contracts",
+      "entry_notional",
+      "percentage_current_equity",
+      "stop",
+      "T1",
+      "T2",
+      "partial_exits",
+      "exit_time_price",
+      "realized_pnl_usd_pct",
+      "swing_unrealized"
+    ],
+    "opening_equity_usd": null,
+    "ending_equity_usd": null,
+    "daily_return_pct": null,
+    "gross_entry_notional_usd": null,
+    "realized_pnl_usd": null,
+    "unrealized_swing_pnl_usd": null,
+    "settled_cash_usd": null,
+    "unsettled_proceeds_usd": null,
+    "buying_power_usd": null,
+    "open_intraday_positions": null,
+    "pre_entry_designated_swings": null,
+    "verified_flat_4pm": null,
+    "never_retroactively_generate_trades": true,
+    "fees_usd": null,
+    "opening_settled_cash_usd": null,
+    "opening_unsettled_proceeds_usd": null,
+    "planned_risk_usd": null,
+    "actual_risk_usd": null
+  },
+  "risk_model": {
+    "basis": "broker_confirmed_current_usable_equity",
+    "normal_planned_risk_pct": 3,
+    "a_plus_planned_risk_pct": 4,
+    "premarket_planned_risk_pct": 2,
+    "max_total_open_planned_risk_pct": 5,
+    "daily_new_entry_lock_pct": 6,
+    "daily_secondary_ceiling_usd": 100,
+    "hard_daily_loss_kill_pct": 8,
+    "weekly_loss_lock_pct": 12,
+    "positive_execution_reserve_required": true,
+    "currently_enforced": null,
+    "planned_new_approved_notional_usd": "0.00",
+    "planned_new_approved_risk_usd": "0.00",
+    "actual_utilization_pct": null,
+    "realized_risk_usd": null,
+    "concentration_quality": null,
+    "can_recycle_unsettled_proceeds": false,
+    "illustrative_NVDA": {
+      "ticker": "NVDA",
+      "direction": "LONG",
+      "security": "stock",
+      "intraday_only": true,
+      "entry_reference": 166.3,
+      "stop": 159.4,
+      "t1": 173.2,
+      "t2": 180,
+      "quantity": 4,
+      "notional_usd": 665.2,
+      "nominal_stop_risk_usd": 27.6,
+      "is_approved": false,
+      "notional_exact_usd": "665.20",
+      "stop_risk_exact_usd": "27.60",
+      "seed_utilization_pct": 66.52,
+      "seed_risk_pct": 2.76,
+      "trigger_validation": null,
+      "session_high_below_T1": true,
+      "session_low_below_stop": true,
+      "no_sequence_inferred": true
+    },
+    "other_watches": [
+      "TSLA no approved levels",
+      "CRWD Nov27 220/210 put spread stale Nov20 quotes",
+      "NVDA Nov27 165/170 call spread stale Nov20 quotes",
+      "ZS all-stock structural reject"
+    ]
+  },
+  "mover_audit": [
+    {
+      "t": "NVDA",
+      "prev": 125.53,
+      "p": 162.01,
+      "hi": 165.6,
+      "lo": 133.57,
+      "turn": 4392.57,
+      "vol": 28.565,
+      "rvol": 4.06,
+      "vwap": 153.7772,
+      "spread": 0.024,
+      "grade": "A",
+      "score": 40,
+      "cat": "CEO reinstatement 11/23",
+      "rank": 1,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up analog n=1, +0.21% D+5; 8/14 gap fades",
+      "changePct": 29.06,
+      "consumedPct": 91,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 40,
+      "floatData": "23.19B",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-23",
+      "source_event_url": "https://www.reuters.com/business/wall-street-futures-rebound-after-rough-week-ai-linked-shares-2026-11-23/",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 91,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 165.23,
+        "change_pct": 31.63,
+        "open": 167.04,
+        "high": 171.5,
+        "low": 156.96,
+        "volume": 772463509,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/nvda/history/",
+        "mark_to_reference_pct": 1.99
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "ZS",
+      "prev": 194.82,
+      "p": 241.17,
+      "hi": 242.876,
+      "lo": 210.5,
+      "turn": 104.39,
+      "vol": 0.454,
+      "rvol": 119,
+      "vwap": 229.8233,
+      "spread": 0.196,
+      "grade": "A",
+      "score": 16,
+      "cat": "Definitive CRWD all-stock 1.135:1 offer 11/23",
+      "rank": 2,
+      "status": "STRUCTURAL_REJECT for unrestricted momentum",
+      "context": "90d up analog n=10, +0.62% D+5; 5/12 gap fades",
+      "changePct": 23.79,
+      "consumedPct": 96.4,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 16,
+      "floatData": "106.2M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-23T04:30:00-05:00",
+      "source_event_url": "https://finviz.com/news/425989/crowdstrike-reports-third-quarter-fiscal-year-2027-financial-results",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 96.4,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 229.62,
+        "change_pct": 17.86,
+        "open": null,
+        "high": null,
+        "low": null,
+        "volume": null,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/zs/history/",
+        "mark_to_reference_pct": -4.79
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "CRWD",
+      "prev": 229.44,
+      "p": 219,
+      "hi": 227.77,
+      "lo": 205.45,
+      "turn": 161.21,
+      "vol": 0.757,
+      "rvol": 24.68,
+      "vwap": 212.8929,
+      "spread": 0.665,
+      "grade": "A",
+      "score": 27,
+      "cat": "Buyer in 43.9B Zscaler merger, 11/23",
+      "rank": 3,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d down analog n=15, -1.53% D+5; 6/10 negative gap reversals",
+      "changePct": -4.55,
+      "consumedPct": 43.5,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 27,
+      "floatData": "991.6M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-23T04:30:00-05:00",
+      "source_event_url": "https://finviz.com/news/425989/crowdstrike-reports-third-quarter-fiscal-year-2027-financial-results",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 43.5,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 208.15,
+        "change_pct": -9.28,
+        "open": null,
+        "high": null,
+        "low": null,
+        "volume": null,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/crwd/history/",
+        "mark_to_reference_pct": -4.95
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "TSLA",
+      "prev": 345.82,
+      "p": 370.4828,
+      "hi": 371.98,
+      "lo": 358.1102,
+      "turn": 322.88,
+      "vol": 0.887,
+      "rvol": 4.68,
+      "vwap": 364.0313,
+      "spread": 0.086,
+      "grade": "B+",
+      "score": 42,
+      "cat": "FSD software v15 launch + sector rebound",
+      "rank": 4,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=9, +0.59% D+5; 1/5 positive gaps fade",
+      "changePct": 7.13,
+      "consumedPct": 94.3,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 42,
+      "floatData": "2.82B",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 94.3,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 386.55,
+        "change_pct": 11.78,
+        "open": 374.74,
+        "high": 393.83,
+        "low": 371.95,
+        "volume": 34914683,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/tsla/history/",
+        "mark_to_reference_pct": 4.34
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "CRWV",
+      "prev": 39.51,
+      "p": 51.1676,
+      "hi": 54.88,
+      "lo": 41.34,
+      "turn": 231.83,
+      "vol": 4.76,
+      "rvol": 3.48,
+      "vwap": 48.7069,
+      "spread": 0.059,
+      "grade": "B",
+      "score": 27,
+      "cat": "AI sector relief, no distinct 11/23 issuer catalyst verified",
+      "rank": 5,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=18, -5.74% D+5; 17/24 gap fades",
+      "changePct": 29.51,
+      "consumedPct": 75.8,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 27,
+      "floatData": "354.6M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 75.8,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 48.22,
+        "change_pct": 22.03,
+        "open": 50.97,
+        "high": 51.9,
+        "low": 46.55,
+        "volume": 94097268,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/crwv/history/",
+        "mark_to_reference_pct": -5.76
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "NBIS",
+      "prev": 81.31,
+      "p": 106.9,
+      "hi": 108,
+      "lo": 86.3,
+      "turn": 275.48,
+      "vol": 2.789,
+      "rvol": 3.27,
+      "vwap": 98.7843,
+      "spread": 0.3,
+      "grade": "B",
+      "score": 23,
+      "cat": "AI sector relief, no distinct 11/23 issuer catalyst verified",
+      "rank": 6,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=21, -10.31% D+5; 15/24 gap fades",
+      "changePct": 31.47,
+      "consumedPct": 95.9,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 23,
+      "floatData": "242.3M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 95.9,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 97.31,
+        "change_pct": 19.68,
+        "open": 110,
+        "high": 110.05,
+        "low": 95.73,
+        "volume": 47503453,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/nbis/history/",
+        "mark_to_reference_pct": -8.97
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "DELL",
+      "prev": 278.02,
+      "p": 338.85,
+      "hi": 341.05,
+      "lo": 295.8,
+      "turn": 111.92,
+      "vol": 0.351,
+      "rvol": 3.88,
+      "vwap": 318.7134,
+      "spread": 0.215,
+      "grade": "B",
+      "score": 24,
+      "cat": "AI sector sympathy; earnings later, not yet reported",
+      "rank": 7,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=16, -3.90% D+5; 8/20 gap fades",
+      "changePct": 21.88,
+      "consumedPct": 96.5,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 24,
+      "floatData": "292.6M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 96.5,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 335.94,
+        "change_pct": 20.83,
+        "open": 377.15,
+        "high": 379.03,
+        "low": 322.31,
+        "volume": 13931386,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/dell/history/",
+        "mark_to_reference_pct": -0.86
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "CAPR",
+      "prev": 7.59,
+      "p": 1.9008,
+      "hi": 2.3554,
+      "lo": 1.81,
+      "turn": 5.7,
+      "vol": 2.77,
+      "rvol": 18.81,
+      "vwap": 2.0568,
+      "spread": 0.522,
+      "grade": "A",
+      "score": 5,
+      "cat": "FDA complete response letter Nov20, conference call Nov23",
+      "rank": 8,
+      "status": "STRUCTURAL_REJECT for under-$5 long; bearish options not quote-qualified",
+      "context": "90d down n=31, +2.39% D+5; event binary, not directly comparable",
+      "changePct": -74.96,
+      "consumedPct": 98.4,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 5,
+      "floatData": "52.7M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-20",
+      "source_event_url": "https://www.capricor.com/investors/sec-filings/all-sec-filings/content/0001104659-26-130730/capr-20261120x8k.htm",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 98.4,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 1.92,
+        "change_pct": -74.7,
+        "open": 1.75,
+        "high": 2.06,
+        "low": 1.7,
+        "volume": 32432442,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/capr/history/",
+        "mark_to_reference_pct": 1.01
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "ANT",
+      "prev": 88.91,
+      "p": 93.68,
+      "hi": 94.5,
+      "lo": 87.4,
+      "turn": 574.08,
+      "vol": 6.295,
+      "rvol": null,
+      "vwap": 91.1944,
+      "spread": 0.301,
+      "grade": "B",
+      "score": 23,
+      "cat": "Newly listed IPO, AI rebound",
+      "rank": 9,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "Only two completed RTH sessions, no 90d analog",
+      "changePct": 5.36,
+      "consumedPct": 85.3,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 23,
+      "floatData": "unverified",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 85.3,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 87.64,
+        "change_pct": -1.43,
+        "open": 93.65,
+        "high": 94.24,
+        "low": 84.61,
+        "volume": 252875995,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/ant/history/",
+        "mark_to_reference_pct": -6.45
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "ASX",
+      "prev": 26.27,
+      "p": 32.85,
+      "hi": 33.01,
+      "lo": 28.8,
+      "turn": 4.71,
+      "vol": 0.151,
+      "rvol": 2.65,
+      "vwap": 31.1253,
+      "spread": 0.456,
+      "grade": "B",
+      "score": 23,
+      "cat": "Semiconductor sector rebound",
+      "rank": 10,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=16, -1.71% D+5; 14/25 gap fades",
+      "changePct": 25.05,
+      "consumedPct": 97.6,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 23,
+      "floatData": "2.21B",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 97.6,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 31.86,
+        "change_pct": 21.26,
+        "open": 33.11,
+        "high": 33.38,
+        "low": 31.06,
+        "volume": 14024767,
+        "time_type": "15:54 ET indication",
+        "source": "https://stockanalysis.com/stocks/asx/history/",
+        "mark_to_reference_pct": -3.01
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "IVVD",
+      "prev": 0.4127,
+      "p": 0.4902,
+      "hi": 0.6999,
+      "lo": 0.4412,
+      "turn": 11.19,
+      "vol": 21.875,
+      "rvol": 375.83,
+      "vwap": 0.5115,
+      "spread": 6.859,
+      "grade": "A-",
+      "score": 10,
+      "cat": "Phase 3 antibody interim results Nov23",
+      "rank": 11,
+      "status": "STRUCTURAL_REJECT: noncompliant listing marker + 6.86% spread",
+      "context": "90d up n=18, +2.61% D+5; 14/24 gap fades",
+      "changePct": 18.78,
+      "consumedPct": 27,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 10,
+      "floatData": "262.4M; listed noncompliant",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-23T07:01:00-05:00",
+      "source_event_url": "https://www.globenewswire.com/news-release/2026/11/23/3408225/0/en/invivyd-announces-positive-declaration-trial-data-for-monoclonal-antibody-vyd2311-and-ushers-in-a-new-era-for-immunization.html",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 27,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 0.4854,
+        "change_pct": 17.62,
+        "open": 0.49,
+        "high": 0.55,
+        "low": 0.45,
+        "volume": 69576050,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/ivvd/history/",
+        "mark_to_reference_pct": -0.98
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "VNET",
+      "prev": 2.18,
+      "p": 2.55,
+      "hi": 2.55,
+      "lo": 2.2298,
+      "turn": 0.43,
+      "vol": 0.178,
+      "rvol": 7.83,
+      "vwap": 2.4162,
+      "spread": 4.669,
+      "grade": "B+",
+      "score": 14,
+      "cat": "Q3 revenue +14.8% / wholesale +27.6%, 11/23",
+      "rank": 12,
+      "status": "REJECT_CURRENT_ENTRY + KEEP_ACTIVE_WATCH",
+      "context": "90d up n=13, -11.90% D+5; 12/20 gap fades",
+      "changePct": 16.97,
+      "consumedPct": 100,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 14,
+      "floatData": "269.3M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": "2026-11-23T04:00:00-05:00",
+      "source_event_url": "https://www.prnewswire.com/news-releases/vnet-reports-unaudited-third-quarter-2026-financial-results-302948054.html",
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 100,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 2.545,
+        "change_pct": 16.74,
+        "open": 2.63,
+        "high": 2.81,
+        "low": 2.44,
+        "volume": 12740690,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/vnet/history/",
+        "mark_to_reference_pct": -0.2
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "WETO",
+      "prev": 0.1584,
+      "p": 0.748,
+      "hi": 0.898,
+      "lo": 0.5549,
+      "turn": 61.39,
+      "vol": 83.919,
+      "rvol": 3191.32,
+      "vwap": 0.7316,
+      "spread": 1.685,
+      "grade": "F",
+      "score": 0,
+      "cat": "No verified same-day operating catalyst; ~0.9M float",
+      "rank": 13,
+      "status": "STRUCTURAL_REJECT",
+      "context": "90d up n=20, -28.33% D+5; 13/20 gap fades",
+      "changePct": 372.22,
+      "consumedPct": 79.7,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 0,
+      "floatData": "0.915M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 79.7,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 0.5339,
+        "change_pct": 237.06,
+        "open": 0.73,
+        "high": 0.77,
+        "low": 0.5,
+        "volume": 294166582,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/weto/history/",
+        "mark_to_reference_pct": -28.62
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    },
+    {
+      "t": "MEDS",
+      "prev": 1.34,
+      "p": 1.85,
+      "hi": 2.46,
+      "lo": 1.6,
+      "turn": 29.63,
+      "vol": 15.121,
+      "rvol": 196.36,
+      "vwap": 1.9594,
+      "spread": 0.539,
+      "grade": "D",
+      "score": 2,
+      "cat": "No verified 11/23 catalyst; ATM/convertible-financing overhang",
+      "rank": 14,
+      "status": "STRUCTURAL_REJECT",
+      "context": "90d up n=16, +19.93% D+5; selection/survivorship risk",
+      "changePct": 38.06,
+      "consumedPct": 45.5,
+      "spreadWhen": "indicative quote ~9:18 AM ET, NOT 9:15",
+      "remainingMoveCapacity": 2,
+      "floatData": "2.88M",
+      "archived_score_semantics": "remaining-capacity qualitative score, not Day-Trade Score",
+      "day_trade_score": null,
+      "source_event_at": null,
+      "source_event_url": null,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_nbbo_depth": null,
+      "regular_session_vwap": null,
+      "opening_range": null,
+      "dilution_reverse_split_verified": null,
+      "catalyst_matched_90d": null,
+      "remaining_executable_capacity": null,
+      "peak_gap_retention_pct": 45.5,
+      "archived_consumed_is_not_future_opportunity_consumed": true,
+      "sector_premarket": {
+        "SPY": {
+          "price": 720.03,
+          "change_pct": 4.38
+        },
+        "QQQ": {
+          "price": 651.28,
+          "change_pct": 7.04
+        },
+        "SOXX": {
+          "price": 141.54,
+          "change_pct": 14.7
+        },
+        "SMH": {
+          "price": 463.92,
+          "change_pct": 15.96
+        },
+        "IWM": {
+          "price": 264.85,
+          "change_pct": 3.21
+        }
+      },
+      "session_outcome": {
+        "price": 1.65,
+        "change_pct": 23.13,
+        "open": 1.87,
+        "high": 1.95,
+        "low": 1.59,
+        "volume": 59469884,
+        "time_type": "vendor 16:00 close",
+        "source": "https://stockanalysis.com/stocks/meds/history/",
+        "mark_to_reference_pct": -10.81
+      },
+      "classification": "ARCHIVED_RESEARCH_ONLY_NO_CONTEMPORANEOUS_DISCOVERY_OR_EXECUTION_CREDIT",
+      "discovery_alpha": null,
+      "execution_alpha": null
+    }
+  ],
+  "external_issuer_ranked_omissions": [
+    {
+      "ticker": "APLD",
+      "source_at": "2026-11-23T08:00:00-05:00",
+      "catalyst": "150 MW 18-year $5.4B base-term lease; delivery 2028 conditional",
+      "price": 13.8,
+      "change_pct": 20.06,
+      "open": 14.11,
+      "high": 15.47,
+      "low": 13.55,
+      "source": "https://www.globenewswire.com/news-release/2026/11/23/3408272/0/en/applied-digital-secures-new-150-mw-18-year-lease-with-tier-one-investment-grade-hyperscaler-bringing-contracted-base-term-revenue-above-41-billion.html",
+      "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+      "observed_in_separate_late_research": true,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_spread": null,
+      "discovery_alpha": null,
+      "execution_alpha": null,
+      "price_source": "https://stockanalysis.com/stocks/apld/history/"
+    },
+    {
+      "ticker": "CODI",
+      "source_at": "2026-11-23T08:00:00-05:00",
+      "catalyst": "activist intends majority board slate",
+      "price": 13.47,
+      "change_pct": 12.34,
+      "source": "https://www.globenewswire.com/news-release/2026/11/23/3408274/0/en/adw-capital-announces-its-intention-to-nominate-majority-slate-of-highly-qualified-and-independent-candidates-for-election-to-the-compass-diversified-board.html",
+      "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+      "observed_in_separate_late_research": true,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_spread": null,
+      "discovery_alpha": null,
+      "execution_alpha": null,
+      "price_source": "https://stockanalysis.com/stocks/codi/history/"
+    },
+    {
+      "ticker": "NHP",
+      "source_at": "2026-11-23T06:00:00-05:00",
+      "catalyst": "completed $531M facility sale",
+      "price": 15.29,
+      "change_pct": 3.17,
+      "source": "https://www.globenewswire.com/news-release/2026/11/23/3408147/0/en/national-healthcare-properties-completes-sale-of-40-omfs-for-531-million.html",
+      "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+      "observed_in_separate_late_research": true,
+      "first_seen_at": null,
+      "decision_time_volume": null,
+      "decision_time_spread": null,
+      "discovery_alpha": null,
+      "execution_alpha": null,
+      "price_source": "https://stockanalysis.com/stocks/nhp/history/"
+    }
+  ],
+  "scanner_counts": {
+    "daily_price_jumps": 309,
+    "under_5_leaders": 386,
+    "not_certified_at_cutoff": true
+  },
+  "best_under_5": {
+    "ticker": "IVVD",
+    "approved": false,
+    "reason": "A- genuine 07:01 issuer release, 6.859% indicative spread, listing risk, 375.83x small-denominator RVOL, no execution qualification",
+    "close": 0.4854,
+    "close_pct": 17.62,
+    "alternative": "VNET earnings backed but spread 4.669%; no qualified candidate"
+  },
+  "deal_diagnostic": {
+    "ratio": "1.135",
+    "friday_implied_usd": "260.41440",
+    "morning_implied_usd": "248.56500",
+    "closing_implied_usd": "236.25025",
+    "target_close_usd": "229.62",
+    "closing_spread_usd": "6.63025",
+    "not_guaranteed_value": true
+  },
+  "cumulative_scoreboard": {
+    "seed_usd": "1000.00",
+    "compounded_equity_usd": null,
+    "cumulative_pnl_usd": null,
+    "cumulative_return_pct": null,
+    "closed_trades": null,
+    "wins": null,
+    "losses": null,
+    "win_rate_pct": null,
+    "average_win_usd": null,
+    "average_loss_usd": null,
+    "largest_win_usd": null,
+    "largest_loss_usd": null,
+    "profit_factor": null,
+    "expectancy_usd": null,
+    "maximum_drawdown_pct": null,
+    "capital_utilization_stats": null,
+    "mover_discovery_stats": null,
+    "mover_trade_win_rate": null,
+    "average_mover_trade_return_pct": null,
+    "missed_high_quality_movers": null,
+    "stale_late_detections": null,
+    "faults": null,
+    "starting_seed_usd": "1000.00",
+    "compounded_balance_usd": null,
+    "win_rate": null,
+    "expectancy": null,
+    "max_drawdown_pct": null,
+    "average_capital_utilization": null,
+    "peak_capital_utilization": null,
+    "mover_discovery_statistics": null,
+    "average_mover_trade_return": null,
+    "data_integrity_fault_count_cumulative": null,
+    "status": "UNCERTIFIED"
+  },
+  "grades": {
+    "analysis_quality": "C+",
+    "mover_discovery": "F_UNVERIFIABLE",
+    "execution": null,
+    "allocation_concentration": null,
+    "risk_control": null,
+    "risk_adjusted_result": null,
+    "data_integrity": "F",
+    "avoidance_of_hindsight": "A",
+    "daily": "F_AUDITABILITY",
+    "scanner": "F_UNVERIFIABLE"
+  },
+  "codex_learning": {
+    "what_worked": [
+      "9:15 archived fail-closed authorization",
+      "merger structure recognition",
+      "structural rejects; no fabricated fills"
+    ],
+    "what_lost_money_or_opportunity": [
+      "actual loss unknown",
+      "NVDA and TSLA favorable market marks; no confirmed entry",
+      "CRWD downside and APLD issuer event worth prospective study"
+    ],
+    "scanner_misses_late_detections": [
+      {
+        "ticker": "APLD",
+        "source_at": "2026-11-23T08:00:00-05:00",
+        "catalyst": "150 MW 18-year $5.4B base-term lease; delivery 2028 conditional",
+        "price": 13.8,
+        "change_pct": 20.06,
+        "open": 14.11,
+        "high": 15.47,
+        "low": 13.55,
+        "source": "https://www.globenewswire.com/news-release/2026/11/23/3408272/0/en/applied-digital-secures-new-150-mw-18-year-lease-with-tier-one-investment-grade-hyperscaler-bringing-contracted-base-term-revenue-above-41-billion.html",
+        "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+        "observed_in_separate_late_research": true,
+        "first_seen_at": null,
+        "decision_time_volume": null,
+        "decision_time_spread": null,
+        "discovery_alpha": null,
+        "execution_alpha": null,
+        "price_source": "https://stockanalysis.com/stocks/apld/history/"
+      },
+      {
+        "ticker": "CODI",
+        "source_at": "2026-11-23T08:00:00-05:00",
+        "catalyst": "activist intends majority board slate",
+        "price": 13.47,
+        "change_pct": 12.34,
+        "source": "https://www.globenewswire.com/news-release/2026/11/23/3408274/0/en/adw-capital-announces-its-intention-to-nominate-majority-slate-of-highly-qualified-and-independent-candidates-for-election-to-the-compass-diversified-board.html",
+        "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+        "observed_in_separate_late_research": true,
+        "first_seen_at": null,
+        "decision_time_volume": null,
+        "decision_time_spread": null,
+        "discovery_alpha": null,
+        "execution_alpha": null,
+        "price_source": "https://stockanalysis.com/stocks/codi/history/"
+      },
+      {
+        "ticker": "NHP",
+        "source_at": "2026-11-23T06:00:00-05:00",
+        "catalyst": "completed $531M facility sale",
+        "price": 15.29,
+        "change_pct": 3.17,
+        "source": "https://www.globenewswire.com/news-release/2026/11/23/3408147/0/en/national-healthcare-properties-completes-sale-of-40-omfs-for-531-million.html",
+        "classification": "ABSENT_FROM_ARCHIVED_TOP_14_FULL_SCANNER_UNKNOWN",
+        "observed_in_separate_late_research": true,
+        "first_seen_at": null,
+        "decision_time_volume": null,
+        "decision_time_spread": null,
+        "discovery_alpha": null,
+        "execution_alpha": null,
+        "price_source": "https://stockanalysis.com/stocks/nhp/history/"
+      }
+    ],
+    "scoring_defects": [
+      "legacy consumedPct measures retained peak gap not opportunity exhausted",
+      "tiny 5-session RVOL denominators",
+      "weak analog sample and not catalyst matched",
+      "LITE/STX malformed values",
+      "CAPR call revision"
+    ],
+    "allocation_risk_defects": [
+      "current account state unknown",
+      "stale options quotes",
+      "NVDA stop/target sequence unverified"
+    ],
+    "exact_rule_config_changes": {
+      "id": "A083",
+      "title": "Separate peak-gap retention from remaining opportunity; refresh dependent catalysts and session marks",
+      "policy_designation": "PROPOSED_SHADOW_ONLY",
+      "causal_effectiveness": "INCONCLUSIVE",
+      "implementation_verified": false,
+      "config": {
+        "rename_legacy_consumedPct_to": "peak_gap_retention_pct",
+        "retention_formula": "100 * abs(mark-prior_close)/abs(direction_specific_premarket_extreme-prior_close) only if same direction and nonzero denominator",
+        "opposite_direction_status": "REVERSAL",
+        "remaining_executable_capacity_requires_calibrated_oos_model": true,
+        "missing_capacity_value": null,
+        "stale_quote_action": "REJECT_CURRENT_ENTRY",
+        "all_stock_target_value": "ratio * synchronized_acquirer_quote",
+        "require_event_revision_timestamp": true,
+        "require_exchange_session_close_time": true,
+        "malformed_percent_action": "QUARANTINE",
+        "shadow_only": true
+      },
+      "tests": [
+        {
+          "name": "gap retention semantics",
+          "n": 40,
+          "pass": "100% correct direction and zero low-retention-as-unused-upside classifications"
+        },
+        {
+          "name": "all-stock linked quotes and event revision",
+          "n": 20,
+          "pass": "100% timestamped ratio marks and call reschedule handling; zero fixed cash ceilings"
+        },
+        {
+          "name": "prospective false chase comparison",
+          "n": 50,
+          "pass": "at least 20% fewer false chases with no more than 10% qualified recall loss; inconclusive if sample incomplete"
+        },
+        {
+          "name": "session calendar",
+          "n": 10,
+          "pass": "zero late or false certificates including Nov27 13:00 close"
+        }
+      ]
+    },
+    "experiments_next_session": [
+      {
+        "name": "gap retention semantics",
+        "n": 40,
+        "pass": "100% correct direction and zero low-retention-as-unused-upside classifications"
+      },
+      {
+        "name": "all-stock linked quotes and event revision",
+        "n": 20,
+        "pass": "100% timestamped ratio marks and call reschedule handling; zero fixed cash ceilings"
+      },
+      {
+        "name": "prospective false chase comparison",
+        "n": 50,
+        "pass": "at least 20% fewer false chases with no more than 10% qualified recall loss; inconclusive if sample incomplete"
+      },
+      {
+        "name": "session calendar",
+        "n": 10,
+        "pass": "zero late or false certificates including Nov27 13:00 close"
+      },
+      {
+        "name": "A072 exact ledger and outage replays",
+        "n": 50,
+        "pass": "zero false certificates or invented fills; exact cents; zero TypeError"
+      }
+    ],
+    "metrics_accept_reject": [
+      "100% correct direction and zero low-retention-as-unused-upside classifications",
+      "100% timestamped ratio marks and call reschedule handling; zero fixed cash ceilings",
+      "at least 20% fewer false chases with no more than 10% qualified recall loss; inconclusive if sample incomplete",
+      "zero late or false certificates including Nov27 13:00 close"
+    ],
+    "unresolved_data_integrity": [
+      "offline host",
+      "missing opening and closing ledger and first-seen manifest",
+      "prior TypeError repair unverified",
+      "no contemporaneous risk policy enforcement evidence",
+      "market quote vendor disagreement"
+    ],
+    "prior_adjustment_effectiveness": [
+      {
+        "id": "A001",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A002",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A003",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A004",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A005",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A006",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A007",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A008",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A009",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A010",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A011",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A012",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A013",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A014",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A015",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A016",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A017",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A018",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A019",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A020",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A021",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A022",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A023",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A024",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A025",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A026",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A027",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A028",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A029",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A030",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A031",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A032",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A033",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A034",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A035",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A036",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A037",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A038",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A039",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A040",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A041",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A042",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A043",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A044",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A045",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A046",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A047",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A048",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A049",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A050",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A051",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A052",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A053",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A054",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A055",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A056",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A057",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A058",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A059",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A060",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A061",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A062",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A063",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A064",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A065",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A066",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A067",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A068",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A069",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A070",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A071",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A072",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A073",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A074",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A075",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A076",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A077",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A078",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A079",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A080",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A081",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A082",
+        "causal_effectiveness": "INCONCLUSIVE"
+      },
+      {
+        "id": "A083",
+        "causal_effectiveness": "INCONCLUSIVE"
+      }
+    ]
+  },
+  "prior_adjustments": {
+    "registry": "knowledge/daily-paper-handoffs/2026-11-23-adjustment-registry-summary.json",
+    "prior_count": 82,
+    "current_count": 83,
+    "all_prior_inconclusive": true
+  },
+  "single_highest_priority_next_session": "A072/A069: restore canonical source access and implement independently retrievable immutable session-close certificate with exact-decimal event replay; no fabricated backfill. Verify Nov27 early close at 13:00 ET.",
+  "sources": [
+    {
+      "name": "Nvidia reinstatement",
+      "url": "https://www.reuters.com/technology/nvidia-reinstates-jensen-huang-ceo-2026-11-23/"
+    },
+    {
+      "name": "CrowdStrike Zscaler acquisition",
+      "url": "https://ir.crowdstrike.com/news-releases/news-release-details/crowdstrike-acquire-zscaler-bringing-network-security-and-zero/"
+    },
+    {
+      "name": "Zscaler Q1 earnings",
+      "url": "https://zscaler.gcs-web.com/news-releases/news-release-details/zscaler-announces-first-quarter-fiscal-year-2027-financial"
+    },
+    {
+      "name": "Invivyd clinical results",
+      "url": "https://invivyd.gcs-web.com/news-releases/news-release-details/invivyd-announces-positive-declaration-trial-data-monoclonal"
+    },
+    {
+      "name": "VNET Q3 earnings",
+      "url": "https://ir.21vianet.com/news-releases/news-release-details/vnet-reports-unaudited-third-quarter-2026-financial-results"
+    },
+    {
+      "name": "CAPR FDA CRL issued Nov20",
+      "url": "https://www.sec.gov/Archives/edgar/data/1133869/000110465926130730/capr-ex99d1.htm"
+    },
+    {
+      "name": "Associated Press broad rally",
+      "url": "https://apnews.com/article/49ba1beba78fa4ed2bd5898029f79c91"
+    },
+    {
+      "name": "CAPR call rescheduled",
+      "url": "https://www.capricor.com/investors/news-events/press-releases/detail/361/capricor-therapeutics-reschedules-conference-call-to"
+    },
+    {
+      "name": "APLD",
+      "url": "https://www.globenewswire.com/news-release/2026/11/23/3408272/0/en/applied-digital-secures-new-150-mw-18-year-lease-with-tier-one-investment-grade-hyperscaler-bringing-contracted-base-term-revenue-above-41-billion.html"
+    },
+    {
+      "name": "CODI",
+      "url": "https://www.globenewswire.com/news-release/2026/11/23/3408274/0/en/adw-capital-announces-its-intention-to-nominate-majority-slate-of-highly-qualified-and-independent-candidates-for-election-to-the-compass-diversified-board.html"
+    },
+    {
+      "name": "NHP",
+      "url": "https://www.globenewswire.com/news-release/2026/11/23/3408147/0/en/national-healthcare-properties-completes-sale-of-40-omfs-for-531-million.html"
+    }
+  ]
+}
